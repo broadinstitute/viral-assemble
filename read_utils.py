@@ -297,10 +297,10 @@ def main_sort_bam(args):
 
 __commands__.append(('sort_bam', parser_sort_bam))
 
+
 # ====================
 # ***  merge_bams  ***
 # ====================
-
 
 def parser_merge_bams(parser=argparse.ArgumentParser()):
     parser.add_argument('inBams', help='Input bam files.', nargs='+')
@@ -316,15 +316,94 @@ def parser_merge_bams(parser=argparse.ArgumentParser()):
     util.cmd.attach_main(parser, main_merge_bams)
     return parser
 
-
 def main_merge_bams(args):
     '''Merge multiple BAMs into one'''
     opts = list(args.picardOptions) + ['USE_THREADING=true']
     tools.picard.MergeSamFilesTool().execute(args.inBams, args.outBam, picardOptions=opts, JVMmemory=args.JVMmemory)
     return 0
 
-
 __commands__.append(('merge_bams', parser_merge_bams))
+
+
+# ============================
+# ***  relabel_merge_bams  ***
+# ============================
+
+def parser_relabel_merge_bams(parser=argparse.ArgumentParser()):
+    parser.add_argument('inBams', help='Input bam files.', nargs='+')
+    parser.add_argument('outBam', help='Output bam file.')
+    parser.add_argument('--sample_name',
+                        default=None,
+                        help='''Rewrite all RG headers to the given sample name.
+                            If this option is not specified, we will use the
+                            sample name specified in the inBams and will fail if
+                            all inBams do not use exactly the same sample name.''')
+    parser.add_argument('--library_id', '-lb', nargs='+',
+                        default=[],
+                        help='''Rewrite all RG headers to use a library ID that
+                            is "<samplename>.l<library_id>".
+                            If this option is not specified, we pass through
+                            any pre-existing values from the inBams.
+                            This should be a list of equal length to inBams.''')
+    parser.add_argument('--date', '-dt', nargs='+',
+                        default=[],
+                        help='''Rewrite all RG headers to use the specified run
+                            dates in ISO format (yyyy-mm-dd).
+                            If this option is not specified, we pass through
+                            any pre-existing values from the inBams.
+                            This should be a list of equal length to inBams.''')
+    parser.add_argument('--platform_unit', '-pu', nargs='+',
+                        default=[],
+                        help='''Rewrite all PU headers to use the specified
+                            platform unit strings (typically
+                            flowcell.lane.index1-index2).
+                            If this option is not specified, we pass through
+                            any pre-existing values from the inBams.
+                            This should be a list of equal length to inBams.''')
+    parser.add_argument('--center', '-cn', nargs='+',
+                        default=[],
+                        help='''Rewrite all CN headers to use the specified
+                            sequencing center strings (typically a short
+                            acronym).
+                            If this option is not specified, we pass through
+                            any pre-existing values from the inBams.
+                            This should be a list of equal length to inBams.''')
+    parser.add_argument('--platform', '-pl', nargs='+',
+                        default=[],
+                        help='''Rewrite all PL headers to use the specified
+                            platform string (e.g. "illumina").
+                            If this option is not specified, we pass through
+                            any pre-existing values from the inBams.
+                            This should be a list of equal length to inBams.''')
+    parser.add_argument('--read_group', '-id', nargs='+',
+                        default=[],
+                        help='''Rewrite all ID headers to use the specified
+                            read group ID (e.g. flowcell.lane).
+                            This requires that each inBam has no more than one
+                            read group per file.
+                            If this option is not specified, we pass through
+                            any pre-existing values from the inBams.
+                            This should be a list of equal length to inBams.''')
+    parser.add_argument('--required_fields', nargs='*',
+                        default=('ID','SM','LB'),
+                        help='''Fail if outBam has any read groups that lack
+                            values for any of these fields.''')
+    parser.add_argument('--JVMmemory',
+                        default=tools.picard.MergeSamFilesTool.jvmMemDefault,
+                        help='JVM virtual memory size (default: %(default)s)')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, main_relabel_merge_bams)
+    return parser
+
+def main_relabel_merge_bams(args):
+    '''Merge multiple BAMs into one while rewriting metadata in the BAM headers.'''
+    tools.picard.MergeSamFilesTool().execute(
+        args.inBams, args.outBam,
+        picardOptions=['USE_THREADING=true'], JVMmemory=args.JVMmemory)
+    return 0
+
+__commands__.append(('relabel_merge_bams', parser_relabel_merge_bams))
+
 
 # ====================
 # ***  filter_bam  ***
