@@ -15,10 +15,9 @@ import os
 import tempfile
 import shutil
 import subprocess
-from Bio import SeqIO
+import Bio.SeqIO
 import util.cmd
 import util.file
-from util.file import mkstempfname
 import tools.picard
 import tools.samtools
 import tools.mvicuna
@@ -39,7 +38,7 @@ def purge_unmated(inFastq1, inFastq2, outFastq1, outFastq2, regex=r'^@(\S+)/[1|2
        Corresponding sequences must have sequence identifiers
        of the form SEQID/1 and SEQID/2.
     '''
-    tempOutput = mkstempfname()
+    tempOutput = util.file.mkstempfname()
     mergeShuffledFastqSeqsPath = os.path.join(util.file.get_scripts_path(), 'mergeShuffledFastqSeqs.pl')
     cmdline = [mergeShuffledFastqSeqsPath, '-t', '-r', regex, '-f1', inFastq1, '-f2', inFastq2, '-o', tempOutput]
     log.debug(' '.join(cmdline))
@@ -79,8 +78,8 @@ def fastq_to_fasta(inFastq, outFasta):
     #    can guarantee that output lines are not split...)
     inFile = util.file.open_or_gzopen(inFastq)
     outFile = util.file.open_or_gzopen(outFasta, 'w')
-    for rec in SeqIO.parse(inFile, 'fastq'):
-        SeqIO.write([rec], outFile, 'fasta')
+    for rec in Bio.SeqIO.parse(inFile, 'fastq'):
+        Bio.SeqIO.write([rec], outFile, 'fasta')
     inFile.close()
     outFile.close()
     return 0
@@ -395,11 +394,112 @@ def parser_relabel_merge_bams(parser=argparse.ArgumentParser()):
     util.cmd.attach_main(parser, main_relabel_merge_bams)
     return parser
 
+def relabel_arg_validator(inLists, codes, n_bams):
+    for inList, code in zip(inLists, codes):
+        if inList:
+            if len(inList) == 1:
+                out = inList * n_bams
+            elif len(inList) == n_bams:
+                out = inList
+            else:
+                raise ValueError("%s was given %d inputs, but requires the same number of inputs as inBams (%d)" % (
+                    code, len(inList), n_bams))
+            yield (code, out)
+
+class BamHeaderValidationError(Exception):
+    def __init__(self, fname, err_string=''):
+        super(BamHeaderValidationError, self).__init__(
+            'Error: BAM header validation error for {}.  {}'.format(
+                fname, err_string))
+
+def rewrite_bam_rgs(inBam, rgmap, outBam):
+    ''' This copies inBam to outBam while rewriting all RG headers such that
+        any fields specified in rgmap's keys are rewritten with rgmap's values.
+        For example an rgmap like:
+            SM   sample1
+            LB   sample1.lib1
+        Will overwrite any existing values for SM and LB in all read groups,
+        but will pass through any other fields untouched.
+    '''
+    # read and convert bam header
+    header_file = util.file.mkstempfname('.sam')
+    with open(header_file, 'wt') as outf:
+        for row in tools.samtools.SamtoolsTool().getHeader(args.inBam):
+            if row[0] == '@RG':
+                outrow = [row[0]]
+                for cell in row[1:]:
+                    k,v = cell.split(':', 1)
+                    v = rgmap.get(k,v)
+                    outrow.append(':'.join((k,v)))
+                row = outrow
+            outf.write('\t'.join(row)+'\n')
+    # write new bam with new header
+    tools.samtools.SamtoolsTool().reheader(inBam, header_file, outBam)
+    os.unlink(header_file)
+
 def main_relabel_merge_bams(args):
     '''Merge multiple BAMs into one while rewriting metadata in the BAM headers.'''
+    samtools = tools.samtools.SamtoolsTool()
+    
+    # prepare rewrite fields and validate args
+    rewrite = dict(relabel_arg_validator(
+        (args.library_id, args.date, args.platform_unit, args.center, args.platform, args.read_group),
+        ('LB','DT','PU','CN','PL','ID'),
+        len(inBams)))
+    if args.sample_name:
+        rewrite['SM'] = [args.sample_name] * len(inBams)
+    
+    ## validate correctness of output (before generating it)
+    # get all original RGs
+    read_groups = list((inBam, samtools.getReadGroups(inBam)) for bam in args.inBams)
+    # make sure all required fields are either present in input or in rewrite
+    assert 'SM' in args.required_fields
+    assert 'ID' in args.required_fields
+    for required in args.required_fields:
+        if required not in rewrite:
+            for inBam, rgs in read_groups:
+                for rg in rgs:
+                    if required not in rg:
+                        raise BamHeaderValidationError(inBam,
+                            'missing required read group field %s in read group %s' % (required, rg.get('ID')))
+    # make sure only one sample name exists
+    if 'SM' not in rewrite:
+        sample_name = []
+        for inBam, rgs in read_groups:
+            for rg in rgs:
+                sample_name.append(rg.get('SM'))
+        sample_name = set(sample_name)
+        if len(sample_name) != 1:
+            raise ValueError("--sample_name not specified, however, input BAMs have inconsistent sample names: %s" % str(sample_name))
+    # if ID is being rewritten, we should only have one RG per bam
+    if 'ID' in rewrite:
+        for inBam, rgs in read_groups:
+            if len(rgs) != 1:
+                raise BamHeaderValidationError(inBam,
+                    '%d RGs in input BAM. When RG ID is rewritten, all input BAM files must have exactly one RG' % len(rgs))
+        if len(rewrite['ID']) != len(set(rewrite['ID'])):
+            raise ValueError("when --read_group is specified, all IDs must be unique")
+    
+    # reheader each input bam
+    if not rewrite:
+        reheadered_bams = args.inBams
+    else:
+        reheadered_bams = []
+        for i, inBam in enumerate(args.inBams):
+            outBam = util.file.mkstempfname('.bam')
+            rgmap = dict((k,vals[i]) for k,vals in rewrite.items())
+            rewrite_bam_rgs(inBam, rgmap, outBam)
+            reheadered_bams.append(outBam)
+    
+    # perform merge
     tools.picard.MergeSamFilesTool().execute(
-        args.inBams, args.outBam,
+        reheadered_bams, args.outBam,
         picardOptions=['USE_THREADING=true'], JVMmemory=args.JVMmemory)
+    
+    # clean up
+    if rewrite:
+        for b in reheadered_bams:
+            os.unlink(b)
     return 0
 
 __commands__.append(('relabel_merge_bams', parser_relabel_merge_bams))
@@ -501,7 +601,7 @@ def fastq_to_bam(inFastq1, inFastq2, outBam, sampleName=None, header=None,
     picardOptions = picardOptions or []
 
     if header:
-        fastqToSamOut = mkstempfname('.bam')
+        fastqToSamOut = util.file.mkstempfname('.bam')
     else:
         fastqToSamOut = outBam
     if sampleName is None:
@@ -572,7 +672,7 @@ def split_reads(inFileName, outPrefix, outSuffix="",
         else:
             with util.file.open_or_gzopen(inFileName, 'rt') as inFile:
                 totalReadCount = 0
-                for rec in SeqIO.parse(inFile, fmt):
+                for rec in Bio.SeqIO.parse(inFile, fmt):
                     totalReadCount += 1
                 maxReads = int(totalReadCount / numChunks + 0.5)
 
@@ -580,12 +680,12 @@ def split_reads(inFileName, outPrefix, outSuffix="",
         readsWritten = 0
         curIndex = 0
         outFile = None
-        for rec in SeqIO.parse(inFile, fmt):
+        for rec in Bio.SeqIO.parse(inFile, fmt):
             if outFile is None:
                 indexstring = "%0" + str(indexLen) + "d"
                 outFileName = outPrefix + (indexstring % (curIndex + 1)) + outSuffix
                 outFile = util.file.open_or_gzopen(outFileName, 'wt')
-            SeqIO.write([rec], outFile, fmt)
+            Bio.SeqIO.write([rec], outFile, fmt)
             readsWritten += 1
             if readsWritten == maxReads:
                 outFile.close()
@@ -655,14 +755,14 @@ def split_bam(inBam, outBams):
         raise Exception('Input BAM file must be sorted in queryame order')
 
     # dump to bigsam
-    bigsam = mkstempfname('.sam')
+    bigsam = util.file.mkstempfname('.sam')
     samtools.view([], inBam, bigsam)
 
     # split bigsam into little ones
     with util.file.open_or_gzopen(bigsam, 'rt') as inf:
         for outBam in outBams:
             log.info("preparing file " + outBam)
-            tmp_sam_reads = mkstempfname('.sam')
+            tmp_sam_reads = util.file.mkstempfname('.sam')
             with open(tmp_sam_reads, 'wt') as outf:
                 for row in header:
                     outf.write('\t'.join(row) + '\n')
@@ -721,7 +821,7 @@ def main_reheader_bam(args):
     # read mapping file
     mapper = dict((a+':'+b, a+':'+c) for a,b,c in util.file.read_tabfile(args.rgMap))
     # read and convert bam header
-    header_file = mkstempfname('.sam')
+    header_file = util.file.mkstempfname('.sam')
     with open(header_file, 'wt') as outf:
         for row in tools.samtools.SamtoolsTool().getHeader(args.inBam):
             if row[0] == '@RG':
@@ -756,7 +856,7 @@ def main_reheader_bams(args):
     # read mapping file
     mapper = dict((a+':'+b, a+':'+c) for a,b,c in util.file.read_tabfile(args.rgMap) if a != 'FN')
     files = list((b,c) for a,b,c in util.file.read_tabfile(args.rgMap) if a == 'FN')
-    header_file = mkstempfname('.sam')
+    header_file = util.file.mkstempfname('.sam')
     # read and convert bam headers
     for inBam, outBam in files:
         if os.path.isfile(inBam):
@@ -779,8 +879,8 @@ __commands__.append(('reheader_bams', parser_reheader_bams))
 
 def mvicuna_fastqs_to_readlist(inFastq1, inFastq2, readList):
     # Run M-Vicuna on FASTQ files
-    outFastq1 = mkstempfname('.1.fastq')
-    outFastq2 = mkstempfname('.2.fastq')
+    outFastq1 = util.file.mkstempfname('.1.fastq')
+    outFastq2 = util.file.mkstempfname('.2.fastq')
     tools.mvicuna.MvicunaTool().rmdup((inFastq1, inFastq2), (outFastq1, outFastq2), None)
 
     # Make a list of reads to keep
@@ -822,12 +922,12 @@ def rmdup_mvicuna_bam(inBam, outBam, JVMmemory=None):
     log.info("found %d distinct libraries and %d read groups", len(lb_to_files), len(read_groups))
 
     # For each library, merge FASTQs and run rmdup for entire library
-    readList = mkstempfname('.keep_reads.txt')
+    readList = util.file.mkstempfname('.keep_reads.txt')
     for lb, files in lb_to_files.items():
         log.info("executing M-Vicuna DupRm on library " + lb)
 
         # create merged FASTQs per library
-        infastqs = (mkstempfname('.1.fastq'), mkstempfname('.2.fastq'))
+        infastqs = (util.file.mkstempfname('.1.fastq'), util.file.mkstempfname('.2.fastq'))
         for d in range(2):
             with open(infastqs[d], 'wt') as outf:
                 for fprefix in files:
@@ -1060,7 +1160,7 @@ def align_and_fix(inBam, refFasta, outBamAll=None, outBamFiltered=None,
         log.warn("are you sure you meant to do nothing?")
         return
 
-    bam_aligned = mkstempfname('.aligned.bam')
+    bam_aligned = util.file.mkstempfname('.aligned.bam')
     tools.novoalign.NovoalignTool().execute(
         inBam,
         refFasta,
@@ -1068,7 +1168,7 @@ def align_and_fix(inBam, refFasta, outBamAll=None, outBamFiltered=None,
         options=novoalign_options.split(),
         JVMmemory=JVMmemory)
 
-    bam_mkdup = mkstempfname('.mkdup.bam')
+    bam_mkdup = util.file.mkstempfname('.mkdup.bam')
     tools.picard.MarkDuplicatesTool().execute(
         [bam_aligned],
         bam_mkdup,
@@ -1076,7 +1176,7 @@ def align_and_fix(inBam, refFasta, outBamAll=None, outBamFiltered=None,
         JVMmemory=JVMmemory)
     os.unlink(bam_aligned)
 
-    bam_realigned = mkstempfname('.realigned.bam')
+    bam_realigned = util.file.mkstempfname('.realigned.bam')
     tools.gatk.GATKTool().local_realign(bam_mkdup, refFasta, bam_realigned, JVMmemory=JVMmemory, threads=threads)
     os.unlink(bam_mkdup)
 
@@ -1119,7 +1219,7 @@ def align_and_count_hits(inBam, refFasta, outCounts, includeZeros=False,
         read counts for each reference sequence.
     '''
 
-    bam_aligned = mkstempfname('.aligned.bam')
+    bam_aligned = util.file.mkstempfname('.aligned.bam')
     tools.novoalign.NovoalignTool().execute(
         inBam,
         refFasta,
