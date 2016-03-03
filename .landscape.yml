@@ -14,11 +14,11 @@
 #     - 3
 
 dodgy:
-  run: false
+  run: yes
 mccabe:
   run: false #mccabe is seemingly problematic
 pyflakes:
-  run: false
+  run: yes
 pep8:
   run: false
 pylint:
