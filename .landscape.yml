@@ -8,4 +8,7 @@ requirements:
 ignore-paths:
     - docs
 python-targets:
+    - 2
     - 3
+pep257:
+  run: false
