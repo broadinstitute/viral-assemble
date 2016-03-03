@@ -26,7 +26,8 @@ pylint:
 pep257:
   run: false # problematic for __all__ statements
 profile-validator:
-  run: yes
+  run: false
+# optional:
 frosted:
   run: false
 vulture:
