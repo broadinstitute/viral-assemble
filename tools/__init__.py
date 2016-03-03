@@ -17,8 +17,8 @@ try:
     from urllib.parse import urlparse    # pylint: disable=E0611
 except ImportError:
     # Python 2.x
-    from urllib import urlretrieve
-    from urlparse import urlparse
+    from urllib import urlretrieve # pylint: disable=E0611
+    from urlparse import urlparse # pylint: disable=import-error
 
 # Put all tool files in __all__
 # allows "from tools import *" to import all tooles for testtools
@@ -314,8 +314,6 @@ class CondaPackage(InstallMethod):
                 _log.warning("failed to decode JSON output from conda create: %s", result.stdout.decode("UTF-8"))
                 raise
                 #return # return rather than raise so we can fall back to the next install method
-
-            _log.debug("data: \"{data}\"".format(data=data))
 
             if data and len(data):
                 installed_package_string = data[0]
