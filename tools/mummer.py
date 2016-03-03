@@ -424,7 +424,7 @@ class AlignsReader(object):
                         mode = 'between'
                         new_coords = list(x.split() for x in line[21:-2].split(' | '))
                         assert coords == new_coords, "error: %s != %s" % (new_coords, coords)
-                        assert len(seqs[0]) == len(seqs[1])
+                        #assert len(seqs[0]) == len(seqs[1])
                         seqs = list(''.join(x) for x in seqs)
                         assert len(seqs[0]) == len(seqs[1])
                         self.alignments.append([coords[0][0], int(coords[0][1]), int(coords[0][3]),
