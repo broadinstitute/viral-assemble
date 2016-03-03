@@ -22,7 +22,7 @@ pyflakes:
 pep8:
   run: yes
 pylint:
-  run: false
+  run: yes
 pep257:
   run: false # problematic for __all__ statements
 profile-validator:
