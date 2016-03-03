@@ -12,5 +12,24 @@ ignore-paths:
 python-targets:
     - 2
     - 3
+
+dodgy:
+  run: false
+mccabe:
+  run: false
+pyflakes:
+  run: false
+pep8:
+  run: false
+pylint:
+  run: false
 pep257:
+  run: false
+profile-validator:
+  run: false
+frosted:
+  run: false
+vulture:
+  run: false
+pyroma:
   run: false
