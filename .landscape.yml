@@ -1,6 +1,6 @@
 doc-warnings: no
 test-warnings: yes
-strictness: medium
+strictness: verylow
 max-line-length: 120
 requirements:
     - requirements.txt
