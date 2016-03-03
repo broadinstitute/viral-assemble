@@ -18,7 +18,7 @@ dodgy:
 mccabe:
   run: false
 pyflakes:
-  run: false
+  run: yes
 pep8:
   run: false
 pylint:
