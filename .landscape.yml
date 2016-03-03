@@ -14,7 +14,7 @@
 #     - 3
 
 dodgy:
-  run: yes
+  run: no
 mccabe:
   run: false #mccabe is seemingly problematic
 pyflakes:
