@@ -22,16 +22,16 @@ except ImportError:
 
 # Put all tool files in __all__
 # allows "from tools import *" to import all tooles for testtools
-__all__ = sorted(
-    [
-        filename[:-3]    # Remove .py
-        for filename in os.listdir(os.path.dirname(__file__))    # tools directory
-        if filename.endswith(
-            '.py') and filename != '__init__.py' and filename not in [    # Add any files to exclude here:
-    # e.g. 'sometool.py',
-            ]
-    ]
-)
+__all__ = ['blast', 'bmtagger', 'diamond', 'gatk', 'kraken', 'last', 'mafft', 'megan', 'mummer', 'muscle', 'mvicuna', 'novoalign', 'picard', 'prinseq', 'samtools', 'snpeff', 'tbl2asn', 'trimmomatic', 'trinity', 'vphaser2']
+# sorted([
+#         filename[:-3]    # Remove .py
+#         for filename in os.listdir(os.path.dirname(__file__))    # tools directory
+#         if filename.endswith(
+#             '.py') and filename != '__init__.py' and filename not in [    # Add any files to exclude here:
+#                 # e.g. 'sometool.py',
+#             ]
+#     ])
+
 installed_tools = {}
 
 _log = logging.getLogger(__name__)
