@@ -20,7 +20,7 @@ mccabe:
 pyflakes:
   run: yes
 pep8:
-  run: false
+  run: yes
 pylint:
   run: false
 pep257:
