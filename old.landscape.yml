@@ -20,9 +20,9 @@ mccabe:
 pyflakes:
   run: yes
 pep8:
-  run: false
-pylint:
   run: yes
+pylint:
+  run: false
 pep257:
   run: false # problematic for __all__ statements
 profile-validator:
