@@ -14,9 +14,9 @@
 #     - 3
 
 dodgy:
-  run: false
+  run: yes
 mccabe:
-  run: false
+  run: yes
 pyflakes:
   run: false
 pep8:
