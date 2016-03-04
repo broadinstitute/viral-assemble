@@ -1,0 +1,3 @@
+#+TITLE: Evaluation of assembly methods
+
+Code for comparing the results of assembling the same data by different methods.

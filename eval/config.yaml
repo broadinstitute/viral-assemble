@@ -1,0 +1,13 @@
+
+# Config file for comparing assemblies
+
+cmp_dir: "/idi/sabeti-scratch/ilya/sw/quast-3.2/ebov"
+
+assemblies:
+  - "assembly-vfat"
+	- "assembly-mummer3"
+	
+viral_ngs_dir: "/idi/sabeti-scratch/ilya/viral-ngs"
+
+
+
