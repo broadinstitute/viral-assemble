@@ -9,6 +9,8 @@ import itertools
 
 configfile: "cfg.yaml"
 
+# * Prelims
+
 workdir: os.path.join( config['cmp_dir'], '__'.join( config['assemblies'] ) )
 
 def read_file(fname):
@@ -33,8 +35,25 @@ def consolidate_reports(infiles, outfile):
 config['samples'] = list(read_file(os.path.join(config['cmp_dir'],'samples-assembly.txt')))
 
 rule all:
-	input:	"pairdiffs/{assembly1}/{assembly2}/report-diff.txt".format(assembly1=assembly1,assembly2=assembly2) for assembly1, assembly2 in itertools.combinations( config['assemblies'], 2 )
+	input:	lambda wildcards: list("pairdiffs/{assembly1}/{assembly2}/report-diff.txt".format(assembly1=assembly1,assembly2=assembly2) for assembly1, assembly2 in itertools.combinations( config['assemblies'], 2 )) + \
+                [ "quast/{assembly_set}/{sample}/report.html".format(assembly_set='__'.join(config['assemblies']),sample=sample) for sample in config['samples'] ]
 
+# * quast-based comparisons
+
+rule quast:
+        input:
+                lambda wildcards: expand("{cmp_dir}/{assembly}/{sample}.fasta", cmp_dir=config['cmp_dir'],assembly=wildcards['assemblies'].split('__'),sample=wildcards['sample'])
+    
+        output: "quast/{assemblies}/{sample}/report.html"
+
+        shell: "/idi/sabeti-scratch/ilya/viral-ngs/eval/run_quast.sh {input} -R {config[reference]} -o quast/{wildcards.assemblies}/{wildcards.sample}"
+
+#        input:
+#		lambda wildcards: expand("{cmp_dir}/{assembly}/{sample}.fasta", cmp_dir=config['cmp_dir'],assembly=wildcards['assembly_set'].split('__'),**wildcards)
+                
+        
+# * reports.py-based comparisons
+        
 rule consolidate:
 	input:
 		lambda wildcards: expand("pairdiffs/{assembly1}/{assembly2}/{sample}.txt", sample=config['samples'],**wildcards)

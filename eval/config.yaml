@@ -9,5 +9,8 @@ assemblies:
 	
 viral_ngs_dir: "/idi/sabeti-scratch/ilya/viral-ngs"
 
+reference: "/idi/sabeti-scratch/ilya/sw/quast-3.2/ebov/ref_genome/reference.fasta"
+   
+
 
 
