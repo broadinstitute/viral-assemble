@@ -16,7 +16,7 @@
 dodgy:
   run: yes
 mccabe:
-  run: false #mccabe is seemingly problematic
+  run: yes #mccabe is seemingly problematic
 pyflakes:
   run: yes
 pep8:
