@@ -30,7 +30,7 @@ pylint:
 pep257:
   run: false # problematic for __all__ statements?
 profile-validator:
-  run: false
+  run: yes
 # optional:
 frosted:
   run: false
