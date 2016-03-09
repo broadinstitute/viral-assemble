@@ -3,15 +3,19 @@
 # strictness: medium
 # autodetect: yes
 # max-line-length: 120
-# requirements:
-#     - requirements.txt
-#     - requirements-pipes.txt
-# ignore-paths:
-#     - docs
-#     - tools/build
-# python-targets:
-#     - 2
-#     - 3
+
+
+requirements:
+    - requirements.txt
+    - requirements-pipes.txt
+
+ignore-paths:
+    - docs
+    - tools/build
+
+python-targets:
+    - 2
+    - 3
 
 dodgy:
   run: yes
