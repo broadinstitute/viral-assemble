@@ -20,7 +20,7 @@ python-targets:
 dodgy:
   run: yes
 mccabe:
-  run: yes #mccabe is seemingly problematic
+  run: yes 
 pyflakes:
   run: yes
 pep8:
@@ -28,7 +28,7 @@ pep8:
 pylint:
   run: yes
 pep257:
-  run: false # problematic for __all__ statements
+  run: false # problematic for __all__ statements?
 profile-validator:
   run: false
 # optional:
