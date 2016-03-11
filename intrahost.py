@@ -30,6 +30,7 @@ from util.stats import median, fisher_exact, chi2_contingency
 from interhost import CoordMapper
 from tools.vphaser2 import Vphaser2Tool
 from tools.samtools import SamtoolsTool
+from tools.sambamba import SambambaTool
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +111,7 @@ def vphaser_one_sample(inBam, inConsFasta, outTab, vphaserNumThreads=None,
             the counts for each allele.
     '''
     samtoolsTool = SamtoolsTool()
+    sambambaTool = SambambaTool()
 
     if minReadsEach is not None and minReadsEach < 0:
         raise Exception('minReadsEach must be at least 0.')
@@ -118,14 +120,16 @@ def vphaser_one_sample(inBam, inConsFasta, outTab, vphaserNumThreads=None,
     if not bam_is_sorted(inBam):
         sorted_bam_file = util.file.mkstempfname('.mapped-sorted.bam')
         sorted_bam_file_tmp = util.file.mkstempfname('.mapped-sorted.bam')
-        samtoolsTool.sort(args=['-T', sorted_bam_file_tmp], inFile=inBam, outFile=sorted_bam_file)
+        #samtoolsTool.sort(args=['-T', sorted_bam_file_tmp], inFile=inBam, outFile=sorted_bam_file)
+        sambambaTool.sort(args=['--tmpdir={}'.format(os.path.dirname(sorted_bam_file_tmp))], in_file=inBam, out_file=sorted_bam_file)
     
     bam_to_process = sorted_bam_file
     if removeDoublyMappedReads:
         bam_to_process = util.file.mkstempfname('.mapped-withdoublymappedremoved.bam')
         
         samtoolsTool.removeDoublyMappedReads(sorted_bam_file, bam_to_process)
-        samtoolsTool.index(bam_to_process)
+        #samtoolsTool.index(bam_to_process)
+        sambambaTool.index(bam_to_process)
 
     variantIter = Vphaser2Tool().iterate(bam_to_process, vphaserNumThreads)
     filteredIter = filter_strand_bias(variantIter, minReadsEach, maxBias)
@@ -172,6 +176,7 @@ def compute_library_bias(isnvs, inBam, inConsFasta):
     '''
     alleleCol = 7  # First column of output with allele counts
     samtoolsTool = SamtoolsTool()
+    sambambaTool = SambambaTool()
     rgs_by_lib = sorted((rg['LB'], rg['ID']) for rg in samtoolsTool.getReadGroups(inBam).values())
     rgs_by_lib = itertools.groupby(rgs_by_lib, lambda x: x[0])
     libBams = []
@@ -203,7 +208,8 @@ def compute_library_bias(isnvs, inBam, inConsFasta):
             else:
                 # samtools merge cannot deal with only one (or zero) input bams
                 libBam = rgBams[0]
-            samtoolsTool.index(libBam)
+            #samtoolsTool.index(libBam)
+            sambambaTool.index(libBam)
             n_reads = samtoolsTool.count(libBam)
             log.debug("LB:%s has %s reads in %s read groups (%s)", lib, n_reads, len(rgs), ', '.join(rgs))
             libBams.append(libBam)
