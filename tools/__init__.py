@@ -17,8 +17,8 @@ try:
     from urllib.parse import urlparse    # pylint: disable=E0611
 except ImportError:
     # Python 2.x
-    from urllib import urlretrieve
-    from urlparse import urlparse
+    from urllib import urlretrieve # pylint: disable=E0611
+    from urlparse import urlparse # pylint: disable=import-error
 
 # Put all tool files in __all__
 # allows "from tools import *" to import all tooles for testtools
@@ -224,6 +224,17 @@ class CondaPackage(InstallMethod):
         #InstallMethod.__init__(self)
         super(CondaPackage, self).__init__()
 
+    @staticmethod
+    def _string_from_start_of_json(string_with_json):
+        # JSON can start with "{" or "["
+        # via http://www.json.org/
+        matches = re.compile("\{|\[").search(string_with_json)
+        if matches:
+            return string_with_json[matches.start():]
+        else:
+            _log.warn("Does not look like json: %s" % string_with_json)
+            return None
+
     @property
     def _package_str(self):
         if len(self.version):
@@ -244,9 +255,7 @@ class CondaPackage(InstallMethod):
         result = util.misc.run_and_print(["conda", "list", "-p", self.env_path, "--json", self.package], silent=True, env=self.conda_env)
         if result.returncode == 0:
             command_output = result.stdout.decode("UTF-8")
-            # load the JSON, but
-            # only use the part from the first "{" to the end since some conda versions print non-JSON text before the JSON
-            data = json.loads(command_output[command_output.index("{"):]) 
+            data = json.loads(self._string_from_start_of_json(command_output))
             if len(data) > 0:
                 return True
         return False
@@ -297,28 +306,25 @@ class CondaPackage(InstallMethod):
         run_cmd = ["conda", "list", "-c", "--json", "-f", "-p", self.env_path, self.package]
 
         result = util.misc.run_and_print(run_cmd, silent=True, env=self.conda_env)
-        try:
-            command_output = result.stdout.decode("UTF-8")
-            # load the JSON, but
-            # only use the part from the first "{" to the end since some conda versions print non-JSON text before the JSON
-            data = json.loads(command_output[command_output.index("["):])
-        except:
-            raise
-            _log.warning("failed to decode JSON output from conda create: %s", result.stdout.decode("UTF-8"))
-            return # return rather than raise so we can fall back to the next install method
+        if result.returncode == 0:
+            try:
+                command_output = result.stdout.decode("UTF-8")
+                data = json.loads(self._string_from_start_of_json(command_output))
+            except:
+                _log.warning("failed to decode JSON output from conda create: %s", result.stdout.decode("UTF-8"))
+                raise
+                #return # return rather than raise so we can fall back to the next install method
 
-        if not len(data):
-            return None
-        else:
-            installed_package_string = data[0]
-            package_info_re = re.compile(r"(?P<package_name>.*)-(?P<version>.*)-(?P<build_type>.*)")
-            matches = package_info_re.match(installed_package_string)
-            if matches:
-                installed_version = matches.group("version")
-                installed_package = matches.group("package_name")
-                installed_build_type = matches.group("build_type")
-                return installed_version
-            return None
+            if data and len(data):
+                installed_package_string = data[0]
+                package_info_re = re.compile(r"(?P<package_name>.*)-(?P<version>.*)-(?P<build_type>.*)")
+                matches = package_info_re.match(installed_package_string)
+                if matches:
+                    installed_version = matches.group("version")
+                    installed_package = matches.group("package_name")
+                    installed_build_type = matches.group("build_type")
+                    return installed_version
+        return None
 
     def uninstall_package(self):
         run_cmd = ["conda", "remove", "-q", "-y", "--json", "-p", self.env_path, self.package]
@@ -332,9 +338,7 @@ class CondaPackage(InstallMethod):
         if result.returncode == 0:
             try:
                 command_output = result.stdout.decode("UTF-8")
-                # load the JSON, but
-                # only use the part from the first "{" to the end since some conda versions print non-JSON text before the JSON
-                data = json.loads(command_output[command_output.index("{"):]) 
+                data = json.loads(self._string_from_start_of_json(command_output))
             except:
                 _log.warning("failed to decode JSON output from conda install: %s", result.stdout.decode("UTF-8"))
                 return # return rather than raise so we can fall back to the next install method
@@ -359,9 +363,7 @@ class CondaPackage(InstallMethod):
         result = util.misc.run_and_print(run_cmd, silent=True, env=self.conda_env)
         try:
             command_output = result.stdout.decode("UTF-8")
-            # load the JSON, but
-            # only use the part from the first "{" to the end since some conda versions print non-JSON text before the JSON
-            data = json.loads(command_output[command_output.index("{"):])
+            data = json.loads(self._string_from_start_of_json(command_output))
         except:
             _log.warning("failed to decode JSON output from conda create: %s", result.stdout.decode("UTF-8"))
             return # return rather than raise so we can fall back to the next install method
@@ -383,9 +385,7 @@ class CondaPackage(InstallMethod):
             if result.returncode == 0:
                 try:
                     command_output = result.stdout.decode("UTF-8")
-                    # load the JSON, but
-                    # only use the part from the first "{" to the end since some conda versions print non-JSON text before the JSON
-                    data = json.loads(command_output[command_output.index("{"):]) 
+                    data = json.loads(self._string_from_start_of_json(command_output))
                 except:
                     _log.warning("failed to decode JSON output from conda install: %s", result.stdout.decode("UTF-8"))
                     return # return rather than raise so we can fall back to the next install method
