@@ -7,10 +7,18 @@ if [ -d "$MINICONDA_DIR" ] && [ -x "$MINICONDA_DIR/bin/conda" ]; then
 else # if it does not exist, we need to install miniconda
     rm -rf "$MINICONDA_DIR" # remove the directory in case we have an empty cached directory
     
-    if [[ "$TRAVIS_PYTHON_VERSION" == 2* ]]; then
-        wget https://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh;
+    if [[ "$TRAVIS_PYTHON_VERSION" == 2* ]] || [[ "$TRAVIS_OSX_PYTHON_VERSION" == py2* ]]; then
+        if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
+            wget https://repo.continuum.io/miniconda/Miniconda-latest-MacOSX-x86_64.sh -O miniconda.sh;
+        else
+            wget https://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh;
+        fi
     else
-        wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
+        if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
+            wget https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -O miniconda.sh;
+        else
+            wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
+        fi
     fi
 
     bash miniconda.sh -b -p "$MINICONDA_DIR"
