@@ -6,7 +6,15 @@ matrix:
           language: python
           python:
             - 2.7
+        - os: linux
+          sudo: false
+          language: python
+          python:
             - 3.4
+        - os: linux
+          sudo: false
+          language: python
+          python:
             - 3.5
         # Use generic language for osx
         - os: osx
