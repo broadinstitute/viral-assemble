@@ -1,16 +1,6 @@
 #!/bin/bash
 set -e
 
-# if we're on OSX we have to activat the virtualenv ourselves
-# at least until Travis supports Python builds nativelt
-if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
-    # if the virtual env exists but is not active
-    if [ -e "$HOME/virtualenv/bin/activate" ] && [ -z "$VIRTUAL_ENV" ]; then
-        # activate the virtualenv
-        source $HOME/virtualenv/bin/activate
-    fi
-fi
-
 if [ ! -d $GATK_PATH -o ! -d $NOVOALIGN_PATH ]; then
   if [ -z "$BUNDLE_SECRET" ]; then
     echo "ERROR: GATK and/or Novoalign is missing, but secret key is not set for auto-download."
