@@ -1,21 +1,18 @@
+language: python
+sudo: false
+
 matrix:
     include:
         # Use the built in venv for linux builds
         - os: linux
-          sudo: false
-          language: python
-          python:
-            - 2.7
+          #sudo: false
+          python: 2.7
         - os: linux
-          sudo: false
-          language: python
-          python:
-            - 3.4
+          #sudo: false
+          python: 3.4
         - os: linux
-          sudo: false
-          language: python
-          python:
-            - 3.5
+          #sudo: false
+          python: 3.5
         # Use generic language for osx
         - os: osx
           language: generic
