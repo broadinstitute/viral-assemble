@@ -16,6 +16,10 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
 
     hash -r
 
+    # if we have a separate licensed tarball for OSX, we can remove this
+    # but for now use the single-threaded conda version
+    unset NOVOALIGN_PATH
+
     #pip install --upgrade virtualenv
     #pip install --upgrade -e git+https://github.com/pypa/virtualenv.git#egg=virtualenv
 
