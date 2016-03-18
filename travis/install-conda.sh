@@ -36,6 +36,5 @@ else # if it does not exist, we need to install miniconda
         #conda install gcc
         conda install boost 
         conda install cmake
-        conda install ruby
     fi
 fi
