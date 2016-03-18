@@ -2,8 +2,8 @@
 set -e
 
 if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
-    brew update
-    brew install pyenv-virtualenv
+    brew update > /dev/null
+    #brew install pyenv-virtualenv
 
     case "${TRAVIS_OSX_PYTHON_VERSION}" in
         py27)

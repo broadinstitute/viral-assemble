@@ -54,10 +54,10 @@ before_install:
   - travis/before_install.sh
 
 install:
-  - travis/prepare-osx.sh
   - travis/install-conda.sh
   - export PATH="$PATH:$HOME/miniconda/bin"
   - hash -r
+  - travis/prepare-osx.sh
   - source travis/activate-virtualenv.sh
   - travis/install-pip.sh
   - travis/install-tools.sh
