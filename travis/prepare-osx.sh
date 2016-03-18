@@ -7,7 +7,8 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
 
     hash -r
 
-    pip install --upgrade virtualenv
+    #pip install --upgrade virtualenv
+    pip install --upgrade -e git+https://github.com/pypa/virtualenv.git#egg=virtualenv
 
     case "${TRAVIS_OSX_PYTHON_VERSION}" in
         py27)
