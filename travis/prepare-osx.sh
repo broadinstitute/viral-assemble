@@ -22,7 +22,7 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
             if [ ! -e $HOME/virtualenv/bin/activate ]; then
                 cd $HOME
                 #pyvenv virtualenv
-                virtualenv venv -p python --no-setuptools --no-pip --no-wheel
+                virtualenv venv -p $(which python3) --no-setuptools --no-pip --no-wheel
             fi
             ;;
     esac
