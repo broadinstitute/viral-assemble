@@ -4,6 +4,7 @@ set -e
 if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
     brew update > /dev/null
     brew tap homebrew/versions
+    brew unlink gcc
     brew install gcc49
 
     export CC=gcc-4.9
