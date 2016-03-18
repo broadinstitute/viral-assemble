@@ -17,10 +17,15 @@ if [ ! -d $GATK_PATH -o ! -d $NOVOALIGN_PATH ]; then
 fi
 
 # perhaps not needed?
-if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
-  export CC=gcc-4.9
-  export CXX=g++-4.9
-fi
+# if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
+#   export CC=gcc-4.9
+#   export CXX=g++-4.9
+# fi
+
+echo "CC: $CC" 
+echo "CXX: $CXX" 
+echo "which gxx: $(which gcc)" 
+echo "gcc --version: $(gcc --version)"
 
 echo "Installing and validating bioinformatic tools"
 #nosetests -v test.unit.test_tools.TestToolsInstallation

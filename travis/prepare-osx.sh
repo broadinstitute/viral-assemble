@@ -11,8 +11,8 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
     brew install boost 
     brew install cmake 
 
-    #export CC=gcc-4.8
-    #export CXX=g++-4.8
+    export CC=gcc-4.9
+    export CXX=g++-4.9
 
     hash -r
 
