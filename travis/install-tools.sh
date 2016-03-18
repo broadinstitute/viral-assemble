@@ -26,6 +26,7 @@ echo "CC: $CC"
 echo "CXX: $CXX" 
 echo "which gxx: $(which gcc)" 
 echo "gcc --version: $(gcc --version)"
+env
 
 echo "Installing and validating bioinformatic tools"
 #nosetests -v test.unit.test_tools.TestToolsInstallation
