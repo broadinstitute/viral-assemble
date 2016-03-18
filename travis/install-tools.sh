@@ -20,11 +20,12 @@ fi
 if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
   export CC=gcc-4.9
   export CXX=g++-4.9
+  alias gcc='$(which gcc-4.9)'
 fi
 
 echo "CC: $CC" 
 echo "CXX: $CXX" 
-echo "which gxx: $(which gcc)" 
+echo "which gcc: $(which gcc)" 
 echo "gcc --version: $(gcc --version)"
 env
 
