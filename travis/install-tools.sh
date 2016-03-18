@@ -22,6 +22,7 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
   export CXX=g++-4.9
   alias gcc='$(which gcc-4.9)'
   alias g++='$(which g++-4.9)'
+  unset NOVOALIGN_PATH
 fi
 
 echo "CC: $CC" 
