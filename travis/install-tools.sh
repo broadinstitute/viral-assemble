@@ -17,8 +17,8 @@ if [ ! -d $GATK_PATH -o ! -d $NOVOALIGN_PATH ]; then
 fi
 
 if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
-  export CC=gcc-4.8
-  export CXX=g++-4.8
+  export CC=gcc-4.9
+  export CXX=g++-4.9
 fi
 
 echo "Installing and validating bioinformatic tools"
