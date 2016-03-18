@@ -19,7 +19,7 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
             #brew install python3
             if [ ! -e $HOME/virtualenv/bin/activate ]; then
                 cd $HOME
-                pyvenv virtualenv
+                #pyvenv virtualenv
                 virtualenv -p python3 virtualenv
             fi
             ;;
