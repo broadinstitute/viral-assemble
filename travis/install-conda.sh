@@ -30,4 +30,8 @@ else # if it does not exist, we need to install miniconda
     conda config --add channels r
     conda update -q conda
     conda info -a # for debugging
+
+    if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
+        conda install pip
+    fi
 fi
