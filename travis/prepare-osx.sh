@@ -3,9 +3,9 @@ set -e
 
 if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
     brew update > /dev/null
-    brew install homebrew/versions/gcc49
+    #brew install homebrew/versions/gcc49
 
-    hash -r python
+    hash -r
 
     case "${TRAVIS_OSX_PYTHON_VERSION}" in
         py27)
