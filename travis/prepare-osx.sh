@@ -7,6 +7,8 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
 
     hash -r
 
+    pip install --upgrade virtualenv
+
     case "${TRAVIS_OSX_PYTHON_VERSION}" in
         py27)
             # Install some custom Python 2.7 requirements on OS X
