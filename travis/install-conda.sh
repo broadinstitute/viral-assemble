@@ -34,7 +34,8 @@ else # if it does not exist, we need to install miniconda
     if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
         #conda install virtualenv
         #conda install gcc
-        conda install boost
+        conda install boost 
         conda install cmake
+        conda install ruby
     fi
 fi
