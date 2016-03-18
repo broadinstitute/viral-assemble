@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+echo "CC: $CC" 
+echo "CXX: $CXX" 
+echo "which gxx: $(which gcc)" 
+echo "gcc --version: $(gcc --version)"
+env
+
 echo "pip installing required python packages"
 pip install -r requirements.txt
 
