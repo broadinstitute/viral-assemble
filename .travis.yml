@@ -56,9 +56,9 @@ before_install:
 install:
   - travis/prepare-osx.sh
   - travis/install-conda.sh
-  - source travis/activate-virtualenv.sh
   - export PATH="$PATH:$HOME/miniconda/bin"
   - hash -r
+  - source travis/activate-virtualenv.sh
   - travis/install-pip.sh
   - travis/install-tools.sh
 
