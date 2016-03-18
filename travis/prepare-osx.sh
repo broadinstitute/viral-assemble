@@ -5,6 +5,8 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
     brew update > /dev/null
     brew install homebrew/versions/gcc49
 
+    hash -r python
+
     case "${TRAVIS_OSX_PYTHON_VERSION}" in
         py27)
             # Install some custom Python 2.7 requirements on OS X
