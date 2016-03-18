@@ -20,6 +20,7 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
             if [ ! -e $HOME/virtualenv/bin/activate ]; then
                 cd $HOME
                 pyvenv virtualenv
+                virtualenv -p python3 virtualenv
             fi
             ;;
     esac

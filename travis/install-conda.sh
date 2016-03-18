@@ -32,6 +32,6 @@ else # if it does not exist, we need to install miniconda
     conda info -a # for debugging
 
     if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
-        conda install pip
+        conda install virtualenv
     fi
 fi
