@@ -5,10 +5,12 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
     brew update > /dev/null
     brew tap homebrew/versions
     brew unlink gcc
-    brew install gcc49 #&& brew link gcc || brew link gcc
+    brew install gcc48 
+    brew install boost 
+    brew install cmake 
 
-    export CC=gcc-4.9
-    export CXX=g++-4.9
+    export CC=gcc-4.8
+    export CXX=g++-4.8
 
     hash -r
 
