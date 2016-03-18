@@ -55,7 +55,8 @@ before_install:
 
 install:
   - travis/install-conda.sh
-  - export PATH="$PATH:$HOME/miniconda/bin"
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export PATH="$HOME/miniconda/bin:$PATH"; fi
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then export PATH="$PATH:$HOME/miniconda/bin"; fi
   - hash -r
   - travis/prepare-osx.sh
   - source travis/activate-virtualenv.sh
