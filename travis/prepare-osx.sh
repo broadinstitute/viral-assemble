@@ -13,7 +13,7 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
             #brew install python
             if [ ! -e $HOME/virtualenv/bin/activate ]; then
                 cd $HOME
-                virtualenv virtualenv --no-setuptools --no-pip --no-wheel
+                virtualenv venv --no-setuptools --no-pip --no-wheel
             fi
             ;;
         py35)
@@ -22,7 +22,7 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
             if [ ! -e $HOME/virtualenv/bin/activate ]; then
                 cd $HOME
                 #pyvenv virtualenv
-                virtualenv virtualenv --no-setuptools --no-pip --no-wheel
+                virtualenv venv -p python --no-setuptools --no-pip --no-wheel
             fi
             ;;
     esac
