@@ -18,6 +18,7 @@ fi
 
 # perhaps not needed?
 if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then 
+  echo "Preparing OSX to install tools..."
   export CC=gcc-4.9
   export CXX=g++-4.9
   alias gcc='$(which gcc-4.9)'
@@ -29,6 +30,7 @@ echo "CC: $CC"
 echo "CXX: $CXX" 
 echo "which gcc: $(which gcc)" 
 echo "gcc --version: $(gcc --version)"
+echo "java version: $(java -version 2>&1 | grep 'java version')" 
 env
 
 echo "Installing and validating bioinformatic tools"
