@@ -1,6 +1,6 @@
 language: python
 
-cache: true
+cache: false
 
 matrix:
     include:
