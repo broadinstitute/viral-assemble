@@ -26,17 +26,16 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
   unset NOVOALIGN_PATH
 fi
 
-echo "CC: $CC" 
-echo "CXX: $CXX" 
-echo "which gcc: $(which gcc)" 
-echo "gcc --version: $(gcc --version)"
-echo "java version: $(java -version 2>&1 | grep 'java version')" 
-echo "conda list:"
-conda list
-echo "=== ENV ==="
-env
-echo "==========="
+# echo "CC: $CC" 
+# echo "CXX: $CXX" 
+# echo "which gcc: $(which gcc)" 
+# echo "gcc --version: $(gcc --version)"
+# echo "java version: $(java -version 2>&1 | grep 'java version')" 
+# echo "conda list:"
+# conda list
+# echo "=== ENV ==="
+# env
+# echo "==========="
 
 echo "Installing and validating bioinformatic tools"
-#nosetests -v test.unit.test_tools.TestToolsInstallation
 nosetests -v test.unit.test_tools

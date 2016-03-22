@@ -54,14 +54,11 @@ before_install:
   - travis/before_install.sh
 
 install:
-  - travis/install-conda.sh
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export PATH="$HOME/miniconda/bin:$PATH"; fi
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then export PATH="$PATH:$HOME/miniconda/bin"; fi
+  - source travis/install-conda.sh
   - hash -r
   - source travis/prepare-osx.sh
   - travis/install-pip.sh
-  - travis/install-tools.sh
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then unset NOVOALIGN_PATH; fi
+  - source travis/install-tools.sh
 
 script:
   - travis/tests-unit.sh

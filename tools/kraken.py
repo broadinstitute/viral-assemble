@@ -58,6 +58,7 @@ class Jellyfish(tools.Tool):
     def __init__(self, install_methods=None):
         if not install_methods:
             install_methods = []
+            install_methods.append(tools.CondaPackage(CONDA_TOOL_NAME, version=CONDA_TOOL_VERSION))
             install_methods.append(
                 DownloadAndInstallJellyfish(
                     JELLYFISH_URL, os.path.join(JELLYFISH_DIR, 'bin', 'jellyfish')
@@ -86,6 +87,7 @@ class DownloadAndInstallJellyfish(tools.DownloadPackage):
         util.misc.run_and_print(['./configure', '--prefix={}'.format(install_dir)], cwd=jellyfish_dir, env=env)
         util.misc.run_and_print(['make', 'install'], cwd=jellyfish_dir, env=env)
 
+@tools.skip_install_test(condition=tools.is_osx)
 class Kraken(tools.Tool):
 
     BINS = ['kraken', 'kraken-build', 'kraken-filter', 'kraken-mpa-report', 'kraken-report', 'kraken-translate']
@@ -93,6 +95,7 @@ class Kraken(tools.Tool):
     def __init__(self, install_methods=None):
         if not install_methods:
             install_methods = []
+            install_methods.append(tools.CondaPackage(CONDA_TOOL_NAME, version=CONDA_TOOL_VERSION))
             install_methods.append(DownloadAndInstallKraken(URL, os.path.join(KRAKEN_DIR, 'bin', 'kraken')))
         super().__init__(install_methods=install_methods)
 

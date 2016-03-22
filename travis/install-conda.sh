@@ -37,5 +37,11 @@ else # if it does not exist, we need to install miniconda
         conda install libgcc
         conda install boost 
         conda install cmake
+
+        # on OSX we need to rely on the conda Python rather than the Travis-supplied system Python
+        # so conda has a higher precedence
+        export PATH="$HOME/miniconda/bin:$PATH"
+    else
+        source PATH="$PATH:$HOME/miniconda/bin" #for systems with Travis-supplied system Python
     fi
 fi
