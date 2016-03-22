@@ -42,6 +42,6 @@ else # if it does not exist, we need to install miniconda
         # so conda has a higher precedence
         export PATH="$HOME/miniconda/bin:$PATH"
     else
-        source PATH="$PATH:$HOME/miniconda/bin" #for systems with Travis-supplied system Python
+        export PATH="$PATH:$HOME/miniconda/bin" #for systems with Travis-supplied system Python
     fi
 fi
