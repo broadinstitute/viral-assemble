@@ -6,10 +6,10 @@ import os.path
 import tempfile
 import unittest
 from util import file
-import tools.diamond
+import tools
 from test import TestCaseWithTmp
 
-
+@unittest.skipIf(tools.is_osx(), "Kraken not yet supported on OSX due to RAM required")
 class TestToolDiamond(TestCaseWithTmp):
 
     def setUp(self):

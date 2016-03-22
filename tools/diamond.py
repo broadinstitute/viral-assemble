@@ -20,6 +20,7 @@ DIAMOND_DIR = 'diamond-{}'.format(TOOL_VERSION)
 log = logging.getLogger(__name__)
 
 
+@tools.skip_install_test(condition=tools.is_osx)
 class Diamond(tools.Tool):
 
     SUBCOMMANDS = ['makedb', 'blastx', 'blastp', 'view']
