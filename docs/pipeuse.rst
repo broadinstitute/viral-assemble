@@ -49,7 +49,7 @@ import the following dotkits prior to activating the virtualenv:
 
     use .python-3.4.3
     use .oracle-java-jdk-1.7.0-51-x86-64
-    use .bzip2-1.0.6 
+    use .bzip2-1.0.6
     use .zlib-1.2.6
     use .gcc-4.5.3
 
@@ -157,10 +157,19 @@ docs <ftp://ftp.ncbi.nih.gov/pub/agarwala/bmtagger/README.bmtagger.txt>`__.
 ::
 
     bmtagger_db_dir: "/path/to/depletion_databases"
-    bmtagger_dbs_remove: 
+    bmtagger_dbs_remove:
       - "hg19"
       - "GRCh37.68_ncRNA-GRCh37.68_transcripts-HS_rRNA_mitRNA"
       - "metagenomics_contaminants_v3"
+
+Pre-built depletion databases are available in both *.tar.gz and *.lz4 
+format, for removing human reads and common metagenomic contaminants:
+
+-  `GRCh37.68_ncRNA-GRCh37.68_transcripts-HS_rRNA_mitRNA.tar.gz <https://storage.googleapis.com/sabeti-public/depletion_dbs/GRCh37.68_ncRNA-GRCh37.68_transcripts-HS_rRNA_mitRNA.tar.gz>`__ (`*.lz4 <https://storage.googleapis.com/sabeti-public/depletion_dbs/GRCh37.68_ncRNA-GRCh37.68_transcripts-HS_rRNA_mitRNA.lz4>`__)
+-  `hg19.tar.gz <https://storage.googleapis.com/sabeti-public/depletion_dbs/hg19.tar.gz>`__ (`*.lz4 <https://storage.googleapis.com/sabeti-public/depletion_dbs/hg19.lz4>`__)
+-  `metagenomics_contaminants_v3.tar.gz <https://storage.googleapis.com/sabeti-public/depletion_dbs/metagenomics_contaminants_v3.tar.gz>`__ (`*.lz4 <https://storage.googleapis.com/sabeti-public/depletion_dbs/metagenomics_contaminants_v3.lz4>`__)
+
+Note that these databases must be extracted prior to use.
 
 In addition to the databases used by BMTagger, you will need to specify
 the location and file prefix of the BLAST database to be used for
@@ -176,6 +185,33 @@ from the University of Oxford.
     blast_db_dir: "/path/to/depletion_databases"
     blast_db_remove: "metag_v3.ncRNA.mRNA.mitRNA.consensus"
 
+A pre-built depletion database is also available for BLAST:
+
+-  `metag_v3.ncRNA.mRNA.mitRNA.consensus.tar.gz <https://storage.googleapis.com/sabeti-public/depletion_dbs/metag_v3.ncRNA.mRNA.mitRNA.consensus.tar.gz>`__ (`*.lz4 <https://storage.googleapis.com/sabeti-public/depletion_dbs/metag_v3.ncRNA.mRNA.mitRNA.consensus.lz4>`__)
+
+Note that this database must be extracted prior to use.
+
+Additional databases are needed to perform metagenomic classification 
+using `Kraken <https://ccb.jhu.edu/software/kraken/>`__, 
+`Diamond <https://github.com/bbuchfink/diamond>`__, or 
+`Krona <https://github.com/marbl/Krona/wiki>`__.
+
+::
+
+    kraken_db: "/path/to/kraken_full_20150910"
+
+    diamond_db: "/path/to/diamond_db/nr"
+
+    krona_db: "/path/to/krona"
+
+Pre-built databases for Kraken, Diamond, and Krona are available:
+
+-  `kraken_db.tar.gz <https://storage.googleapis.com/sabeti-public/meta_dbs/kraken_db.tar.gz>`__ (`*.lz4 <https://storage.googleapis.com/sabeti-public/meta_dbs/kraken_db.tar.lz4>`__)
+-  `krona_taxonomy_20160502.tar.gz <https://storage.googleapis.com/sabeti-public/meta_dbs/krona_taxonomy_20160502.tar.gz>`__ (`*.lz4 <https://storage.googleapis.com/sabeti-public/meta_dbs/krona_taxonomy_20160502.tar.lz4>`__)
+-  `nr.dmnd.gz <https://storage.googleapis.com/sabeti-public/meta_dbs/nr.dmnd.gz>`__ (`*.lz4 <https://storage.googleapis.com/sabeti-public/meta_dbs/nr.dmnd.lz4>`__)
+
+Note that these databases must be extracted prior to use.
+
 An array of the `NCBI GenBank
 CoreNucleotide <http://www.ncbi.nlm.nih.gov/nuccore/>`__ accessions for
 the sequences comprising the reference genome to be used for contig
@@ -185,17 +221,17 @@ to represent the full reference genome file used downstream.
 
 ::
 
-    accessions_for_ref_genome_build: 
+    accessions_for_ref_genome_build:
       - "KJ660346.2"
 
-An optional file containing a list of accessions may be specified for 
-filtering reads via `LAST <http://last.cbrc.jp/doc/lastal.txt>`__. This is 
-intended to narrow to a genus. If this file is not provided, viral-ngs 
+An optional file containing a list of accessions may be specified for
+filtering reads via `LAST <http://last.cbrc.jp/doc/lastal.txt>`__. This is
+intended to narrow to a genus. If this file is not provided, viral-ngs
 defaults to using the accessions specified for the reference genome.
 
 ::
 
-    accessions_file_for_lastal_db_build: "/path/to/lastal_accessions.txt"  
+    accessions_file_for_lastal_db_build: "/path/to/lastal_accessions.txt"
 
 A FASTA file to be used by Trimmomatic during assembly to remove
 contaminents from reads:
@@ -203,6 +239,10 @@ contaminents from reads:
 ::
 
     trim_clip_db: "/path/to/depletion_databases/contaminants.fasta"
+
+Pre-built databases for Trimmomatic:
+
+-  `contaminants.fasta.tar.gz <https://console.cloud.google.com/m/cloudstorage/b/sabeti-public/o/depletion_dbs/contaminants.fasta.tar.gz>`__ (`*.lz4 <https://console.cloud.google.com/m/cloudstorage/b/sabeti-public/o/depletion_dbs/contaminants.fasta.lz4>`__)
 
 A FASTA file containing spike-ins to be reported:
 
@@ -284,8 +324,8 @@ The pipeline may fail with errors during execution, usually while
 generating assemblies with Trinity. If this occurs, examine the output,
 add the failing sample names to ``samples-assembly-failures.txt``,
 keeping the good ones in ``samples-assembly.txt``, and re-run the
-pipeline. Due to sample degredation prior to sequencing in the wet lab,
-not all samples have the integirty to complete the pipeline, and it may
+pipeline. Due to sample degradation prior to sequencing in the wet lab,
+not all samples have the integrity to complete the pipeline, and it may
 necessary to skip over these samples by adding them to the
 ``samples-assembly-failures.txt``.
 

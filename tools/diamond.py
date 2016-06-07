@@ -8,12 +8,14 @@ import os
 import os.path
 import shlex
 import shutil
+import subprocess
 import tools
 import util.file
 import util.misc
 
 URL = 'https://github.com/bbuchfink/diamond/archive/b576a5c03177603554f4627ae367f7bcbc6b8dcb.zip'
 TOOL_VERSION = '0.7.9'
+CONDA_VERSION = tools.CondaPackageVersion('0.7.10', 'boost1.60_1')
 DIAMOND_COMMIT_DIR = 'diamond-b576a5c03177603554f4627ae367f7bcbc6b8dcb'
 DIAMOND_DIR = 'diamond-{}'.format(TOOL_VERSION)
 
@@ -26,7 +28,9 @@ class Diamond(tools.Tool):
 
     def __init__(self, install_methods=None):
         if not install_methods:
-            install_methods = [DownloadAndBuildDiamond(URL, os.path.join(DIAMOND_DIR, 'bin', 'diamond'))]
+            install_methods = [
+                tools.CondaPackage("diamond", version=CONDA_VERSION),
+                DownloadAndBuildDiamond(URL, os.path.join(DIAMOND_DIR, 'bin', 'diamond'))]
         super().__init__(install_methods=install_methods)
 
     def version(self):
@@ -46,7 +50,7 @@ class Diamond(tools.Tool):
             options['--in'] = input_fasta
             options['--db'] = db
 
-            return self.execute('makedb', options=options, option_string=option_string)
+            self.execute('makedb', options=options, option_string=option_string)
 
     def blastx(self, db, query_files, diamond_alignment, options=None, option_string=None):
         '''Perform a blastx-like search from query file to database.
@@ -58,12 +62,12 @@ class Diamond(tools.Tool):
         '''
         assert diamond_alignment.endswith('.daa'), 'Output must end in .daa'
         options = options or {}
-        temp_file = util.file.temp_catted_files(query_files, prefix='diamond_', suffix='.fasta')
+        temp_file = util.file.temp_catted_files(query_files, prefix='diamond_', suffix='.fastq')
         with temp_file as query:
             options['--db'] = db
             options['--query'] = query
             options['--daa'] = diamond_alignment
-            return self.execute('blastx', options=options, option_string=option_string)
+            self.execute('blastx', options=options, option_string=option_string)
 
     def view(self, diamond_alignment, output_file, output_format='tab', options=None, option_string=None):
         '''Perform translation between diamond output and blast tab/sam output.
@@ -74,7 +78,7 @@ class Diamond(tools.Tool):
         options['--out'] = output_file
         options['--daa'] = diamond_alignment
         options['--outfmt'] = output_format
-        return self.execute('view', options=options, option_string=option_string)
+        self.execute('view', options=options, option_string=option_string)
 
     def execute(self, command, options=None, option_string=None, return_stdout=False):
         '''Run a diamond command
@@ -95,7 +99,7 @@ class Diamond(tools.Tool):
         if option_string:
             cmd.extend(shlex.split(option_string))
         log.debug("Calling {}: {}".format(command, " ".join(cmd)))
-        return util.misc.run(cmd)
+        util.misc.run_and_print(cmd, check=True, loglevel=logging.ERROR)
 
 
 class DownloadAndBuildDiamond(tools.DownloadPackage):
@@ -116,4 +120,4 @@ class DownloadAndBuildDiamond(tools.DownloadPackage):
             env['CC'] = 'gcc-4.9'
             env['CXX'] = 'g++-4.9'
         #util.misc.run_and_print(['cmake', '..'], env=env, cwd=build_dir)
-        util.misc.run_and_print(['make'], env=env, cwd=build_dir)
+        util.misc.run_and_print(['make'], env=env, cwd=build_dir, check=True)

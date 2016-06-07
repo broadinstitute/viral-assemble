@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-''' Reports
+''' Functions to create reports from genomics pipeline data.
 '''
 
 __author__ = "dpark@broadinstitute.org"
@@ -62,9 +62,9 @@ def get_assembly_stats(sample,
             out['reads_' + adj] = samtools.count(reads_bam)
     if os.path.isdir(raw_reads_dir):
         out['reads_raw'] = sum(samtools.count(bam)
-            # correct issue where sample names containing other sample names as substrings leads 
+            # correct issue where sample names containing other sample names as substrings leads
             # to extra files being included in the count
-            # 
+            #
             # add a dot before the wildcard, and assume the sample name is found before the dot.
             # this works for now since dots are the filename field separators
             # and leading/trailing dots are stripped from sample names in util.file.string_to_file_name()
@@ -166,6 +166,9 @@ __commands__.append(('assembly_stats', parser_assembly_stats))
 
 
 def alignment_summary(inFastaFileOne, inFastaFileTwo, outfileName=None, printCounts=False):
+    """ Write or print pairwise alignment summary information for sequences in two FASTA
+        files, including SNPs, ambiguous bases, and indels.
+    """
     gap = '-'
     ambiguous = 'N'
     aligner = tools.muscle.MuscleTool()
@@ -233,14 +236,14 @@ def alignment_summary(inFastaFileOne, inFastaFileTwo, outfileName=None, printCou
 
         if printCounts:
             print("Counts for this segment/chromosome:")
-            print("same_unambig ", same_unambig) 
-            print("snp_unambig  ", snp_unambig) 
-            print("indel_unambig", indel_unambig) 
-            print("indel_ambig  ", indel_ambig) 
-            print("ambig_one    ", ambig_one) 
-            print("ambig_two    ", ambig_two) 
-            print("ambig_both   ", ambig_both) 
-            print("unambig_both ", unambig_both) 
+            print("same_unambig ", same_unambig)
+            print("snp_unambig  ", snp_unambig)
+            print("indel_unambig", indel_unambig)
+            print("indel_ambig  ", indel_ambig)
+            print("ambig_one    ", ambig_one)
+            print("ambig_two    ", ambig_two)
+            print("ambig_both   ", ambig_both)
+            print("unambig_both ", unambig_both)
 
         results["same_unambig"]  += same_unambig
         results["snp_unambig"]   += snp_unambig

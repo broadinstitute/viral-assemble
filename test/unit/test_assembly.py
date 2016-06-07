@@ -112,7 +112,7 @@ class TestOrderAndOrient(TestCaseWithTmp):
         self.assertEqual(
             str(Bio.SeqIO.read(outFasta, 'fasta').seq),
             str(Bio.SeqIO.read(expected, 'fasta').seq))
-        
+
     @unittest.skip('promer alignments not implemented for custom scaffolding step')
     def test_lassa_protein(self):
         inDir = util.file.get_test_input_path(self)
@@ -125,7 +125,7 @@ class TestOrderAndOrient(TestCaseWithTmp):
             aligner='promer')
         self.assertEqualContents(outFasta, expected)
         os.unlink(outFasta)
-    
+
     def test_multi_overlap(self):
         inDir = util.file.get_test_input_path(self)
         outFasta = util.file.mkstempfname('.fasta')
@@ -137,7 +137,7 @@ class TestOrderAndOrient(TestCaseWithTmp):
         self.assertEqual(
             str(Bio.SeqIO.read(outFasta, 'fasta').seq),
             str(Bio.SeqIO.read(expected, 'fasta').seq))
-        
+
 
 class TestImputeFromReference(TestCaseWithTmp):
     ''' Test the impute_from_reference command (align and modify_contig) '''
@@ -236,7 +236,7 @@ class TestRefineAssembly(TestCaseWithTmp):
         imputeFasta = util.file.mkstempfname('.imputed.fasta')
         refine1Fasta = util.file.mkstempfname('.refine1.fasta')
         shutil.copy(inFasta, imputeFasta)
-        tools.picard.CreateSequenceDictionaryTool().execute(imputeFasta)
+        tools.picard.CreateSequenceDictionaryTool().execute(imputeFasta, overwrite=True)
         tools.novoalign.NovoalignTool().index_fasta(imputeFasta)
         assembly.refine_assembly(
             imputeFasta,
@@ -256,7 +256,7 @@ class TestRefineAssembly(TestCaseWithTmp):
         refine1Fasta = util.file.mkstempfname('.refine1.fasta')
         refine2Fasta = util.file.mkstempfname('.refine2.fasta')
         shutil.copy(inFasta, refine1Fasta)
-        tools.picard.CreateSequenceDictionaryTool().execute(refine1Fasta)
+        tools.picard.CreateSequenceDictionaryTool().execute(refine1Fasta, overwrite=True)
         tools.novoalign.NovoalignTool().index_fasta(refine1Fasta)
         assembly.refine_assembly(
             refine1Fasta,
@@ -510,7 +510,7 @@ class TestContigChooser(unittest.TestCase):
         for test_seq in ('A', '', 'GACTGATG', 'non-biological :characters!'):
             actual = tools.mummer.contig_chooser([test_seq], 90)
             self.assertEqual(actual, test_seq)
-    
+
     def test_most_popular_seq(self):
         alt_seqs = ['AA', 'aa', 'GGA', 'T', 'GGA']
         expected = 'GGA'
@@ -528,7 +528,7 @@ class TestContigChooser(unittest.TestCase):
         self.assertEqual(actual, 'GGA')
         actual = tools.mummer.contig_chooser(alt_seqs, 1)
         self.assertEqual(actual, 'GGA')
-    
+
     def test_same_as_ref_len(self):
         alt_seqs = ['AA', 'GGA', 'aa', 'GGA', 'T', 'GGC', 'aa']
         actual = tools.mummer.contig_chooser(alt_seqs, 1)

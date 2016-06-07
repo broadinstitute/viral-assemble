@@ -3,6 +3,7 @@
 on membership or non-membership in a species / genus / taxonomic grouping.
 '''
 
+from __future__ import print_function
 __author__ = "dpark@broadinstitute.org, irwin@broadinstitute.org," \
     + "hlevitin@broadinstitute.org"
 __commands__ = []
@@ -11,9 +12,14 @@ import argparse
 import logging
 import subprocess
 import os
+import math
 import tempfile
 import shutil
+import functools
+
 from Bio import SeqIO
+import concurrent.futures
+
 import util.cmd
 import util.file
 import util.misc
@@ -67,6 +73,7 @@ def parser_deplete_human(parser=argparse.ArgumentParser()):
         help='One reference database for last (required if --taxfiltBam is specified).',
         default=None
     )
+    parser.add_argument('--threads', type=int, default=4, help='The number of threads to use in running blastn.')
     parser.add_argument(
         '--JVMmemory',
         default=tools.picard.FilterSamReadsTool.jvmMemDefault,
@@ -90,10 +97,11 @@ def main_deplete_human(args):
         args.bmtaggerDbs,
         deplete_bmtagger_bam,
         args.bmtaggerBam,
+        threads=args.threads,
         JVMmemory=args.JVMmemory
     )
     read_utils.rmdup_mvicuna_bam(args.bmtaggerBam, args.rmdupBam, JVMmemory=args.JVMmemory)
-    multi_db_deplete_bam(args.rmdupBam, args.blastDbs, deplete_blastn_bam, args.blastnBam, JVMmemory=args.JVMmemory)
+    multi_db_deplete_bam(args.rmdupBam, args.blastDbs, deplete_blastn_bam, args.blastnBam, threads=args.threads, JVMmemory=args.JVMmemory)
     if args.taxfiltBam and args.lastDb:
         filter_lastal_bam(args.blastnBam, args.lastDb, args.taxfiltBam, JVMmemory=args.JVMmemory)
     return 0
@@ -134,7 +142,7 @@ def trimmomatic(inFastq1, inFastq2, pairedOutFastq1, pairedOutFastq2, clipFasta)
     )
 
     log.debug(' '.join(javaCmd))
-    util.misc.run_and_print(javaCmd)
+    util.misc.run_and_print(javaCmd, check=True)
     os.unlink(tmpUnpaired1)
     os.unlink(tmpUnpaired2)
 
@@ -156,6 +164,78 @@ __commands__.append(('trim_trimmomatic', parser_trim_trimmomatic))
 # ***  filter_lastal  ***
 # =======================
 
+def lastal_chunked_fastq(
+    inFastq, 
+    db, 
+    outFastq, 
+    max_gapless_alignments_per_position=1,
+    min_length_for_initial_matches=5,
+    max_length_for_initial_matches=50,
+    max_initial_matches_per_position=100,
+    chunk_size=100000
+    ):
+
+    lastal_path = tools.last.Lastal().install_and_get_path()
+    mafsort_path = tools.last.MafSort().install_and_get_path()
+    mafconvert_path = tools.last.MafConvert().install_and_get_path()
+    no_blast_like_hits_path = os.path.join(util.file.get_scripts_path(), 'noBlastLikeHits.py')
+
+    filtered_fastq_files = []
+    with open(inFastq, "rt") as fastqFile:
+        record_iter = SeqIO.parse(fastqFile, "fastq")
+        for batch in util.misc.batch_iterator(record_iter, chunk_size):
+
+            chunk_fastq = mkstempfname('.fastq')
+            with open(chunk_fastq, "wt") as handle:
+                SeqIO.write(batch, handle, "fastq")
+            batch = None
+
+            lastal_out = mkstempfname('.lastal')
+            with open(lastal_out, 'wt') as outf:
+                cmd = [lastal_path, '-Q1']
+                cmd.extend(
+                    [
+                        '-n', max_gapless_alignments_per_position, '-l', min_length_for_initial_matches, '-L',
+                        max_length_for_initial_matches, '-m', max_initial_matches_per_position
+                    ]
+                )
+                cmd = [str(x) for x in cmd]
+                cmd.extend([db, chunk_fastq])
+                log.debug(' '.join(cmd) + ' > ' + lastal_out)
+                util.misc.run_and_save(cmd, outf=outf)
+            # everything below this point in this method should be replaced with
+            # our own code that just reads lastal output and makes a list of read names
+
+            mafsort_out = mkstempfname('.mafsort')
+            with open(mafsort_out, 'wt') as outf:
+                with open(lastal_out, 'rt') as inf:
+                    cmd = [mafsort_path, '-n2']
+                    log.debug('cat ' + lastal_out + ' | ' + ' '.join(cmd) + ' > ' + mafsort_out)
+                    subprocess.check_call(cmd, stdin=inf, stdout=outf)
+            os.unlink(lastal_out)
+
+            mafconvert_out = mkstempfname('.mafconvert')
+            with open(mafconvert_out, 'wt') as outf:
+                cmd = [mafconvert_path, 'tab', mafsort_out]
+                log.debug(' '.join(cmd) + ' > ' + mafconvert_out)
+                subprocess.check_call(cmd, stdout=outf)
+            os.unlink(mafsort_out)
+
+            filtered_fastq_chunk = mkstempfname('.filtered.fastq')
+            with open(filtered_fastq_chunk, 'wt') as outf:
+                cmd = [no_blast_like_hits_path, '-b', mafconvert_out, '-r', chunk_fastq, '-m', 'hit']
+                log.debug(' '.join(cmd) + ' > ' + filtered_fastq_chunk)
+                subprocess.check_call(cmd, stdout=outf)
+                filtered_fastq_files.append(filtered_fastq_chunk)
+            os.unlink(mafconvert_out)
+
+    # concatenate filtered fastq files to outFastq
+    util.file.concat(filtered_fastq_files, outFastq)
+
+    # remove temp fastq files
+    for tempfastq in filtered_fastq_files:
+        os.unlink(tempfastq)
+
 
 def lastal_get_hits(
     inFastq,
@@ -166,46 +246,16 @@ def lastal_get_hits(
     max_length_for_initial_matches=50,
     max_initial_matches_per_position=100
 ):
-    lastalPath = tools.last.Lastal().install_and_get_path()
-    mafSortPath = tools.last.MafSort().install_and_get_path()
-    mafConvertPath = tools.last.MafConvert().install_and_get_path()
-    noBlastLikeHitsPath = os.path.join(util.file.get_scripts_path(), 'noBlastLikeHits.py')
-
-    lastalOut = mkstempfname('.lastal')
-    with open(lastalOut, 'wt') as outf:
-        cmd = [lastalPath, '-Q1', db, inFastq]
-        cmd.extend(
-            [
-                '-n', max_gapless_alignments_per_position, '-l', min_length_for_initial_matches, '-L',
-                max_length_for_initial_matches, '-m', max_initial_matches_per_position
-            ]
-        )
-        log.debug(' '.join(map(str,cmd)) + ' > ' + lastalOut)
-        util.misc.run_and_save(map(str, cmd), outf=outf)
-    # everything below this point in this method should be replaced with
-    # our own code that just reads lastal output and makes a list of read names
-
-    mafSortOut = mkstempfname('.mafsort')
-    with open(mafSortOut, 'wt') as outf:
-        with open(lastalOut, 'rt') as inf:
-            cmd = [mafSortPath, '-n2']
-            log.debug('cat ' + lastalOut + ' | ' + ' '.join(cmd) + ' > ' + mafSortOut)
-            subprocess.check_call(cmd, stdin=inf, stdout=outf)
-    os.unlink(lastalOut)
-
-    mafConvertOut = mkstempfname('.mafconvert')
-    with open(mafConvertOut, 'wt') as outf:
-        cmd = [mafConvertPath, 'tab', mafSortOut]
-        log.debug(' '.join(cmd) + ' > ' + mafConvertOut)
-        subprocess.check_call(cmd, stdout=outf)
-    os.unlink(mafSortOut)
-
     filteredFastq = mkstempfname('.filtered.fastq')
-    with open(filteredFastq, 'wt') as outf:
-        cmd = [noBlastLikeHitsPath, '-b', mafConvertOut, '-r', inFastq, '-m', 'hit']
-        log.debug(' '.join(cmd) + ' > ' + filteredFastq)
-        subprocess.check_call(cmd, stdout=outf)
-    os.unlink(mafConvertOut)
+    lastal_chunked_fastq(
+        inFastq, 
+        db, 
+        filteredFastq,
+        max_gapless_alignments_per_position=max_gapless_alignments_per_position, 
+        min_length_for_initial_matches=min_length_for_initial_matches, 
+        max_length_for_initial_matches=max_length_for_initial_matches, 
+        max_initial_matches_per_position=max_initial_matches_per_position
+    )
 
     with open(outList, 'wt') as outf:
         with open(filteredFastq, 'rt') as inf:
@@ -217,6 +267,8 @@ def lastal_get_hits(
                         seq_id = seq_id[:-2]
                     outf.write(seq_id + '\n')
                 line_num += 1
+
+    os.unlink(filteredFastq)
 
 
 def parser_lastal_generic(parser=argparse.ArgumentParser()):
@@ -256,10 +308,10 @@ def filter_lastal_bam(
     inBam,
     db,
     outBam,
-    max_gapless_alignments_per_position,
-    min_length_for_initial_matches,
-    max_length_for_initial_matches,
-    max_initial_matches_per_position,
+    max_gapless_alignments_per_position=1,
+    min_length_for_initial_matches=5,
+    max_length_for_initial_matches=50,
+    max_initial_matches_per_position=100,
     JVMmemory=None
 ):
     ''' Restrict input reads to those that align to the given
@@ -324,56 +376,36 @@ def filter_lastal(
     max_initial_matches_per_position=100
 ):
     ''' Restrict input reads to those that align to the given
-        reference database using LASTAL.  Also, remove duplicates with prinseq.
+        reference database using LASTAL. Also, remove duplicates with prinseq.
     '''
     assert outFastq.endswith('.fastq')
-    tempFilePath = mkstempfname('.hits')
-    lastalPath = tools.last.Lastal().install_and_get_path()
-    mafSortPath = tools.last.MafSort().install_and_get_path()
-    mafConvertPath = tools.last.MafConvert().install_and_get_path()
-    prinseqPath = tools.prinseq.PrinseqTool().install_and_get_path()
-    noBlastLikeHitsPath = os.path.join(util.file.get_scripts_path(), 'noBlastLikeHits.py')
 
-    lastalCmd = ' '.join(
-        [
-            '{lastalPath} -Q1 -n {max_gapless_alignments_per_position} -l {min_length_for_initial_matches} -L {max_length_for_initial_matches} -m {max_initial_matches_per_position} {refDb} {inFastq}'.format(
-                lastalPath=lastalPath,
-                refDb=refDb,
-                inFastq=inFastq,
-                max_gapless_alignments_per_position=max_gapless_alignments_per_position,
-                min_length_for_initial_matches=min_length_for_initial_matches,
-                max_length_for_initial_matches=max_length_for_initial_matches,
-                max_initial_matches_per_position=max_initial_matches_per_position
-            ),
-            '| {mafSortPath} -n2'.format(mafSortPath=mafSortPath),
-            '| python {mafConvertPath} tab /dev/stdin > {tempFilePath}'.format(mafConvertPath=mafConvertPath,
-                                                                               tempFilePath=tempFilePath),
-        ]
+    filtered_fastq = mkstempfname('.filtered.fastq')
+    lastal_chunked_fastq(
+        inFastq, 
+        refDb, 
+        filtered_fastq,
+        max_gapless_alignments_per_position=max_gapless_alignments_per_position, 
+        min_length_for_initial_matches=min_length_for_initial_matches, 
+        max_length_for_initial_matches=max_length_for_initial_matches, 
+        max_initial_matches_per_position=max_initial_matches_per_position
     )
-    log.debug(lastalCmd)
-    assert not os.system(lastalCmd)
-
-    # filter inFastq against lastal hits
-    filteredFastq = mkstempfname('.filtered.fastq')
-    with open(filteredFastq, 'wt') as outf:
-        noBlastLikeHitsCmd = [noBlastLikeHitsPath, '-b', tempFilePath, '-r', inFastq, '-m', 'hit']
-        log.debug(' '.join(noBlastLikeHitsCmd) + ' > ' + filteredFastq)
-        subprocess.check_call(noBlastLikeHitsCmd, stdout=outf)
 
     # remove duplicate reads and reads with multiple Ns
-    if os.path.getsize(filteredFastq) == 0:
+    if os.path.getsize(filtered_fastq) == 0:
         # prinseq-lite fails on empty file input (which can happen in real life
         # if no reads match the refDb) so handle this scenario specially
         log.info("output is empty: no reads in input match refDb")
-        shutil.copyfile(filteredFastq, outFastq)
+        shutil.copyfile(filtered_fastq, outFastq)
     else:
+        prinseqPath = tools.prinseq.PrinseqTool().install_and_get_path()
         prinseqCmd = [
-            'perl', prinseqPath, '-ns_max_n', '1', '-derep', '1', '-fastq', filteredFastq, '-out_bad', 'null',
+            'perl', prinseqPath, '-ns_max_n', '1', '-derep', '1', '-fastq', filtered_fastq, '-out_bad', 'null',
             '-line_width', '0', '-out_good', outFastq[:-6]
         ]
         log.debug(' '.join(prinseqCmd))
-        util.misc.run_and_print(prinseqCmd)
-    os.unlink(filteredFastq)
+        util.misc.run_and_print(prinseqCmd, check=True)
+    os.unlink(filtered_fastq)
 
 
 def parser_filter_lastal(parser=argparse.ArgumentParser()):
@@ -393,7 +425,7 @@ __commands__.append(('filter_lastal', parser_filter_lastal))
 # ============================
 
 
-def deplete_bmtagger_bam(inBam, db, outBam, JVMmemory=None):
+def deplete_bmtagger_bam(inBam, db, outBam, threads=None, JVMmemory=None):
     """
     Use bmtagger to partition the input reads into ones that match at least one
         of the databases and ones that don't match any of the databases.
@@ -420,14 +452,21 @@ def deplete_bmtagger_bam(inBam, db, outBam, JVMmemory=None):
     inReads2 = mkstempfname('.2.fastq')
     tools.picard.SamToFastqTool().execute(inBam, inReads1, inReads2)
 
+    bmtaggerConf = mkstempfname('.bmtagger.conf')
+    with open(bmtaggerConf, 'w') as f:
+        # Default srprismopts: "-b 100000000 -n 5 -R 0 -r 1 -M 7168"
+        print(
+            'srprismopts="-b 100000000 -n 5 -R 0 -r 1 -M 7168 --paired false"',
+            file=f)
     tempDir = tempfile.mkdtemp()
     matchesFile = mkstempfname('.txt')
     cmdline = [
-        bmtaggerPath, '-b', db + '.bitmask', '-x', db + '.srprism', '-T', tempDir, '-q1', '-1', inReads1, '-2',
-        inReads2, '-o', matchesFile
+        bmtaggerPath, '-b', db + '.bitmask', '-C', bmtaggerConf,
+        '-x', db + '.srprism', '-T', tempDir, '-q1', '-1', inReads1,
+        '-2', inReads2, '-o', matchesFile
     ]
     log.debug(' '.join(cmdline))
-    util.misc.run_and_print(cmdline)
+    util.misc.run_and_print(cmdline, check=True)
 
     tools.picard.FilterSamReadsTool().execute(inBam, True, matchesFile, outBam, JVMmemory=JVMmemory)
     os.unlink(matchesFile)
@@ -494,7 +533,7 @@ def partition_bmtagger(inFastq1, inFastq2, databases, outMatch=None, outNoMatch=
             curReads2, '-o', matchesFile
         ]
         log.debug(' '.join(cmdline))
-        util.misc.run_and_print(cmdline)
+        util.misc.run_and_print(cmdline, check=True)
         prevReads1, prevReads2 = curReads1, curReads2
         if count < len(databases) - 1:
             curReads1, curReads2 = mkstempfname(), mkstempfname()
@@ -561,7 +600,7 @@ def deplete_bmtagger(inFastq1, inFastq2, databases, outFastq1, outFastq2):
             '-2', curReads2, '-o', outprefix
         ]
         log.debug(' '.join(cmdline))
-        util.misc.run_and_print(cmdline)
+        util.misc.run_and_print(cmdline, check=True)
         curReads1, curReads2 = [outprefix + suffix for suffix in ('_1.fastq', '_2.fastq')]
         tempfiles += [curReads1, curReads2]
     shutil.copyfile(curReads1, outFastq1)
@@ -626,6 +665,7 @@ def parser_deplete_bam_bmtagger(parser=argparse.ArgumentParser()):
                 and db.srprism.idx, db.srprism.map, etc. by srprism mkindex.'''
     )
     parser.add_argument('outBam', help='Output BAM file.')
+    parser.add_argument('--threads', type=int, default=4, help='The number of threads to use in running blastn.')
     parser.add_argument(
         '--JVMmemory',
         default=tools.picard.FilterSamReadsTool.jvmMemDefault,
@@ -638,17 +678,17 @@ def parser_deplete_bam_bmtagger(parser=argparse.ArgumentParser()):
 
 def main_deplete_bam_bmtagger(args):
     '''Use bmtagger to deplete input reads against several databases.'''
-    multi_db_deplete_bam(args.inBam, args.refDbs, deplete_bmtagger_bam, args.outBam, JVMmemory=args.JVMmemory)
+    multi_db_deplete_bam(args.inBam, args.refDbs, deplete_bmtagger_bam, args.outBam, threads=args.threads, JVMmemory=args.JVMmemory)
 
 
 __commands__.append(('deplete_bam_bmtagger', parser_deplete_bam_bmtagger))
 
 
-def multi_db_deplete_bam(inBam, refDbs, deplete_method, outBam, JVMmemory=None):
+def multi_db_deplete_bam(inBam, refDbs, deplete_method, outBam, threads=1, JVMmemory=None):
     tmpBamIn = inBam
     for db in refDbs:
         tmpBamOut = mkstempfname('.bam')
-        deplete_method(tmpBamIn, db, tmpBamOut, JVMmemory=JVMmemory)
+        deplete_method(tmpBamIn, db, tmpBamOut, threads=threads, JVMmemory=JVMmemory)
         if tmpBamIn != inBam:
             os.unlink(tmpBamIn)
         tmpBamIn = tmpBamOut
@@ -658,35 +698,93 @@ def multi_db_deplete_bam(inBam, refDbs, deplete_method, outBam, JVMmemory=None):
 # ***  deplete_blastn  ***
 # ========================
 
+def run_blastn(blastn_path, db, input_fasta, blast_threads=1):
+        """ run blastn on the input fasta file. this is intended to be run in parallel """
+        chunk_hits = mkstempfname('.hits.txt')
+        blastnCmd = [
+            blastn_path, '-db', db, '-word_size', '16', '-num_threads', str(blast_threads), '-evalue', '1e-6', '-outfmt', '6', '-max_target_seqs', '2',
+            '-query', input_fasta, '-out', chunk_hits
+        ]
+        log.debug(' '.join(blastnCmd))
+        util.misc.run_and_print(blastnCmd, check=True)
 
-def blastn_chunked_fasta(fasta, db, chunkSize=1000000):
+        os.unlink(input_fasta)
+        return chunk_hits
+
+def blastn_chunked_fasta(fasta, db, chunkSize=1000000, threads=1):
     """
     Helper function: blastn a fasta file, overcoming apparent memory leaks on
     an input with many query sequences, by splitting it into multiple chunks
     and running a new blastn process on each chunk. Return a list of output
     filenames containing hits
     """
+    # the lower bound of how small a fasta chunk can be.
+    # too small and the overhead of spawning a new blast process
+    # will be detrimental relative to actual computation time
+    MIN_CHUNK_SIZE = 20000
+
+    # get the blastn path here so we don't run conda install checks multiple times
     blastnPath = tools.blast.BlastnTool().install_and_get_path()
 
-    hits_files = []
+    # clamp threadcount to number of CPUs minus one
+    threads = min(util.misc.available_cpu_count()-1, threads)
+
+    # determine size of input data; records in fasta file
+    number_of_reads = util.file.fasta_length(fasta)
+    log.debug("number of reads in fasta file %s" % number_of_reads)
+
+    # divide (max, single-thread) chunksize by thread count
+    # to find the  absolute max chunk size per thread
+    chunk_max_size_per_thread = chunkSize // threads
+    
+    # find the chunk size if evenly divided among blast threads
+    reads_per_thread = number_of_reads // threads
+
+    # use the smaller of the two chunk sizes so we can run more copies of blast in parallel
+    chunkSize = min(reads_per_thread, chunk_max_size_per_thread)
+
+    # if the chunk size is too small, impose a sensible size
+    chunkSize = max(chunkSize, MIN_CHUNK_SIZE)
+
+    log.debug("chunk_max_size_per_thread %s" % chunk_max_size_per_thread)
+
+    # adjust chunk size so we don't have a small fraction 
+    # of a chunk running in its own blast process
+    # if the size of the last chunk is <80% the size of the others, 
+    # decrease the chunk size until the last chunk is 80%
+    # this is bounded by the MIN_CHUNK_SIZE
+    while (number_of_reads / chunkSize) % 1 < 0.8 and chunkSize > MIN_CHUNK_SIZE:
+        chunkSize = chunkSize-1
+
+    log.debug("blastn chunk size %s" % chunkSize)
+    log.debug("number of chunks to create %s" % (number_of_reads / chunkSize))
+    log.debug("blastn parallel instances %s" % threads)
+
+    # chunk the input file. This is a sequential operation
+    input_fastas = []
     with open(fasta, "rt") as fastaFile:
         record_iter = SeqIO.parse(fastaFile, "fasta")
         for batch in util.misc.batch_iterator(record_iter, chunkSize):
             chunk_fasta = mkstempfname('.fasta')
+            
             with open(chunk_fasta, "wt") as handle:
                 SeqIO.write(batch, handle, "fasta")
             batch = None
+            input_fastas.append(chunk_fasta)
 
-            chunk_hits = mkstempfname('.hits.txt')
-            blastnCmd = [
-                blastnPath, '-db', db, '-word_size', '16', '-evalue', '1e-6', '-outfmt', '6', '-max_target_seqs', '2',
-                '-query', chunk_fasta, '-out', chunk_hits
-            ]
-            log.debug(' '.join(blastnCmd))
-            util.misc.run_and_print(blastnCmd)
+    log.debug("number of chunk files to be processed by blastn %s" % len(input_fastas))
 
-            os.unlink(chunk_fasta)
-            hits_files.append(chunk_hits)
+    hits_files = []
+    # run blastn on each of the fasta input chunks
+    with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+        # if we have so few chunks that there are cpus left over, 
+        # divide extra cpus evenly among chunks where possible
+        # rounding to 1 if there are more chunks than extra threads
+        cpus_leftover = (threads - len(input_fastas))
+        blast_threads = max(1, int(cpus_leftover/len(input_fastas)) )
+
+        futs = [executor.submit(functools.partial(run_blastn, blastnPath, db, input_fasta, blast_threads)) for input_fasta in input_fastas]
+        hits_files = [fut.result() for fut in concurrent.futures.as_completed(futs)]
 
     return hits_files
 
@@ -723,7 +821,7 @@ def no_blast_hits(blastOutCombined, inFastq, outFastq):
                     outf.write(line1 + line2 + line3 + line4)
 
 
-def deplete_blastn(inFastq, outFastq, refDbs):
+def deplete_blastn(inFastq, outFastq, refDbs, threads=1, chunkSize=1000000):
     'Use blastn to remove reads that match at least one of the databases.'
 
     # Convert to fasta
@@ -734,7 +832,7 @@ def deplete_blastn(inFastq, outFastq, refDbs):
     blastOutFiles = []
     for db in refDbs:
         log.info("running blastn on %s against %s", inFastq, db)
-        blastOutFiles += blastn_chunked_fasta(inFasta, db)
+        blastOutFiles += blastn_chunked_fasta(inFasta, db, chunkSize, threads)
 
     # Combine results from different databases
     blastOutCombined = mkstempfname('.txt')
@@ -751,6 +849,7 @@ def parser_deplete_blastn(parser=argparse.ArgumentParser()):
     parser.add_argument('inFastq', help='Input fastq file.')
     parser.add_argument('outFastq', help='Output fastq file with matching reads removed.')
     parser.add_argument('refDbs', nargs='+', help='One or more reference databases for blast.')
+    parser.add_argument('--threads', type=int, default=4, help='The number of threads to use in running blastn.')
     util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, deplete_blastn, split_args=True)
     return parser
@@ -759,7 +858,7 @@ def parser_deplete_blastn(parser=argparse.ArgumentParser()):
 __commands__.append(('deplete_blastn', parser_deplete_blastn))
 
 
-def deplete_blastn_paired(infq1, infq2, outfq1, outfq2, refDbs):
+def deplete_blastn_paired(infq1, infq2, outfq1, outfq2, refDbs, threads):
     'Use blastn to remove reads that match at least one of the databases.'
     tmpfq1_a = mkstempfname('.fastq')
     tmpfq1_b = mkstempfname('.fastq')
@@ -771,7 +870,7 @@ def deplete_blastn_paired(infq1, infq2, outfq1, outfq2, refDbs):
     # (this should significantly speed up the second run of deplete_blastn)
     read_utils.purge_unmated(tmpfq1_a, infq2, tmpfq1_b, tmpfq2_b)
     # deplete fq2
-    deplete_blastn(tmpfq2_b, tmpfq2_c, refDbs)
+    deplete_blastn(tmpfq2_b, tmpfq2_c, refDbs, threads)
     # purge fq1 of read pairs lost in fq2
     read_utils.purge_unmated(tmpfq1_b, tmpfq2_c, outfq1, outfq2)
 
@@ -782,6 +881,7 @@ def parser_deplete_blastn_paired(parser=argparse.ArgumentParser()):
     parser.add_argument('outfq1', help='Output fastq file with matching reads removed.')
     parser.add_argument('outfq2', help='Output fastq file with matching reads removed.')
     parser.add_argument('refDbs', nargs='+', help='One or more reference databases for blast.')
+    parser.add_argument('--threads', type=int, default=4, help='The number of threads to use in running blastn.')
     util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, deplete_blastn_paired, split_args=True)
     return parser
@@ -790,7 +890,7 @@ def parser_deplete_blastn_paired(parser=argparse.ArgumentParser()):
 __commands__.append(('deplete_blastn_paired', parser_deplete_blastn_paired))
 
 
-def deplete_blastn_bam(inBam, db, outBam, chunkSize=1000000, JVMmemory=None):
+def deplete_blastn_bam(inBam, db, outBam, threads, chunkSize=1000000, JVMmemory=None):
     'Use blastn to remove reads that match at least one of the databases.'
 
     #blastnPath = tools.blast.BlastnTool().install_and_get_path()
@@ -809,7 +909,7 @@ def deplete_blastn_bam(inBam, db, outBam, chunkSize=1000000, JVMmemory=None):
     os.unlink(fastq1)
     os.unlink(fastq2)
     log.info("running blastn on %s pair 1 against %s", inBam, db)
-    blastOutFiles = blastn_chunked_fasta(fasta, db, chunkSize)
+    blastOutFiles = blastn_chunked_fasta(fasta, db, chunkSize, threads)
     with open(blast_hits, 'wt') as outf:
         for blastOutFile in blastOutFiles:
             with open(blastOutFile, 'rt') as inf:
@@ -831,7 +931,7 @@ def deplete_blastn_bam(inBam, db, outBam, chunkSize=1000000, JVMmemory=None):
     os.unlink(fastq1)
     os.unlink(fastq2)
     log.info("running blastn on %s pair 2 against %s", inBam, db)
-    blastOutFiles = blastn_chunked_fasta(fasta, db, chunkSize)
+    blastOutFiles = blastn_chunked_fasta(fasta, db, chunkSize, threads)
     with open(blast_hits, 'wt') as outf:
         for blastOutFile in blastOutFiles:
             with open(blastOutFile, 'rt') as inf:
@@ -854,6 +954,7 @@ def parser_deplete_blastn_bam(parser=argparse.ArgumentParser()):
     parser.add_argument('inBam', help='Input BAM file.')
     parser.add_argument('refDbs', nargs='+', help='One or more reference databases for blast.')
     parser.add_argument('outBam', help='Output BAM file with matching reads removed.')
+    parser.add_argument('--threads', type=int, default=4, help='The number of threads to use in running blastn.')
     parser.add_argument("--chunkSize", type=int, default=1000000, help='FASTA chunk size (default: %(default)s)')
     parser.add_argument(
         '--JVMmemory',
@@ -868,10 +969,10 @@ def parser_deplete_blastn_bam(parser=argparse.ArgumentParser()):
 def main_deplete_blastn_bam(args):
     '''Use blastn to remove reads that match at least one of the specified databases.'''
 
-    def wrapper(inBam, db, outBam, JVMmemory=None):
-        return deplete_blastn_bam(inBam, db, outBam, chunkSize=args.chunkSize, JVMmemory=JVMmemory)
+    def wrapper(inBam, db, outBam, threads, JVMmemory=None):
+        return deplete_blastn_bam(inBam, db, outBam, threads=threads, chunkSize=args.chunkSize, JVMmemory=JVMmemory)
 
-    multi_db_deplete_bam(args.inBam, args.refDbs, wrapper, args.outBam, JVMmemory=args.JVMmemory)
+    multi_db_deplete_bam(args.inBam, args.refDbs, wrapper, args.outBam, threads=args.threads, JVMmemory=args.JVMmemory)
     return 0
 
 
@@ -883,7 +984,7 @@ __commands__.append(('deplete_blastn_bam', parser_deplete_blastn_bam))
 
 
 def lastal_build_db(inputFasta, outputDirectory, outputFilePrefix):
-
+    ''' build a database for use with last based on an input fasta file '''
     if outputFilePrefix:
         outPrefix = outputFilePrefix
     else:
@@ -891,7 +992,7 @@ def lastal_build_db(inputFasta, outputDirectory, outputFilePrefix):
         fileNameSansExtension = os.path.splitext(baseName)[0]
         outPrefix = fileNameSansExtension
 
-    tools.last.Lastdb().execute(inputFasta=inputFasta, outputDirectory=outputDirectory, outputFilePrefix=outPrefix)
+    tools.last.Lastdb().build_database(inputFasta, os.path.join(outputDirectory, outPrefix))
 
 
 def parser_lastal_build_db(parser=argparse.ArgumentParser()):
@@ -907,6 +1008,73 @@ def parser_lastal_build_db(parser=argparse.ArgumentParser()):
 
 
 __commands__.append(('lastal_build_db', parser_lastal_build_db))
+
+
+# ========================
+# ***  blastn_build_db  ***
+# ========================
+
+def blastn_build_db(inputFasta, outputDirectory, outputFilePrefix):
+    """ Create a database for use with blastn from an input reference FASTA file 
+    """
+
+    if outputFilePrefix:
+        outPrefix = outputFilePrefix
+    else:
+        baseName = os.path.basename(inputFasta)
+        fileNameSansExtension = os.path.splitext(baseName)[0]
+        outPrefix = fileNameSansExtension
+
+    blastdb_path = tools.blast.MakeblastdbTool().build_database(inputFasta, os.path.join(outputDirectory, outPrefix))
+
+
+def parser_blastn_build_db(parser=argparse.ArgumentParser()):
+    parser.add_argument('inputFasta', help='Location of the input FASTA file')
+    parser.add_argument('outputDirectory', help='Location for the output files')
+    parser.add_argument(
+        '--outputFilePrefix',
+        help='Prefix for the output file name (default: inputFasta name, sans ".fasta" extension)'
+    )
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, blastn_build_db, split_args=True)
+    return parser
+
+
+__commands__.append(('blastn_build_db', parser_blastn_build_db))
+
+
+# ========================
+# ***  bmtagger_build_db  ***
+# ========================
+
+def bmtagger_build_db(inputFasta, outputDirectory, outputFilePrefix):
+    """ Create a database for use with Bmtagger from an input FASTA file.
+    """
+    if outputFilePrefix:
+        outPrefix = outputFilePrefix
+    else:
+        baseName = os.path.basename(inputFasta)
+        fileNameSansExtension = os.path.splitext(baseName)[0]
+        outPrefix = fileNameSansExtension
+
+    bmtooldb_path = tools.bmtagger.BmtoolTool().build_database(inputFasta, os.path.join(outputDirectory, outPrefix+".bitmask"))
+    srprismdb_path = tools.bmtagger.SrprismTool().build_database(inputFasta, os.path.join(outputDirectory, outPrefix+".srprism"))
+
+def parser_bmtagger_build_db(parser=argparse.ArgumentParser()):
+    parser.add_argument('inputFasta', help='Location of the input FASTA file')
+    parser.add_argument('outputDirectory', help='Location for the output files (Where *.bitmask and *.srprism files will be stored)')
+    parser.add_argument(
+        '--outputFilePrefix',
+        help='Prefix for the output file name (default: inputFasta name, sans ".fasta" extension)'
+    )
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, bmtagger_build_db, split_args=True)
+    return parser
+
+
+__commands__.append(('bmtagger_build_db', parser_bmtagger_build_db))
+
+
 
 # ========================
 

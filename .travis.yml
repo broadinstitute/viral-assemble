@@ -34,6 +34,9 @@ addons:
     - g++-4.9
     - libboost1.55-all-dev
 
+git:
+  depth: 3
+
 before_install:
   - travis/before_install.sh
 
@@ -44,9 +47,16 @@ install:
   - travis/install-pip.sh
   - travis/install-tools.sh
 
+before_script:
+  - flake8 --exit-zero .
+
 script:
   - travis/tests-unit.sh
   - travis/tests-long.sh
 
 after_success:
   - coveralls
+
+notifications:
+  slack:
+    secure: dVmGF86ZaVkL7LhqmcjqTgmmc8ONZfLH2H2GO5AUHce3q61dA4tuZrfW0T+6puQWtIvvMC+5ioD0vRce+3iZELs83KR4Xm1vqNu6RZdAHx/ec3QQU4/7ulcEs50wWQl+WmyRqciGaBThUv+Un1K6AA2HYTcb8gQaFkpPmI3huZo=

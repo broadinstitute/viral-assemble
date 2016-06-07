@@ -15,6 +15,7 @@ import errno
 import logging
 import json
 import util.cmd
+import util.misc
 
 # imports needed for download_file() and webfile_readlines()
 import re
@@ -101,10 +102,13 @@ def set_tmp_dir(name):
         if e in os.environ:
             proposed_prefix.append(os.environ[e])
     tempfile.tempdir = tempfile.mkdtemp(prefix='-'.join(proposed_prefix) + '-', dir=util.cmd.find_tmp_dir())
+    return tempfile.tempdir
 
 
-def destroy_tmp_dir():
-    if tempfile.tempdir:
+def destroy_tmp_dir(tempdir=None):
+    if tempdir:
+        shutil.rmtree(tempdir)
+    elif tempfile.tempdir:
         shutil.rmtree(tempfile.tempdir)
     tempfile.tempdir = None
 
@@ -331,8 +335,6 @@ def cat(output_file, input_files):
 @contextlib.contextmanager
 def temp_catted_files(input_files, prefix=None, suffix=None):
     '''Create a temporary file holding catted contents of input_files.'''
-    if len(input_files) == 1:
-        yield input_files[0]
     try:
         fn = util.file.mkstempfname(prefix=prefix, suffix=suffix)
         cat(fn, input_files)
@@ -342,8 +344,8 @@ def temp_catted_files(input_files, prefix=None, suffix=None):
 
 def string_to_file_name(string_value):
     replacements_dict = {
-        "\\": "-", # win directory separator 
-        "/": "-", # posix directory separator 
+        "\\": "-", # win directory separator
+        "/": "-", # posix directory separator
         "^": "_", # caret
         "&": "_and_", # background
         "\"": "", # double quotes
@@ -366,7 +368,7 @@ def string_to_file_name(string_value):
         #"": "", # other illegal strings to replace
     }
 
-    # group of ascii control and non-printable characters    
+    # group of ascii control and non-printable characters
     control_chars = ''.join( map(chr, list(range(0,32)) + list(range(127,160)) ) )
     control_char_re = re.compile('[%s]' % re.escape(control_chars))
     string_value = control_char_re.sub("_", string_value)
@@ -387,3 +389,11 @@ def string_to_file_name(string_value):
     string_value = string_value.strip(".")
 
     return string_value
+
+def fasta_length(fasta_path):
+    env = os.environ.copy()
+    env['LC_ALL'] = 'C' #use C locale rather than UTF8 for faster grep
+    
+    # grep for record start characters, in fixed-string mode (no regex)
+    number_of_seqs = util.misc.run_and_print(["grep", "-cF", ">", fasta_path], silent=False, check=True, env=env)
+    return int(number_of_seqs.stdout.decode("utf-8").rstrip(os.linesep))

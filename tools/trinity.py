@@ -18,7 +18,7 @@ import util.misc
 
 TOOL_NAME = "trinity"
 TOOL_VERSION = "2011-11-26"
-CONDA_TOOL_VERSION = "2011_11_26" # conda versions cannot have hyphens...
+CONDA_TOOL_VERSION = "date.2011_11_26" # conda versions cannot have hyphens...
 TRINITY_VERSION = "trinityrnaseq_r{}".format(TOOL_VERSION)
 url = "http://sourceforge.net/projects/trinityrnaseq/files/{}.tgz".format(TRINITY_VERSION)
 
@@ -56,7 +56,7 @@ class TrinityTool(tools.Tool):
             '--output', outdir
         ]
         log.debug(' '.join(cmd))
-        util.misc.run_and_print(cmd)
+        util.misc.run_and_print(cmd, check=True)
         shutil.copyfile(os.path.join(outdir, 'Trinity.fasta'), outFasta)
         shutil.rmtree(outdir, ignore_errors=True)
 
@@ -89,7 +89,7 @@ class DownloadAndBuildTrinity(tools.DownloadPackage):
             shutil.copymode(badFilePath + '.orig', badFilePath)
 
         # Now we can make:
-        os.system('cd "{}" && make -s'.format(trinity_dir))
+        util.misc.run_and_print(['make', '-s'], cwd=trinity_dir)
         shutil.rmtree(os.path.join(trinity_dir, 'sample_data'), ignore_errors=True)
 
     def verify_install(self):
@@ -106,5 +106,5 @@ class DownloadAndBuildTrinity(tools.DownloadPackage):
             if not os.access(path, (os.X_OK | os.R_OK)):
                 log.debug('%s was not built.', path)
                 self.installed = False
-        
+
         return self.installed

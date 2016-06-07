@@ -57,7 +57,7 @@ class PicardTools(tools.Tool):
                 self.install_and_get_path(), '-Xmx' + JVMmemory, '-Djava.io.tmpdir=' + tempfile.tempdir, command
             ] + picardOptions
         _log.debug(' '.join(tool_cmd))
-        util.misc.run_and_print(tool_cmd)
+        util.misc.run_and_print(tool_cmd, check=True)
 
     @staticmethod
     def dict_to_picard_opts(options):
@@ -87,11 +87,12 @@ class MarkDuplicatesTool(PicardTools):
 
 class SamToFastqTool(PicardTools):
     subtoolName = 'SamToFastq'
+    illumina_clipping_attribute = 'XT'
 
-    def execute(self, inBam, outFastq1, outFastq2, picardOptions=None, JVMmemory=None):    # pylint: disable=W0221
+    def execute(self, inBam, outFastq1, outFastq2, picardOptions=None, JVMmemory=None):  # pylint: disable=W0221
         picardOptions = picardOptions or []
-
-        opts = ['INPUT=' + inBam, 'FASTQ=' + outFastq1, 'SECOND_END_FASTQ=' + outFastq2, 'VALIDATION_STRINGENCY=SILENT']
+        opts = ['FASTQ=' + outFastq1, 'SECOND_END_FASTQ=' + outFastq2,
+                'INPUT=' + inBam, 'VALIDATION_STRINGENCY=SILENT']
         PicardTools.execute(self, self.subtoolName, opts + picardOptions, JVMmemory)
 
     def per_read_group(self, inBam, outDir, picardOptions=None, JVMmemory=None):
@@ -166,13 +167,11 @@ class FilterSamReadsTool(PicardTools):
                 shutil.copyfile(inBam, outBam)
             else:
                 tmpf = util.file.mkstempfname('.sam')
-                with open(tmpf, 'wt') as outf:
-                    if inBam.endswith('.sam'):
-                        header = pysam.view('-H', '-S', inBam)
-                    else:
-                        header = pysam.view('-H', inBam)
-                    for line in header:
-                        outf.write(line)
+                if inBam.endswith('.sam'):
+                    # output format (sam/bam) is inferred by samtools based on file extension
+                    header = pysam.view('-o', tmpf, '-H', '-S', inBam, catch_stdout=False)
+                else:
+                    header = pysam.view('-o', tmpf, '-H', inBam, catch_stdout=False)
                 # pysam.AlignmentFile cannot write an empty file
                 # samtools cannot convert SAM -> BAM on an empty file
                 # but Picard SamFormatConverter can deal with empty files
