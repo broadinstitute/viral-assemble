@@ -1,5 +1,6 @@
 """Misc assembly-related utils"""
 
+from __future__ import division
 import os, re
 
 def dump_file( fname, value ):
@@ -30,3 +31,28 @@ def is_convertible_to( x, aType ):
         dummy = aType(x)
         return True
     except ValueError: return False
+
+def perc(num,den):
+    """Compute an integer percentage"""
+    assert float(num)>=0 and float(den)>0
+    return int(100.0*(float(num)/float(den)))
+
+def dict_get( d, k, dflt ):
+    """Get a value from the dictionary; if not such value, return the specified default"""
+    return d.get( k, dflt )
+
+
+def tabjoin( *args, **kwargs ):
+    """Join args by tab"""
+    sep = dict_get( kwargs, 'sep', '\t' )
+    return sep.join( map( str, args ) )
+
+def tabwriten( f, *args, **kwargs ):
+    """Write a tab-separated line to a file"""
+    f.write( tabjoin( *args, **kwargs ) )
+
+def tabwrite( f, *args, **kwargs ):
+    """Write a tab-separated line to a file, followed by a newline"""
+    tabwriten( f, *args, **kwargs )
+    f.write( '\n' )
+    

@@ -1,5 +1,8 @@
 # ==================== [ Values that must checked ] =========================
 
+# Directory storing results of assembly evaluation.
+# The result of running assembler A on sample S and computing the parameter P
+# is stored in the file {cmp_dir}/A/S/P
 cmp_dir: "/idi/sabeti-scratch/ilya/sw/quast-3.2/ebov"
 
 viral_ngs_dir: "/idi/sabeti-scratch/dpark/ebov/test-slround3/compare/bin"
@@ -9,6 +12,12 @@ assemblies:
   - "assembly-mummer3"
 
 reference: "/idi/sabeti-scratch/ilya/sw/quast-3.2/ebov/ref_genome/reference.fasta"
+
+reference_genes: "/idi/sabeti-scratch/ilya/sw/quast-3.2/ebov/KJ660346.2.genes.tsv"
+
+
+##################################################################################
+
 
 # A list of GenBank accessions representing the reference 
 # genome, where each accession represents one segment/chromosome.

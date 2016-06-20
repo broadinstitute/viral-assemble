@@ -46,7 +46,7 @@ rule quast:
     
         output: "quast/{assemblies}/{sample}/report.html"
 
-        shell: "/idi/sabeti-scratch/ilya/viral-ngs/eval/run_quast.sh {input} -R {config[reference]} -o quast/{wildcards.assemblies}/{wildcards.sample}"
+        shell: "/idi/sabeti-scratch/ilya/viral-ngs/eval/run_quast.sh {input} -R {config[reference]} -G {config[reference_genes]} -o quast/{wildcards.assemblies}/{wildcards.sample}"
 
 #        input:
 #		lambda wildcards: expand("{cmp_dir}/{assembly}/{sample}.fasta", cmp_dir=config['cmp_dir'],assembly=wildcards['assembly_set'].split('__'),**wildcards)

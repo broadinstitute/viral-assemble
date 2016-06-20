@@ -1,7 +1,8 @@
 """Code for comparing assemblies"""
 
 from __future__ import division
-import os, pandas, logging
+import os, pandas, logging, collections
+import numpy as np
 import asmutil
 
 class AsmCmp(object):
@@ -24,39 +25,63 @@ class AsmCmp(object):
         return os.path.join( self.cfg['statdir'], asmutil.make_alpha_num( readset ), 
                              asmutil.make_alpha_num( asm ), asmutil.make_alpha_num( stat ) + '.dat' )
 
-    def find_largest_changes( self, asm1, asm2, readsets, stats, out_dir ):
+    def find_largest_changes( self, asm1, asm2, readsets, stats, out_dir, include_plots=False ):
         """For a pair of assemblers, find the largest differences between their performance."""
-        
-        for stat in stats:
-            logging.info('find_largest_changes: stat=%s', stat)
-            deltas = []
-            for readset in readsets:
-                stat_asm1 = self.get_stat( readset, asm1, stat )
-                stat_asm2 = self.get_stat( readset, asm2, stat )
-                if stat_asm1 is not None and stat_asm2 is not None:
-                    diff = stat_asm1 - stat_asm2
-                    if diff != 0:
-                        logging.info( 'readset=%s stat=%s diff=%f', readset, stat, diff )
-                    deltas.append( diff  )
-            if not deltas: 
-                logging.warn('no stats for ' + stat)
-                continue
-            import matplotlib as mp
-            mp.use('agg')
-            import matplotlib.pyplot as pp
 
-            fig=pp.figure()
-            pp.xlabel( 'delta ' + stat )
-            pp.suptitle( asm1 + ' vs. ' + asm2 )
-            nonzero_deltas=[v for v in deltas if v != 0]
-            pp.title( 'no diff for %d of %d (%f %%)' % ( len(deltas)-len(nonzero_deltas),
-                                                         len(deltas), 
-                                                         asmutil.perc(len(deltas)-len(nonzero_deltas),len(deltas))))
+        asmutil.ensure_dir_exists(out_dir)
+        with open( os.path.join( out_dir, 'statsumm.tsv' ), 'w' ) as statsumm:
+            statLines=[]
+            for stat in stats:
+                logging.info('find_largest_changes: stat=%s', stat)
+                deltas = []
+                sign2ndeltas = collections.defaultdict(int)
+                
+                for readset in readsets:
+                    stat_asm1 = self.get_stat( readset, asm1, stat )
+                    stat_asm2 = self.get_stat( readset, asm2, stat )
+                    if stat_asm1 is not None and stat_asm2 is not None:
+                        diff = stat_asm1 - stat_asm2
+                        sign2ndeltas[ np.sign(diff) ] += 1
+                        if diff != 0:
+                            logging.info( 'readset=%s stat=%s diff=%f', readset, stat, diff )
+                        deltas.append( diff  )
+                if not deltas: 
+                    logging.warn('no stats for ' + stat)
+                    continue
 
-            pp.hist(nonzero_deltas)
-            asmutil.ensure_dir_exists( out_dir )
-            pp.savefig( os.path.join( out_dir, asmutil.make_alpha_num(stat) + '.png' ) )
-            pp.close(fig)
+                nonzero_deltas=[v for v in deltas if v != 0]
+                pos_deltas=[v for v in deltas if v > 0]
+                neg_deltas=[v for v in deltas if v < 0]
+                
+                if include_plots:
+                    import matplotlib as mp
+                    mp.use('agg')
+                    import matplotlib.pyplot as pp
+
+                    fig=pp.figure()
+                    pp.xlabel( 'delta ' + stat )
+                    pp.suptitle( asm1 + ' vs. ' + asm2 )
+                    pp.title( 'no diff for %d of %d (%f %%)' % ( len(deltas)-sign2ndeltas[0],
+                                                                 len(deltas), 
+                                                                 asmutil.perc(len(deltas)-sign2ndeltas[0],len(deltas))))
+
+                    pp.hist(nonzero_deltas)
+                    asmutil.ensure_dir_exists( out_dir )
+                    pp.savefig( os.path.join( out_dir, asmutil.make_alpha_num(stat) + '.png' ) )
+                    pp.close(fig)
+
+                def num2str(x): return '%.1f' % x
+
+                statLines.append((float(np.max(list(map(abs,deltas)))),
+                                  (stat, len(deltas), sign2ndeltas[0], sign2ndeltas[-1], sign2ndeltas[+1],
+                                   ','.join(map(num2str,sorted(neg_deltas))),
+                                   ','.join(map(num2str,sorted(pos_deltas,reverse=True))))))
+
+            statLines.sort(reverse=True)
+            asmutil.tabwrite( statsumm, 'stat', 'n', 'n_no_chg', 'n_neg', 'n_pos', 'max_neg', 'max_pos' )
+            for maxDiff, statLine in statLines:
+                asmutil.tabwrite(statsumm, *statLine)
+
 
     def import_quast_stats( self, quast_dir, asms ):
         """Import assembly stats computed by QUAST"""
