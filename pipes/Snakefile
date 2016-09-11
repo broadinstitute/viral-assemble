@@ -43,7 +43,13 @@ all_inputs = [
     # create summary reports
     expand("{reports_dir}/summary.fastqc.{adjective}.txt",
            reports_dir=config["reports_dir"],
-           adjective=['raw', 'cleaned', 'taxfilt', 'align_to_self'])
+           adjective=['raw', 'cleaned', 'taxfilt', 'align_to_self']),
+    # create reference-based assemblies
+    expand("{data_dir}/{subdir}/{sample}.fasta",
+           data_dir=config["data_dir"],
+           subdir=[config["subdirs"]["align_ref"],
+                   config["subdirs"]["align_ref_from_cleaned"]],
+           sample=samples_assembly)
 ]
 
 if config.get('spikeins_db'):
