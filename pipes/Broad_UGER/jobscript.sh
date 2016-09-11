@@ -12,8 +12,14 @@ unuse Python-3.4
 
 export PATH="$MINICONDADIR/bin:$PATH"
 
+export TMPDIR="/broad/hptmp/hmetsky"
+
+# Sometimes snakemake fails with 'OSError: [Errno 28] No space left on device' when it
+# sets up its logger. The failure happens on a call to multiprocessing.Lock()
+python3 -c 'import multiprocessing; multiprocessing.Lock()' || exit 99
+
 # load Python virtual environment
-source activate "$CONDAENVDIR"
+ls "$CONDAENVDIR" && source activate "$CONDAENVDIR" || exit 99
 
 # if listing the data directory fails, exit 99 to reschedule the job
 # since the node with the job doesn't have the NFS share mounted.
