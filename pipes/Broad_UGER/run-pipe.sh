@@ -23,7 +23,7 @@ source activate "$CONDAENVDIR"
 
 # invoke Snakemake in cluster mode with custom wrapper scripts
 snakemake --timestamp --rerun-incomplete --keep-going --nolock \
-    --jobs 90 --immediate-submit \
+    --jobs 90 \
         --latency-wait 60 \
     --config mode=UGER \
     --directory . \
