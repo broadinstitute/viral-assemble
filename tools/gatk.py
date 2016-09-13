@@ -116,6 +116,8 @@ class GATKTool(tools.Tool):
             0,
             '-A',
             'AlleleBalance',
+            '--min_indel_count_for_genotyping',
+            1
         ]
         self.execute('UnifiedGenotyper', opts + options, JVMmemory=JVMmemory)
 
