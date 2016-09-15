@@ -61,6 +61,10 @@ rule krona_import_taxonomy:
     input: lambda wildcards: join(config["data_dir"], config["subdirs"]["metagenomics"], \
            ".".join([wildcards.sample, wildcards.adjective, method_props[wildcards.method]['reads_ext']]))
     output: join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.{method,kraken|diamond}.krona.html")
+    resources: cores=int(config.get("number_of_threads", 1)),
+               mem=15
+    params: numThreads=str(config.get("number_of_threads", 1)),
+            UGER=config.get('UGER_queues', {}).get('long', '-q long')
     run:
         # method_props key can be changed to allow for different tools, 
         # but with new changes Diamond output should look like Kraken output
