@@ -24,6 +24,9 @@ rule all_reports:
 rule all_ref_guided_fastqc:
     input: config["reports_dir"]+'/summary.fastqc.align_to_ref.txt'
 
+rule fastqc_raw:
+    input: config["reports_dir"]+'/summary.fastqc.raw.txt'
+
 #-----------FASTQC---------------------
 
 def fastqc_report_inputs(wildcards):
