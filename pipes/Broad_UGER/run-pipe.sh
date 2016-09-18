@@ -25,6 +25,7 @@ source activate "$CONDAENVDIR"
 snakemake --timestamp --rerun-incomplete --keep-going --nolock \
     --jobs 90 \
         --latency-wait 60 \
+    --force-use-threads \
     --config mode=UGER \
     --directory . \
     --jobscript "$BINDIR/pipes/Broad_UGER/jobscript.sh" \
