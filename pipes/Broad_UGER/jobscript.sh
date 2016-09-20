@@ -17,6 +17,7 @@ export TMPDIR="/broad/hptmp/hmetsky"
 # load Python virtual environment
 source activate "$CONDAENVDIR"
 
+echo "Hostname: $(hostname)"
 
 # As a simple solution to transient UGER problems, maintain a list of blacklisted
 # nodes. When a node fails a check, add its hostname to the list and exit 99
