@@ -704,7 +704,8 @@ def align_rna_metagenomics(
     opts = list(picardOptions)
     dupe_removal_out_metrics = util.file.mkstempfname('.metrics')
     pic = tools.picard.MarkDuplicatesTool()
-    pic.execute([aln_bam], aln_bam_deduped, dupe_removal_out_metrics, picardOptions=opts, JVMmemory=pic.jvmMemDefault)
+    pic.execute([aln_bam], aln_bam_deduped, dupe_removal_out_metrics,
+picardOptions=opts, JVMmemory='4g')
     os.unlink(aln_bam)
 
     sam_lca_report(tax_db, aln_bam_deduped, outReport=outReport, outLca=outLca)
