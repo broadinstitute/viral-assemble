@@ -7,7 +7,7 @@ rule all_metagenomics:
         expand(join(config["data_dir"], config["subdirs"]["metagenomics"],
                     "{sample}.raw.{method}.report"), sample=samples, method=['kraken']),
         expand(join(config["data_dir"], config["subdirs"]["metagenomics"],
-                    "{sample}.raw.{method}.krona.html"), sample=samples, method=['kraken', 'rna_bwa', 'rna_bwa_nodupes'])
+                    "{sample}.raw.{method}.krona.html"), sample=samples, method=['kraken'])
     params: LSF='-N'
 
 
@@ -53,7 +53,7 @@ rule kraken:
     output: report=join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.kraken.report"),
             reads=join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.kraken.reads.gz")
     resources: cores=int(config.get("number_of_threads", 1)),
-               mem=120
+               mem=180
     params: numThreads=str(config.get("number_of_threads", 1)),
             UGER=config.get('UGER_queues', {}).get('long', '-q long')
     shell:
