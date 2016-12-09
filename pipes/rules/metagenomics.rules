@@ -53,9 +53,9 @@ rule kraken:
     output: report=join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.kraken.report"),
             reads=join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.kraken.reads.gz")
     resources: cores=int(config.get("number_of_threads", 1)),
-               mem=180
+               mem=160
     params: numThreads=str(config.get("number_of_threads", 1)),
-            UGER=config.get('UGER_queues', {}).get('long', '-q long')
+            UGER=config.get('UGER_queues', {}).get('short', '-q short')
     shell:
         """
         {config[bin_dir]}/metagenomics.py kraken {input} {config[kraken_db]} --outReads {output.reads} --outReport {output.report} --numThreads {params.numThreads}
@@ -81,7 +81,7 @@ rule krona_import_taxonomy:
     input: lambda wildcards: join(config["data_dir"], config["subdirs"]["metagenomics"], \
            ".".join([wildcards.sample, wildcards.adjective, method_props[wildcards.method]['reads_ext']]))
     output: join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.{method,kraken|diamond|rna_bwa|rna_bwa_nodupes}.krona.html")
-    resources: mem=4
+    resources: mem=8
     shell:
         """
         {config[bin_dir]}/metagenomics.py krona {input} {config[krona_db]} {output} --noRank
