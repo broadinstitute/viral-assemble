@@ -40,7 +40,7 @@ rule diamond:
     output: report=join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.diamond.report"),
             lca=join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.diamond.lca.gz")
     resources: cores=int(config.get("number_of_threads", 1)),
-               mem=15
+               mem=120
     params: numThreads=str(config.get("number_of_threads", 1)),
             UGER=config.get('UGER_queues', {}).get('long', '-q long')
     shell:
