@@ -154,7 +154,14 @@ rule refine_assembly_2:
             novoalign_options = config.get("refine_assembly_2_novoalign_params", "-r Random -l 40 -g 40 -x 20 -t 100"),
             min_coverage = "3",
             numThreads=str(config.get("number_of_threads", 1))
-    shell:  "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {params.numThreads}"
+    run:
+        major_cutoff_append = ""
+        if wildcards.sample.endswith("_ampseq"):
+            # This sample is amplicon-based; use a major_cutoff of 0.9 to be conservative in calling
+            # consensus bases. For all others, use the default cutoff (0.5) by not specifying the
+            # argument.
+            major_cutoff_append = " --major_cutoff 0.9"
+        shell("{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {params.numThreads}" + major_cutoff_append)
 
 rule map_reads_to_self:
     ''' After the final assembly is produced, we also produce BAM files with all reads
