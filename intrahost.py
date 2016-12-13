@@ -596,16 +596,16 @@ def merge_to_vcf(
                                 reverse=True))
                             # naive filter (quick and dirty)
                             if naive_filter:
-                                # TODO: revert the commit that relaxed these
-                                # filters
                                 # require 2 libraries for every allele call
                                 #row['allele_counts'] = list((a, n) for a, n in row['allele_counts']
                                 #                            if row['n_libs'][a] >= 2)
                                 # recompute total read counts for remaining
                                 tot_n = sum(n for a, n in row['allele_counts'])
-                                # require allele frequency >= 5%
+                                # require allele frequency >= 5% for 1 library
+                                # and >= 0.5% for >= 2 libraries
                                 row['allele_counts'] = list((a, n) for a, n in row['allele_counts']
-                                                            if tot_n > 0 and float(n) / tot_n >= 0.05)
+                                    if tot_n > 0 and ((row['n_libs'][a] == 1 and float(n) / tot_n >= 0.05) or
+                                                      (row['n_libs'][a] >= 2 and float(n) / tot_n >= 0.005)))
                                 # drop this position:sample if no variation left
                                 if len(row['allele_counts']) < 2:
                                     log.info(
