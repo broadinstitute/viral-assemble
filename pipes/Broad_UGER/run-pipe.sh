@@ -38,7 +38,7 @@ ARGS=""
 # invoke Snakemake in cluster mode with custom wrapper scripts
 snakemake --timestamp --rerun-incomplete --keep-going --nolock \
           $ARGS \
-          --jobs 90 \
+          --jobs 900 \
           --force-use-threads \
           --latency-wait 60 \
           --config mode=UGER \
