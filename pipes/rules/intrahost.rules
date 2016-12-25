@@ -47,7 +47,11 @@ rule isnvs_vcf:
             config["data_dir"]+'/'+config["subdirs"]["intrahost"] +'/isnvs.vcf.gz.tbi',
             config["data_dir"]+'/'+config["subdirs"]["intrahost"] +'/isnvs.annot.vcf.gz',
             config["data_dir"]+'/'+config["subdirs"]["intrahost"] +'/isnvs.annot.txt.gz',
-            config["data_dir"]+'/'+config["subdirs"]["intrahost"] +'/isnvs.annot.vcf.gz.tbi'
+            config["data_dir"]+'/'+config["subdirs"]["intrahost"] +'/isnvs.annot.vcf.gz.tbi',
+            expand("{data_dir}/{subdir}/vphaser2.{sample}.with-ref-pos.txt.gz",
+                data_dir=config["data_dir"],
+                subdir=config["subdirs"]["intrahost"],
+                sample=read_samples_file(config["samples_assembly"]))
     resources: mem=4
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
             UGER=config.get('UGER_queues', {}).get('short', '-q short'),
@@ -60,6 +64,7 @@ rule isnvs_vcf:
             shell("{config[bin_dir]}/intrahost.py merge_to_vcf {params.refGenome} {output[0]}"
                 + " --samples " + " ".join(params.samples)
                 + " --isnvs " + " ".join(["{config[data_dir]}/{config[subdirs][intrahost]}/vphaser2."+s+".txt.gz" for s in params.samples])
+                + " --isnvs_rewrite " + " ".join(["{config[data_dir]}/{config[subdirs][intrahost]}/vphaser2."+s+".with-ref-pos.txt.gz" for s in params.samples])
                 + " --alignments " + " ".join(["{config[data_dir]}/{config[subdirs][multialign_ref]}/aligned_" + str(n) + ".fasta" for n in range(1, len(config["accessions_for_ref_genome_build"])+1)])
                 + " --strip_chr_version"
                 + " --parse_accession" # the vcf chr column must match a chr known to snpEff; we have an option to parse out only the accession

@@ -14,6 +14,7 @@ import itertools
 import re
 import os
 import collections
+import gzip
 
 # third-party
 import Bio.AlignIO
@@ -440,6 +441,43 @@ def strip_accession_version(acc):
     return acc
 
 
+def rewrite_isnvs_with_ref_pos(vphaser_output_files,
+                               vphaser_output_files_rewrite,
+                               samp_pos_to_ref_pos):
+    """Rewrite each vPhaser2 output text file to have reference positions.
+
+    This writes an additional version of each vPhaser2 output text file that
+    has two added columns. Each line in the vPhaser2 output text file
+    corresponds to a position in a sample. The two added columns give the
+    reference sequence identifer and reference sequence position that correspond
+    to these sample positions.
+
+    Args:
+        vphaser_output_files: list of file names output by vphaser_one_sample
+        vphaser_output_files_rewrite: list of file names for the rewritten
+            vphaser files that have the added columns, in the same order as
+            vphaser_output_files
+        samp_pos_to_ref_pos: dict mapping sample positions to reference
+            positions, in the form
+                {sample chrom: {sample pos: (reference id, reference pos)}}
+    """
+    def open_out(out_file, should_gzip_out):
+        if should_gzip_out:
+            return gzip.open(out_file, 'wb')
+        else:
+            return open(out_file, 'w')
+    for in_file, out_file in zip(vphaser_output_files, vphaser_output_files_rewrite):
+        should_gzip_out = out_file.endswith('.gz')
+        with open_out(out_file, should_gzip_out) as outf:
+            for row in util.file.read_tabfile(in_file):
+                s_chrom, s_pos = row[0], int(row[1])
+                ref_chrom, ref_pos = samp_pos_to_ref_pos[s_chrom][s_pos]
+                row_rewrite = [row[0], row[1], ref_chrom, str(ref_pos)] + row[2:]
+                row_rewrite_out = '\t'.join(row_rewrite) + '\n'
+                if should_gzip_out:
+                    row_rewrite_out = row_rewrite_out.encode('utf-8')
+                outf.write(row_rewrite_out)
+
 
 # def merge_to_vcf(refFasta, outVcf, samples, isnvs, assemblies, strip_chr_version=False, naive_filter=False):
 
@@ -450,6 +488,7 @@ def merge_to_vcf(
         samples,
         isnvs,
         alignments,
+        isnvs_rewrite=None,
         strip_chr_version=False,
         naive_filter=False,
         parse_accession=False):
@@ -542,6 +581,10 @@ def merge_to_vcf(
                         %s does not have the right number of sequences""" % fileName)
 
         samp_to_isnv = dict(zip(samples, isnvs))
+
+        # save mapping of
+        # {sample sequence name: {sample pos: (reference sequence name, reference pos)}}
+        samp_pos_to_ref_pos = collections.defaultdict(dict)
 
         # one reference chrom at a time
         with open(refFasta, 'r') as inf:
@@ -659,6 +702,19 @@ def merge_to_vcf(
                                 if ref_end is None:
                                     raise Exception('consensus extends ' 'beyond start or end of reference.')
                                 end = max(end, ref_end)
+
+                        ref_site = (ref_sequence.id, row['POS'])
+                        samp_pos = row['s_pos']
+                        if row['s_alt'].startswith('D'):
+                            # row['s_pos'] was repositioned (minus 1) to be
+                            # consistent with VCF conventions on deletions;
+                            # add 1 to equal what was in the vphaser output
+                            samp_pos += 1
+                        if samp_pos in samp_pos_to_ref_pos[row['s_chrom']]:
+                            # ensure a unique mapping from sample pos to ref
+                            # pos
+                            assert samp_pos_to_ref_pos[row['s_chrom']][samp_pos] == ref_site
+                        samp_pos_to_ref_pos[row['s_chrom']][samp_pos] = ref_site
 
                     # find reference allele and consensus alleles
                     refAllele = str(ref_sequence[pos - 1:end].seq)
@@ -829,6 +885,9 @@ def merge_to_vcf(
         pysam.tabix_index(outVcf, force=True, preset='vcf')
         os.unlink(tmpVcf)
 
+    if isnvs_rewrite:
+        rewrite_isnvs_with_ref_pos(isnvs, isnvs_rewrite, samp_pos_to_ref_pos)
+
 
 def parser_merge_to_vcf(parser=argparse.ArgumentParser()):
     parser.add_argument("refFasta",
@@ -848,6 +907,12 @@ def parser_merge_to_vcf(parser=argparse.ArgumentParser()):
             assemblies, with one file per chromosome/segment. Each alignment
             file will contain a line for each sample, as well as the
             reference genome to which they were aligned.""")
+    parser.add_argument("--isnvs_rewrite",
+                        nargs='+',
+                        help="""A list of file names to which to rewrite the
+            files in isnvs with added columns that map sample positions
+            to reference positions.
+            These must be in the SAME ORDER as isnvs.""")
     parser.add_argument("--strip_chr_version",
                         default=False,
                         action="store_true",
