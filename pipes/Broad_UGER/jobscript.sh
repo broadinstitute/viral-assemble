@@ -13,7 +13,7 @@ unuse Python-3.4
 
 export PATH="$MINICONDADIR/bin:$PATH"
 
-export TMPDIR="/broad/hptmp/hmetsky"
+export TMPDIR="/broad/hptmp/hmetsky/tmp-viral-ngs"
 
 # load Python virtual environment
 source activate "$CONDAENVDIR"
