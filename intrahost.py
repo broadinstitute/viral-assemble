@@ -470,7 +470,12 @@ def rewrite_isnvs_with_ref_pos(vphaser_output_files,
         should_gzip_out = out_file.endswith('.gz')
         with open_out(out_file, should_gzip_out) as outf:
             for row in util.file.read_tabfile(in_file):
-                s_chrom, s_pos = row[0], int(row[1])
+                s_chrom, s_pos, s_alt = row[0], int(row[1]), row[2]
+                if s_alt.startswith('D'):
+                    # s_pos was repositioned (minus 1) in merge_to_vcf
+                    # to be consistent with VCF conventions on deletions;
+                    # subtract 1 to find it in the lookup table
+                    s_pos -= 1
                 ref_chrom, ref_pos = samp_pos_to_ref_pos[s_chrom][s_pos]
                 row_rewrite = [row[0], row[1], ref_chrom, str(ref_pos)] + row[2:]
                 row_rewrite_out = '\t'.join(row_rewrite) + '\n'
@@ -705,11 +710,6 @@ def merge_to_vcf(
 
                         ref_site = (ref_sequence.id, row['POS'])
                         samp_pos = row['s_pos']
-                        if row['s_alt'].startswith('D'):
-                            # row['s_pos'] was repositioned (minus 1) to be
-                            # consistent with VCF conventions on deletions;
-                            # add 1 to equal what was in the vphaser output
-                            samp_pos += 1
                         if samp_pos in samp_pos_to_ref_pos[row['s_chrom']]:
                             # ensure a unique mapping from sample pos to ref
                             # pos
