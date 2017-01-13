@@ -742,8 +742,20 @@ def merge_to_vcf(
                         allele = str(cons[cons_start - 1:cons_stop]).upper()
                         if s in samp_offsets:
                             samp_offsets[s] -= cons_start
-                        if all(a in set(('A', 'C', 'T', 'G')) for a in allele):
-                            consAlleles[s] = allele
+                        if all(a != 'N' for a in allele):
+                            # If the consensus allele is ambiguous (but not N),
+                            # viral-ngs will throw an exception later
+                            # (e.g., "consensus allele R not among iSNV alleles
+                            # G, A"). The reason is presumably that it won't
+                            # know what allele to treat as the reference in the
+                            # VCF. So arbitrarily pick an unambiguous allele
+                            # for these cases.
+                            picks = {'K': 'G', 'M': 'A', 'R': 'A', 'Y': 'C',
+                                     'S': 'C', 'W': 'A', 'B': 'C', 'V': 'A',
+                                     'H': 'A', 'D': 'A', 'A': 'A', 'T': 'T',
+                                     'C': 'C', 'G': 'G'}
+                            allele_unambig = ''.join([picks[x] for x in allele])
+                            consAlleles[s] = allele_unambig
                         else:
                             log.warning("dropping ambiguous consensus for %s at %s:%s-%s: %s", s, ref_sequence.id, pos,
                                         end, allele)
