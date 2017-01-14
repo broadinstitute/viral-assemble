@@ -1081,6 +1081,7 @@ def align_and_fix(
     inBam, refFasta,
     outBamAll=None,
     outBamFiltered=None,
+    outBamWithDups=None,
     aligner_options='',
     aligner="novoalign",
     JVMmemory=None,
@@ -1092,7 +1093,7 @@ def align_and_fix(
         with Picard, realign indels with GATK, and optionally filter
         final file to mapped/non-dupe reads.
     '''
-    if not (outBamAll or outBamFiltered):
+    if not (outBamAll or outBamFiltered or outBamWithDups):
         log.warn("are you sure you meant to do nothing?")
         return
 
@@ -1135,6 +1136,17 @@ def align_and_fix(
 
         bwa.align_mem_bam(inBam, refFastaCopy, bam_aligned, options=opts, min_qual=bwa_map_threshold)
 
+    if outBamWithDups:
+        tools.samtools.SamtoolsTool().index(bam_aligned)
+        bam_realigned_dups = mkstempfname('.realigned-with-dups.bam')
+        tools.gatk.GATKTool(path=gatk_path).local_realign(bam_aligned, refFastaCopy, bam_realigned_dups, JVMmemory=JVMmemory, threads=threads)
+        tools.samtools.SamtoolsTool().view(['-b', '-q', '1', '-F', '4'], bam_realigned_dups, outBamWithDups)
+        tools.picard.BuildBamIndexTool().execute(outBamWithDups)
+        os.unlink(bam_realigned_dups)
+    if not (outBamAll or outBamFiltered):
+        os.unlink(bam_aligned)
+        return
+
     bam_mkdup = mkstempfname('.mkdup.bam')
     tools.picard.MarkDuplicatesTool().execute(
         [bam_aligned], bam_mkdup, picardOptions=['CREATE_INDEX=true'],
@@ -1171,6 +1183,13 @@ def parser_align_and_fix(parser=argparse.ArgumentParser()):
         default=None,
         help='''Aligned, sorted, and indexed reads.  Unmapped reads and
                 duplicate reads are removed from this file.'''
+    )
+    parser.add_argument(
+        '--outBamWithDups',
+        default=None,
+        help='''Aligned, sorted, and indexed reads.  Unmapped reads
+                are removed from this file (but duplicates are unmarked
+                and remain).'''
     )
     parser.add_argument('--aligner_options', default=None, help='aligner options (default for novoalign: "-r Random", bwa: "-T 30"')
     parser.add_argument('--aligner', choices=['novoalign', 'bwa'], default='novoalign', help='aligner (default: %(default)s)')

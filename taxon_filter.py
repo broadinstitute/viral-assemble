@@ -74,6 +74,8 @@ def parser_deplete_human(parser=argparse.ArgumentParser()):
         help='One reference database for last (required if --taxfiltBam is specified).',
         default=None
     )
+    parser.add_argument('--skipRmdup', action='store_true',
+        help='Do not rmdup reads; instead, pass the output of bmtagger into BLASTN')
     parser.add_argument('--threads', type=int, default=4, help='The number of threads to use in running blastn.')
     parser.add_argument(
         '--JVMmemory',
@@ -130,9 +132,17 @@ def main_deplete_human(args):
     if not args.revertBam:
         os.unlink(revertBamOut)
 
-    read_utils.rmdup_mvicuna_bam(args.bmtaggerBam, args.rmdupBam, JVMmemory=args.JVMmemory)
+    if args.skipRmdup:
+        # Do not rmdup, but touch the output so the job completes
+        # successfully
+        blastn_input = args.bmtaggerBam
+        util.file.touch(args.rmdupBam)
+    else:
+        read_utils.rmdup_mvicuna_bam(args.bmtaggerBam, args.rmdupBam, JVMmemory=args.JVMmemory)
+        blastn_input = args.rmdupBam
+
     multi_db_deplete_bam(
-        args.rmdupBam,
+        blastn_input,
         args.blastDbs,
         deplete_blastn_bam,
         args.blastnBam,
