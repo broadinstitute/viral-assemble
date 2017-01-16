@@ -201,7 +201,7 @@ rule map_reads_to_self_with_dups:
             mem=12,
             cores=int(config.get("number_of_threads", 1))
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
-            UGER=config.get('UGER_queues', {}).get('long', '-q long'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short'),
             logid="{sample}",
             aligner_options = config.get('map_reads_to_self_novoalign_params', "-r Random -l 40 -g 40 -x 20 -t 100 -k") if config.get('map_reads_to_self_aligner', "novoalign")=="novoalign" else "",
             aligner = config.get('map_reads_to_self_aligner', "novoalign"),

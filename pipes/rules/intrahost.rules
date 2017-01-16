@@ -25,7 +25,7 @@ rule isnvs_per_sample:
     input: isnvs_per_sample_inputs
     output: config["data_dir"]+'/'+config["subdirs"]["intrahost"] +'/vphaser2.{sample}.txt.gz'
     resources: 
-            mem=7,
+            mem=12,
             cores=int(config.get("number_of_threads", 1))
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
             UGER=config.get('UGER_queues', {}).get('long', '-q long'),
