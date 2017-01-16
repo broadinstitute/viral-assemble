@@ -678,6 +678,7 @@ def refine_assembly(
     major_cutoff=0.5,
     chr_names=None,
     keep_all_reads=False,
+    skip_rmdup=False,
     already_realigned_bam=None,
     JVMmemory=None,
     threads=1,
@@ -721,15 +722,20 @@ def refine_assembly(
         novoBam = util.file.mkstempfname('.novoalign.bam')
         min_qual = 0 if keep_all_reads else 1
         novoalign.execute(inBam, inFasta, novoBam, options=novo_params.split(), min_qual=min_qual, JVMmemory=JVMmemory)
-        rmdupBam = util.file.mkstempfname('.rmdup.bam')
-        opts = ['CREATE_INDEX=true']
-        if not keep_all_reads:
-            opts.append('REMOVE_DUPLICATES=true')
-        picard_mkdup.execute([novoBam], rmdupBam, picardOptions=opts, JVMmemory=JVMmemory)
-        os.unlink(novoBam)
+        if skip_rmdup:
+            realign_input = novoBam
+        else:
+            rmdupBam = util.file.mkstempfname('.rmdup.bam')
+            opts = ['CREATE_INDEX=true']
+            if not keep_all_reads:
+                opts.append('REMOVE_DUPLICATES=true')
+            picard_mkdup.execute([novoBam], rmdupBam, picardOptions=opts, JVMmemory=JVMmemory)
+            realign_input = rmdupBam
         realignBam = util.file.mkstempfname('.realign.bam')
-        gatk.local_realign(rmdupBam, deambigFasta, realignBam, JVMmemory=JVMmemory, threads=threads)
-        os.unlink(rmdupBam)
+        gatk.local_realign(realign_input, deambigFasta, realignBam, JVMmemory=JVMmemory, threads=threads)
+        os.unlink(novoBam)
+        if not skip_rmdup:
+            os.unlink(rmdupBam)
         if outBam:
             shutil.copyfile(realignBam, outBam)
 
@@ -830,6 +836,14 @@ def parser_refine_assembly(parser=argparse.ArgumentParser()):
         default=False,
         action="store_true",
         dest="keep_all_reads"
+    )
+    parser.add_argument(
+        "--skip_rmdup",
+        help="""Do not mark or remove duplicates in BAM; include duplicates
+                when refining assembly""",
+        default=False,
+        action="store_true",
+        dest="skip_rmdup"
     )
     parser.add_argument(
         '--JVMmemory',
