@@ -27,8 +27,8 @@ echo "Hostname: $(hostname)"
 BLACKLISTED_NODES="/broad/hptmp/$(whoami)/blacklisted-nodes"
 mkdir -p $BLACKLISTED_NODES
 
-# Cleanup blacklisted nodes if they have not been touched in a day
-find $BLACKLISTED_NODES -name "*" -type f -mmin +2880 -delete
+# Cleanup blacklisted nodes if they have not been touched in seven days
+find $BLACKLISTED_NODES -name "*" -type f -mmin +10080 -delete
 
 # Specify whether to require that a node have the NFS share mounted
 REQUIRE_NFS_SHARE_MOUNTED=true
