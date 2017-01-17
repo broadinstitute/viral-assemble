@@ -134,6 +134,8 @@ class GATKTool(tools.Tool):
                 intervals,
                 '-o',
                 outBam,    #'--num_threads', threads,
+                '--maxReadsForRealignment',
+                '1000000'
                ]
         self.execute('IndelRealigner', opts, JVMmemory=JVMmemory)
         os.unlink(intervals)
