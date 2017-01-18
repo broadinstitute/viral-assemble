@@ -70,6 +70,7 @@ rule diamond:
         shell("{config[bin_dir]}/metagenomics.py diamond {input.bam} "+diamond_db_prefix+" "+taxonomy_db_prefix+" {output.report} --outReads {output.reads} --threads {resources.threads}")
 
 rule align_rna:
+<<<<<<< HEAD
     input:
         bam         = os.path.join(config["data_dir"], config["subdirs"]["per_sample"], "{sample}.{adjective}.bam"),
         rna_bwa_db  = objectify_remote(expand("{path_prefix}.{ext}", path_prefix=config["align_rna_db"], ext=rna_bwa_ext)),
@@ -194,6 +195,22 @@ rule all_kraken_host_depleted:
         expand(os.path.join(config["data_dir"], config["subdirs"]["metagenomics"],
                             "{sample}.cleaned.kraken.krona.html"), sample=samples)
 
+=======
+    input: join(config["data_dir"], config["subdirs"]["per_sample"], "{sample}.{adjective}.bam")
+    output: report=join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.rna_bwa.report"),
+            nodupes_report=join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.rna_bwa.nodupes.report"),
+            bam=join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.rna_bwa.bam"),
+            lca=join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.rna_bwa.lca.gz"),
+            nodupes_lca=join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.rna_bwa.lca_nodupes.gz")
+    resources: cores=int(config.get("number_of_threads", 1)),
+               mem=36
+    params: numThreads=str(config.get("number_of_threads", 1)),
+            UGER=config.get('UGER_queues', {}).get('long', '-q long')
+    shell:
+        """
+        {config[bin_dir]}/metagenomics.py align_rna {input} {config[align_rna_db]} {config[taxonomy_db]} {output.nodupes_report} --dupeReport {output.report} --outBam {output.bam} --outLca {output.nodupes_lca} --dupeLca {output.lca} --JVMmemory 30g --numThreads {params.numThreads} --tmp_dir {config[tmp_dir]}
+        """
+>>>>>>> Fix the nodupes report.
 
 rule krona_import_taxonomy:
     input:
