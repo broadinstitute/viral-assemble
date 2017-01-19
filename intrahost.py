@@ -1113,7 +1113,7 @@ def iSNV_table(vcf_iter):
                         'pos': row['POS'],
                         'alleles': "%s,%s" % (row['REF'], row['ALT']),
                         'sample': s,
-                        'iSNV_freq': f,
+                        'iSNV_freq': ','.join([str(x) for x in freqs]),
                         'Hw': Hw,
                         'Hs': Hs
                     }
