@@ -26,11 +26,14 @@ def read_tab_file(fname):
             assert len(header) == len(row)
             yield dict(zip(header, row))
 
-def read_samples_file(fname, number_of_chromosomes=1, append_chrom_num=False):
+def read_samples_file(fname, number_of_chromosomes=1, append_chrom_num=False,
+                      skip_ampseq_samples=False):
     if fname==None:
         return []
     with open(fname, 'rt') as inf:
         for line in inf:
+            if skip_ampseq_samples and line.strip().endswith('_ampseq'):
+                continue
             if not append_chrom_num:
                 yield line.strip()
             else:

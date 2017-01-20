@@ -42,7 +42,8 @@ rule isnvs_vcf:
             expand("{data_dir}/{subdir}/vphaser2.{sample}.txt.gz",
                 data_dir=config["data_dir"],
                 subdir=config["subdirs"]["intrahost"],
-                sample=read_samples_file(config["samples_assembly"])),
+                sample=read_samples_file(config["samples_assembly"],
+                                         skip_ampseq_samples=config.get("skip_ampseq_in_merged_vcf", False))),
             expand("{data_dir}/{subdir}/aligned_{chrom}.fasta",
                 data_dir=config["data_dir"],
                 subdir=config["subdirs"]["multialign_ref"],
@@ -58,14 +59,16 @@ rule isnvs_vcf:
             expand("{data_dir}/{subdir}/vphaser2.{sample}.with-ref-pos.txt.gz",
                 data_dir=config["data_dir"],
                 subdir=config["subdirs"]["intrahost"],
-                sample=read_samples_file(config["samples_assembly"]))
+                sample=read_samples_file(config["samples_assembly"],
+                                         skip_ampseq_samples=config.get("skip_ampseq_in_merged_vcf", False)))
     resources: mem=4
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
             UGER=config.get('UGER_queues', {}).get('short', '-q short'),
             logid="all",
             refGenome=os.path.join(config["ref_genome_dir"],"reference"+".fasta"),
             snpEff_ref=" ".join(config["accessions_for_ref_genome_build"]),
-            samples=list(read_samples_file(config["samples_assembly"])),
+            samples=list(read_samples_file(config["samples_assembly"],
+                                           skip_ampseq_samples=config.get("skip_ampseq_in_merged_vcf", False))),
             emailAddress=config["email_point_of_contact_for_ncbi"]
     run:
             shell("{config[bin_dir]}/intrahost.py merge_to_vcf {params.refGenome} {output[0]}"
@@ -84,7 +87,8 @@ rule isnvs_vcf_filtered:
             expand("{data_dir}/{subdir}/vphaser2.{sample}.txt.gz",
                 data_dir=config["data_dir"],
                 subdir=config["subdirs"]["intrahost"],
-                sample=read_samples_file(config["samples_assembly"])),
+                sample=read_samples_file(config["samples_assembly"],
+                                         skip_ampseq_samples=config.get("skip_ampseq_in_merged_vcf", False))),
             expand("{data_dir}/{subdir}/aligned_{chrom}.fasta",
                 data_dir=config["data_dir"],
                 subdir=config["subdirs"]["multialign_ref"],
@@ -100,7 +104,8 @@ rule isnvs_vcf_filtered:
             logid="all",
             refGenome=os.path.join(config["ref_genome_dir"],"reference"+".fasta"),
             snpEff_ref=" ".join(config["accessions_for_ref_genome_build"]),
-            samples=list(read_samples_file(config["samples_assembly"])),
+            samples=list(read_samples_file(config["samples_assembly"],
+                                           skip_ampseq_samples=config.get("skip_ampseq_in_merged_vcf", False))),
             emailAddress=config["email_point_of_contact_for_ncbi"],
             naiveFilter="--naive_filter" if config["vcf_merge_naive_filter"] else ""
     run:
