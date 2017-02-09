@@ -303,8 +303,7 @@ def get_mpileup_allele_counts(inBam, chrom, pos, inConsFasta):
             'i' or 'd', in which case report count for consensus.
     """
     pileupFileName = util.file.mkstempfname('.txt')
-    SamtoolsTool().mpileup(inBam, pileupFileName, ['-A', '-r', '%s:%d-%d' % (chrom, pos, pos), '-B', '-d', '1000000000',
-                                                   '-L', '1000000000', '-Q', '0', '-f', inConsFasta])
+    SamtoolsTool().mpileup(inBam, pileupFileName, ['-r', '%s:%d-%d' % (chrom, pos, pos), '-d', '1000000000', '-L', '1000000000', '-Q', '13', '-f', inConsFasta])
     with open(pileupFileName) as pileupFile:
         words = pileupFile.readline().split('\t')
     if len(words) < 5:
