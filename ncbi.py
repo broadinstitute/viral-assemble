@@ -85,6 +85,7 @@ def tbl_transfer_common(cmap, ref_tbl, out_tbl, alt_chrlens, oob_clip=False):
                                 row[0] = '<1'
                             if row[1] == None:
                                 row[1] = '>{}'.format(alt_chrlens[altid])
+                            feature_keep = True
                         else:
                             feature_keep = False
                             continue
