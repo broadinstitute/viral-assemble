@@ -14,9 +14,9 @@ rule all_metagenomics:
 rule all_metagenomics_host_depleted:
     input:
         expand(join(config["data_dir"], config["subdirs"]["metagenomics"],
-                    "{sample}.cleaned.{method}.report"), sample=samples, method=['kraken', 'rna_bwa']),
+                    "{sample}.cleaned.{method}.report"), sample=samples, method=['kraken']),
         expand(join(config["data_dir"], config["subdirs"]["metagenomics"],
-                    "{sample}.cleaned.{method}.krona.html"), sample=samples, method=['kraken', 'rna_bwa'])
+                    "{sample}.cleaned.{method}.krona.html"), sample=samples, method=['kraken'])
     params: LSF='-N'
 
 
