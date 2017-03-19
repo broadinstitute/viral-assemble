@@ -35,6 +35,14 @@ rule all_ref_guided_from_cleaned_reads:
             os.path.join(config["data_dir"], config["subdirs"]["interhost"], 'ref_guided.from_cleaned.fasta'),
             os.path.join(config["data_dir"], config["subdirs"]["interhost"], 'ref_guided.from_cleaned.vcf.gz')
 
+rule all_multialigned_with_ref:
+    input:
+        config["data_dir"]+'/'+config["subdirs"]["multialign_ref"] + "/sampleNameList.txt",
+        expand("{data_dir}/{subdir}/aligned_{chrom}.fasta",
+                data_dir=config["data_dir"],
+                subdir=config["subdirs"]["multialign_ref"],
+                chrom=range(1, len(config["accessions_for_ref_genome_build"])+1))
+
 rule ref_guided_consensus:
     input:  
             expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" ),
