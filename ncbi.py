@@ -386,8 +386,9 @@ def make_structured_comment_file(cmt_fname, name=None, seq_tech=None, coverage=N
             outf.write("Assembly Name\t{}\n".format(name))
         if coverage:
             coverage = str(coverage)
-            if not coverage.endswith('x') or coverage.endswith('X'):
-                coverage = coverage + 'x'
+            if not coverage.startswith('n/a'):
+                if not coverage.endswith('x') or coverage.endswith('X'):
+                    coverage = coverage + 'x'
             outf.write("Genome Coverage\t{}\n".format(coverage))
         if seq_tech:
             outf.write("Sequencing Technology\t{}\n".format(seq_tech))
