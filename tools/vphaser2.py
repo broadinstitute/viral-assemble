@@ -69,10 +69,13 @@ class Vphaser2Tool(tools.Tool):
             outfile = os.path.join(outdir, chromName + '.var.raw.txt')
             if not os.path.exists(outfile):
                 continue
+            log.info("Raw vphaser output for CHROM: " + chromName)
             with open(outfile, 'rt') as inf:
                 for line in inf:
+                    log.info(line)
                     if not line.startswith('#'):
                         yield [chromName] + line.strip().split()
+            log.info("Done outputing raw vphaser output")
         shutil.rmtree(outdir)
 
 
