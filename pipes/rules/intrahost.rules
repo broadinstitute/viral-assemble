@@ -32,10 +32,12 @@ rule isnvs_per_sample:
             logid="{sample}",
             numThreads=str(config.get("number_of_threads", 1)),
             minReadsPerStrand="--minReadsEach {}".format(config['vphaser_min_reads_each']) if 'vphaser_min_reads_each' in config else "",
-            maxBias="--maxBias {}".format(config['vphaser_max_bins']) if 'vphaser_max_bins' in config else ""
+            maxBias="--maxBias {}".format(config['vphaser_max_bins']) if 'vphaser_max_bins' in config else "",
+            raw_vphaser_output=config["tmp_dir"]+'/'+config["subdirs"]["intrahost"]+'/{sample}-1.var.raw.txt'
     run:
             makedirs(config["data_dir"]+'/'+config["subdirs"]["intrahost"])
-            shell("{config[bin_dir]}/intrahost.py vphaser_one_sample {input} {output} --vphaserNumThreads {params.numThreads} --removeDoublyMappedReads {params.minReadsPerStrand} {params.maxBias}")
+            makedirs(config["tmp_dir"]+'/'+config["subdirs"]["intrahost"])
+            shell("{config[bin_dir]}/intrahost.py vphaser_one_sample {input} {output} {params.raw_vphaser_output} --vphaserNumThreads {params.numThreads} --removeDoublyMappedReads {params.minReadsPerStrand} {params.maxBias}")
             
 rule isnvs_vcf:
     input:

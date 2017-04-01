@@ -48,35 +48,50 @@ class Vphaser2Tool(tools.Tool):
             log.error(ex.output)
             raise
 
-    def iterate(self, inBam, numThreads=None):
+    def iterate(self, inBam, rawVphaserOutput, numThreads=None):
         """
         Run V-Phaser 2 on inBam. Interate through lines in files
             CHROM.var.raw.txt in order of chroms in the inBam header.
         For each line yield:
          [CHROM, Ref_Pos, Var, Cons, Strd_bias_pval, Type, Var_perc,
           SNP_or_LP_Profile1, SNP_or_LP_Profile2, ...]
+
+        Read from rawVphaserOutput if it exists; if it does not, write to
+        there
         """
-        outdir = tempfile.mkdtemp('vphaser2')
-        try:
-            self.execute(inBam, outdir, numThreads)
-        finally:
-            # these V-Phaser droppings cause problems if they persist
-            bti = inBam + '.bti'
-            if os.path.isfile(bti):
-                os.unlink(bti)
+        if not os.path.exists(rawVphaserOutput):
+            # run vphaser
+            log.info("Executing vphaser2")
+            outdir = tempfile.mkdtemp('vphaser2')
+            try:
+                self.execute(inBam, outdir, numThreads)
+            finally:
+                # these V-Phaser droppings cause problems if they persist
+                bti = inBam + '.bti'
+                if os.path.isfile(bti):
+                    os.unlink(bti)
+            ran_vphaser = True
+        else:
+            log.info("Reading raw vphaser2 input from tmp file")
+            ran_vphaser = False
+            
         chromNames = pysam.Samfile(inBam).references
         for chromName in chromNames:
-            outfile = os.path.join(outdir, chromName + '.var.raw.txt')
-            if not os.path.exists(outfile):
-                continue
+            if ran_vphaser:
+                outfile = os.path.join(outdir, chromName + '.var.raw.txt')
+                if not os.path.exists(outfile):
+                    continue
+                shutil.copy(outfile, rawVphaserOutput)
             log.info("Raw vphaser output for CHROM: " + chromName)
-            with open(outfile, 'rt') as inf:
+            with open(rawVphaserOutput, 'rt') as inf:
                 for line in inf:
                     log.info(line)
                     if not line.startswith('#'):
                         yield [chromName] + line.strip().split()
             log.info("Done outputing raw vphaser output")
-        shutil.rmtree(outdir)
+
+        if ran_vphaser:
+            shutil.rmtree(outdir)
 
 
 def _get_vphaser2_path():

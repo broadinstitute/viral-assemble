@@ -101,7 +101,7 @@ defaultMinReads = 5
 defaultMaxBias = 10
 
 
-def vphaser_one_sample(inBam, inConsFasta, outTab, vphaserNumThreads=None,
+def vphaser_one_sample(inBam, inConsFasta, outTab, rawVphaserOutput, vphaserNumThreads=None,
                        minReadsEach=None, maxBias=None, removeDoublyMappedReads=False):
     ''' Input: a single BAM file, representing reads from one sample, mapped to
             its own consensus assembly. It may contain multiple read groups and
@@ -142,7 +142,7 @@ def vphaser_one_sample(inBam, inConsFasta, outTab, vphaserNumThreads=None,
         util.file.touch(outTab)
         return None
 
-    variantIter = Vphaser2Tool().iterate(bam_to_process, vphaserNumThreads)
+    variantIter = Vphaser2Tool().iterate(bam_to_process, rawVphaserOutput, vphaserNumThreads)
     filteredIter = filter_strand_bias(variantIter, minReadsEach, maxBias)
 
     libraryFilteredIter = compute_library_bias(filteredIter, bam_to_process, inConsFasta)
@@ -330,6 +330,8 @@ def parser_vphaser_one_sample(parser=argparse.ArgumentParser()):
     parser.add_argument("inBam", help="Input Bam file.")
     parser.add_argument("inConsFasta", help="Consensus assembly fasta.")
     parser.add_argument("outTab", help="Tab-separated headerless output file.")
+    parser.add_argument("rawVphaserOutput", help=("Read the raw vphaser output "
+       "from here if it exists; write it to here if it does not"))
     parser.add_argument("--vphaserNumThreads", type=int, default=None, help="Number of threads in call to V-Phaser 2.")
     parser.add_argument("--minReadsEach",
                         type=int,
