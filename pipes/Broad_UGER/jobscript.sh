@@ -42,6 +42,10 @@ REQUIRE_AVAILABLE_SHARED_MEMORY=true
 # error (e.g., for some time the node 'sgi1' could not run java)
 REQUIRE_JAVA_TO_RUN=true
 
+# Specify whether to avoid nodes with Opteron processors, which
+# run slower than the Xeon ones
+REQUIRE_NON_OPTERON_CPU=true
+
 # Perform checks on node and decide whether to blacklist
 if [[ "$REQUIRE_NFS_SHARE_MOUNTED" = true ]] && ! $(ls "$DATADIR" &> /dev/null); then
     # Listing the data directory fails since the node does not have the
@@ -59,6 +63,12 @@ fi
 if [[ "$REQUIRE_JAVA_TO_RUN" = true ]] && ! java -version; then
     # Java does not run successfully
     echo "Host '$(hostname)' cannot run java. Retrying.." 1>&2
+    touch "$BLACKLISTED_NODES/$(hostname)"
+    exit 99
+fi
+if [[ "$REQUIRE_NON_OPTERON_CPU" = true ]] && grep Opteron /proc/cpuinfo; then
+    # This node has an Opteron CPU
+    echo "Host '$(hostname)' has an Opteron CPU. Retrying.." 1>&2
     touch "$BLACKLISTED_NODES/$(hostname)"
     exit 99
 fi
