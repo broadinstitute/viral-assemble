@@ -102,7 +102,8 @@ defaultMaxBias = 10
 
 
 def vphaser_one_sample(inBam, inConsFasta, outTab, rawVphaserOutput, vphaserNumThreads=None,
-                       minReadsEach=None, maxBias=None, removeDoublyMappedReads=False):
+                       minReadsEach=None, maxBias=None, removeDoublyMappedReads=False,
+                       vphaserFreqToFilter=0):
     ''' Input: a single BAM file, representing reads from one sample, mapped to
             its own consensus assembly. It may contain multiple read groups and
             libraries.
@@ -143,12 +144,26 @@ def vphaser_one_sample(inBam, inConsFasta, outTab, rawVphaserOutput, vphaserNumT
         return None
 
     variantIter = Vphaser2Tool().iterate(bam_to_process, rawVphaserOutput, vphaserNumThreads)
-    filteredIter = filter_strand_bias(variantIter, minReadsEach, maxBias)
+    freqFilteredIter = filter_vphaser_freq(variantIter, vphaserFreqToFilter)
+    strandBiasFilteredIter = filter_strand_bias(freqFilteredIter, minReadsEach, maxBias)
 
-    libraryFilteredIter = compute_library_bias(filteredIter, bam_to_process, inConsFasta)
+    libraryFilteredIter = compute_library_bias(strandBiasFilteredIter, bam_to_process, inConsFasta)
     with util.file.open_or_gzopen(outTab, 'wt') as outf:
         for row in libraryFilteredIter:
             outf.write('\t'.join(row) + '\n')
+
+
+def filter_vphaser_freq(isnvs, vphaserFreqToFilter=0):
+    """Take an iterator of vphaser output (plus chromosome name prepended)
+    and performed hard filtering on frequency
+
+    vphaserFreqToFilter should be a float in [0,100] (i.e., frequency as
+    a percentage).
+    """
+    freqCol = 6 # column giving frequency of variant
+    for row in isnvs:
+        if float(row[freqCol]) >= vphaserFreqToFilter:
+            yield row
 
 
 def filter_strand_bias(isnvs, minReadsEach=None, maxBias=None):
@@ -346,6 +361,13 @@ def parser_vphaser_one_sample(parser=argparse.ArgumentParser()):
                         default=False,
                         action="store_true",
                         help="""When calling V-Phaser, remove reads mapping to more than one contig. Default is to keep the reads.""")
+    parser.add_argument("--vphaserFreqToFilter",
+                        type=float,
+                        default=0,
+                        help=("Filter variants from vphaser's raw output whose "
+                              "frequency is < this value. Does not call "
+                              "mpileup per library on these variants. "
+                              "Expressed as a percent in [0,100]."))
     util.cmd.common_args(parser, (('loglevel', None), ('version', None)))
     util.cmd.attach_main(parser, vphaser_one_sample, split_args=True)
     return parser

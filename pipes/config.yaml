@@ -202,6 +202,12 @@ vcf_merge_naive_filter: false
 # warning that 'vPhaser and assembly pipelines mismatch'.
 skip_ampseq_in_merged_vcf: false
 
+# After calling vphaser, filter its variants that have frequency less
+# than this percent (expressed in [0,100]). mpileup counts per library
+# are not collected for these variants that are filtered and they are
+# not included in the intrahost output.
+vphaser_freq_to_filter: 0
+
 #    |----------------------- Data storage locations ---------------------------
 
 # The parent directory containing data sub-directories.
