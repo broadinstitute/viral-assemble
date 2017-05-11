@@ -94,6 +94,16 @@ def mkstempfname(suffix='', prefix='tmp', directory=None, text=False):
     return fn
 
 
+@contextlib.contextmanager
+def tempfname(*args, **kwargs):
+    '''Create a tempfile name on context entry, delete the file (if it exists) on context exit.'''
+    fn = mkstempfname(*args, **kwargs)
+    try:
+        yield fn
+    finally:
+        if os.path.isfile(fn): os.unlink(fn)
+
+
 def set_tmp_dir(name):
     proposed_prefix = ['tmp']
     if name:
@@ -473,3 +483,9 @@ def line_count(infname):
 def touch(fname, times=None):
     with open(fname, 'a'):
         os.utime(fname, times)
+
+def touch_empty(fname):
+    '''Make fname a zero-length file with the current timestamp'''
+    with open(fname, 'w'):
+        pass
+        

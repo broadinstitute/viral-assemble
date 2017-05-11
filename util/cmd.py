@@ -200,14 +200,18 @@ def main_argparse(commands, description):
         try:
             ret = args.func_main(args)
         except:
-            if hasattr(args, 'tmp_dirKeep') and args.tmp_dirKeep:
+            if (hasattr(args, 'tmp_dirKeep') and args.tmp_dirKeep)  or ('VNGS_KEEPTMP' in os.environ):
                 log.exception(
                     "Exception occurred while running %s, saving tmp_dir at %s", args.command, tempfile.tempdir)
             else:
                 shutil.rmtree(tempfile.tempdir)
             raise
         else:
-            shutil.rmtree(tempfile.tempdir)
+            if (hasattr(args, 'tmp_dirKeep') and args.tmp_dirKeep) or ('VNGS_KEEPTMP' in os.environ):
+                log.debug(
+                    "No exception occurred while running %s, but saving tmp_dir at %s", args.command, tempfile.tempdir)
+            else:
+               shutil.rmtree(tempfile.tempdir)
     else:
         # otherwise just run the command
         ret = args.func_main(args)

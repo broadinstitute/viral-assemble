@@ -101,18 +101,19 @@ class SamToFastqTool(PicardTools):
     subtoolName = 'SamToFastq'
     illumina_clipping_attribute = 'XT'
 
-    def execute(self, inBam, outFastq1, outFastq2, picardOptions=None, JVMmemory=None):    # pylint: disable=W0221
+    def execute(self, inBam, outFastq1, outFastq2, outFastqUnpaired=None,
+                picardOptions=None, JVMmemory=None):    # pylint: disable=W0221
         if tools.samtools.SamtoolsTool().isEmpty(inBam):
             # Picard SamToFastq cannot deal with an empty input BAM file
-            with open(outFastq1, 'wt') as outf:
-                pass
-            with open(outFastq2, 'wt') as outf:
-                pass
+            for f in (outFastq1,outFastq2,outFastqUnpaired):
+                if f: util.file.touch_empty(f)
         else:
             picardOptions = picardOptions or []
             opts = [
-                'FASTQ=' + outFastq1, 'SECOND_END_FASTQ=' + outFastq2, 'INPUT=' + inBam, 'VALIDATION_STRINGENCY=SILENT'
+                'FASTQ=' + outFastq1, 'INPUT=' + inBam, 'VALIDATION_STRINGENCY=SILENT'
             ]
+            if outFastq2: opts.append( 'SECOND_END_FASTQ=' + outFastq2 )
+            if outFastqUnpaired: opts.append( 'UNPAIRED_FASTQ=' + outFastqUnpaired )
             PicardTools.execute(self, self.subtoolName, opts + picardOptions, JVMmemory)
 
     def per_read_group(self, inBam, outDir, picardOptions=None, JVMmemory=None):

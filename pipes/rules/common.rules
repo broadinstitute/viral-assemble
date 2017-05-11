@@ -39,7 +39,7 @@ def read_samples_file(fname, number_of_chromosomes=1, append_chrom_num=False):
                     yield line+"-{idx}".format(idx=str(i))
 
 def read_accessions_file(fname):
-    if fname==None:
+    if not fname:
         return []
     with open(fname, 'rt') as inf:
         for line in inf:

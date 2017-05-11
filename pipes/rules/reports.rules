@@ -101,3 +101,16 @@ if config.get("spikeins_db"):
         output: '{dir}/summary.spike_count.txt'
         params: logid="all"
         shell:  "{config[bin_dir]}/reports.py consolidate_spike_count {wildcards.dir}/spike_count {output}"
+
+rule assembly_report:
+    output: config["reports_dir"]+'/assembly/{sample}.txt'
+    resources: mem=2
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            logid="{sample}"
+    shell:  "{config[bin_dir]}/reports.py assembly_stats {wildcards.sample} {output}" \
+            " --assembly_dir {config[data_dir]}/{config[subdirs][assembly]}" \
+            " --assembly_tmp {config[tmp_dir]}/{config[subdirs][assembly]}" \
+            " --align_dir {config[data_dir]}/{config[subdirs][align_self]}" \
+            " --reads_dir {config[data_dir]}/{config[subdirs][per_sample]}" \
+            " --raw_reads_dir {config[data_dir]}/{config[subdirs][source]}"
+        

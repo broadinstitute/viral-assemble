@@ -54,7 +54,50 @@ rule assemble_trinity:
                 subdir=config["subdirs"]["assembly"]))
             shell("{config[bin_dir]}/assembly.py assemble_trinity {input} {params.clipDb} {output} --n_reads={params.n_reads} --outReads {params.subsamp_bam} --threads {params.numThreads} --JVMmemory 5g")
 
-rule orient_and_impute:
+rule assemble_spades:
+    ''' This step runs the SPAdes assembler.
+    '''
+    input:  config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.subsamp.bam'
+    output: config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-spades.fasta'
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short'),
+            logid="{sample}",
+            numThreads=str(config.get("number_of_threads", 1)),
+            spades_use=bool(config.get("spades_use", False))
+    run:
+            makedirs(expand("{dir}/{subdir}",
+                dir=[config["data_dir"],config["tmp_dir"]],
+                subdir=config["subdirs"]["assembly"]))
+            if params.spades_use:
+                shell("{config[bin_dir]}/assembly.py assemble_spades {input} {output}")
+            else:
+                shell("touch {output}")
+
+
+rule combine_de_novo_contigs:
+    '''Combine de novo contigs obtained by different assemblers'''
+    input: config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta',
+           config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-spades.fasta'
+    output: config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity-spades.fasta'
+    run:
+            shell("cat {input[0]} {input[1]} > {output[0]}")
+
+rule choose_scaffolding_reference:
+    '''Identify the reference that best matches the sample, so we can scaffold the contigs on it.'''
+    input: 
+        config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity-spades.fasta',
+        config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam',
+        config["scafref_dir"] +'/scafref.indexing.done'
+    output:
+        config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-scafref.fasta'
+    run:
+        shell("{config[bin_dir]}/scafref.py choose_scafref {config[scafref_dir]} {input[0]} {input[1]}")
+
+
+rule order_and_orient:
     ''' This step cleans up the Trinity assembly with a known reference genome.
         order_and_orient (MUMmer): take the de novo assembly,
             align them to the known reference genome, switch it to the same
@@ -77,7 +120,9 @@ rule orient_and_impute:
     input:  
         config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta',
         expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" )
-    output: config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta'
+    output: 
+        config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.fasta'
+        #config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-alternate_sequences.fasta'
     resources: mem=12
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
             UGER=config.get('UGER_queues', {}).get('short', '-q short'),
@@ -103,7 +148,129 @@ rule orient_and_impute:
                 ono_extra.extend(["--min_pct_contig_aligned", str(config["scaffold_min_pct_contig_aligned"])])
             ono_extra = " ".join(ono_extra)
             shell("{config[bin_dir]}/assembly.py order_and_orient {input[0]} {params.refGenome} {params.scaffolded_fasta} {ono_extra} --outAlternateContigs {params.alternate_fasta}")
+            shell("{config[bin_dir]}/read_utils.py index_fasta_all {params.scaffolded_fasta}")
+
+
+rule fill_scaffold_gaps:
+    ''' Fill gaps in assembly, using clean reads.
+    '''
+    input:  config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.fasta',
+            config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
+    output: config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-gapfilled.fasta'
+    resources: 
+            mem=45,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('long', '-q long'),
+            logid="{sample}",
+            numThreads=str(config.get("number_of_threads", 1))
+    run:   
+          shell("{config[bin_dir]}/assembly.py gapfill_sealer {input[0]} {input[1]} {output[0]} -k90  -b10 -P20 --sealer_opts='-j4'")
+          shell("{config[bin_dir]}/read_utils.py index_fasta_all {output[0]}")
+
+
+
+rule impute_from_reference:
+    ''' This step cleans up the Trinity assembly with a known reference genome.
+        order_and_orient (MUMmer): take the de novo assembly,
+            align them to the known reference genome, switch it to the same
+            strand as the reference, and produce chromosome-level assemblies
+            (with runs of N's in between the de novo contigs).
+        filter_short_seqs: Fail on assemblies that come out to
+            < 15kb or < 95% unambiguous.
+        impute_from_reference: trim off anything at the end that exceeds
+            the length of the known reference assembly.  We also replace all
+            Ns and everything within 55bp of the chromosome ends with the
+            reference sequence.  This is clearly incorrect consensus sequence,
+            but it allows downstream steps to map reads in parts of the genome
+            that would otherwise be Ns, and we will correct all of the inferred
+            positions with two steps of read-based refinement (below), and
+            revert positions back to Ns where read support is lacking.  The
+            de novo step is still important because it allows for significant
+            structural / indel changes (or significant substitution distances)
+            which will be captured in this output.
+    '''
+    input:  
+        config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-gapfilled.fasta',
+        expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" )
+    output: config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta'
+    resources: mem=12
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short'),
+            refGenome=os.path.join(config["ref_genome_dir"],"reference"+".fasta"),
+            # length should be defined as a fraction/percentage cutoff, relative to 
+            # reference length for a given sequence. float is in the config.yaml file
+            length = str(config["assembly_min_length_fraction_of_reference"]),
+            min_unambig = str(config["assembly_min_unambig"]),
+            renamed_prefix="",
+            replace_length=str(config.get("assembly_replace_length", 55)),
+            logid="{sample}",
+    run:
+            ono_extra = []
+            if config.get("assembly_nucmer_max_gap"):
+                ono_extra.extend(["--maxgap", str(config["assembly_nucmer_max_gap"])])
+            if config.get("assembly_nucmer_min_match"):
+                ono_extra.extend(["--minmatch", str(config["assembly_nucmer_min_match"])])
+            if config.get("assembly_nucmer_min_cluster"):
+                ono_extra.extend(["--mincluster", str(config["assembly_nucmer_min_cluster"])])
+            if config.get("scaffold_min_pct_contig_aligned"):
+                ono_extra.extend(["--min_pct_contig_aligned", str(config["scaffold_min_pct_contig_aligned"])])
+            ono_extra = " ".join(ono_extra)
+            shell("{config[bin_dir]}/assembly.py impute_from_reference {input[0]} {params.refGenome} {output} --newName {params.renamed_prefix}{wildcards.sample} --replaceLength {params.replace_length} --minLengthFraction {params.length} --minUnambig {params.min_unambig} --index")
+
+
+rule orient_and_impute_spades:
+    ''' This step cleans up the Trinity assembly with a known reference genome.
+        order_and_orient (MUMmer): take the de novo assembly,
+            align them to the known reference genome, switch it to the same
+            strand as the reference, and produce chromosome-level assemblies
+            (with runs of N's in between the de novo contigs).
+        filter_short_seqs: Fail on assemblies that come out to
+            < 15kb or < 95% unambiguous.
+        impute_from_reference: trim off anything at the end that exceeds
+            the length of the known reference assembly.  We also replace all
+            Ns and everything within 55bp of the chromosome ends with the
+            reference sequence.  This is clearly incorrect consensus sequence,
+            but it allows downstream steps to map reads in parts of the genome
+            that would otherwise be Ns, and we will correct all of the inferred
+            positions with two steps of read-based refinement (below), and
+            revert positions back to Ns where read support is lacking.  The
+            de novo step is still important because it allows for significant
+            structural / indel changes (or significant substitution distances)
+            which will be captured in this output.
+    '''
+    input:  
+        config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-spades.fasta',
+        expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" )
+    output: config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.spades.fasta'
+    resources: mem=12
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short'),
+            refGenome=os.path.join(config["ref_genome_dir"],"reference"+".fasta"),
+            # length should be defined as a fraction/percentage cutoff, relative to 
+            # reference length for a given sequence. float is in the config.yaml file
+            length = str(config["assembly_min_length_fraction_of_reference"]),
+            min_unambig = str(config["assembly_min_unambig"]),
+            renamed_prefix="",
+            replace_length=str(config.get("assembly_replace_length", 55)),
+            logid="{sample}",
+            scaffolded_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.spades.fasta',
+            alternate_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-alternate_sequences.spades.fasta'
+    run:
+            ono_extra = []
+            if config.get("assembly_nucmer_max_gap"):
+                ono_extra.extend(["--maxgap", str(config["assembly_nucmer_max_gap"])])
+            if config.get("assembly_nucmer_min_match"):
+                ono_extra.extend(["--minmatch", str(config["assembly_nucmer_min_match"])])
+            if config.get("assembly_nucmer_min_cluster"):
+                ono_extra.extend(["--mincluster", str(config["assembly_nucmer_min_cluster"])])
+            if config.get("scaffold_min_pct_contig_aligned"):
+                ono_extra.extend(["--min_pct_contig_aligned", str(config["scaffold_min_pct_contig_aligned"])])
+            ono_extra = " ".join(ono_extra)
+            shell("{config[bin_dir]}/assembly.py order_and_orient {input[0]} {params.refGenome} {params.scaffolded_fasta} {ono_extra} --outAlternateContigs {params.alternate_fasta}")
             shell("{config[bin_dir]}/assembly.py impute_from_reference {params.scaffolded_fasta} {params.refGenome} {output} --newName {params.renamed_prefix}{wildcards.sample} --replaceLength {params.replace_length} --minLengthFraction {params.length} --minUnambig {params.min_unambig} --index")
+
+
 
 rule refine_assembly_1:
     ''' This a first pass refinement step where we take the scaffolded assembly,
@@ -180,3 +347,4 @@ rule map_reads_to_self:
             makedirs([os.path.join(config["data_dir"], config["subdirs"]["align_self"]),
                 os.path.join(config["reports_dir"], "assembly")])
             shell("{config[bin_dir]}/read_utils.py align_and_fix {input} --outBamAll {output[0]} --outBamFiltered {output[1]} --aligner novoalign --aligner_options '{params.aligner_options}' --threads {params.numThreads}")
+

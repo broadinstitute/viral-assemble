@@ -37,6 +37,8 @@ import tools.trinity
 import tools.mafft
 import tools.mummer
 import tools.muscle
+import tools.spades
+import tools.abyss
 
 # third-party
 import Bio.AlignIO
@@ -337,6 +339,100 @@ def parser_assemble_trinity(parser=argparse.ArgumentParser()):
 
 
 __commands__.append(('assemble_trinity', parser_assemble_trinity))
+
+def assemble_spades(
+    inBam,
+    outFasta,
+    min_contig_len=300,
+    spades_opts='',
+    always_succeed=False,
+    threads=1,
+):
+    ''' This step runs the SPAdes assembler.
+    '''
+    picard_opts = {
+                 'CLIPPING_ATTRIBUTE': tools.picard.SamToFastqTool.illumina_clipping_attribute,
+                 'CLIPPING_ACTION': 'X'
+    }
+
+    subsampfq = list(map(util.file.mkstempfname, ['.subsamp.1.fastq', '.subsamp.2.fastq', '.subsamp.unpaired.fastq']))
+    tools.picard.SamToFastqTool().execute(inBam, subsampfq[0], subsampfq[1], 
+                                          outFastqUnpaired=subsampfq[2],
+                                          picardOptions=tools.picard.PicardTools.dict_to_picard_opts(picard_opts))
+    try:
+        tools.spades.SpadesTool().assemble(reads_fwd=subsampfq[0], reads_bwd=subsampfq[1], reads_unpaired=subsampfq[2],
+                                           contigs_out=outFasta, spades_opts='')
+    except subprocess.CalledProcessError as e:
+        if always_succeed:
+            log.warn("denovo assembly (SPAdes) failed to assemble input, emitting empty output instead.")
+            util.file.touch_empty(outFasta)
+        else:
+            raise DenovoAssemblyError((0,0,0,0,0,0))
+    os.unlink(subsampfq[0])
+    os.unlink(subsampfq[1])
+    os.unlink(subsampfq[2])
+
+def parser_assemble_spades(parser=argparse.ArgumentParser()):
+    parser.add_argument('inBam', help='Input unaligned reads, BAM format.')
+    parser.add_argument('outFasta', help='Output assembly.')
+    parser.add_argument(
+        '--min_contig_len',
+        default=300,
+        type=int,
+        help='Discard contigs shorter than this many basepairs (default %(default)s)'
+    )
+    parser.add_argument(
+        "--always_succeed",
+        help="""If SPAdes fails (usually because insufficient reads to assemble),
+                        emit an empty fasta file as output. Default is to throw a DenovoAssemblyError.""",
+        default=False,
+        action="store_true",
+        dest="always_succeed"
+    )
+    parser.add_argument('--threads', default=1, help='Number of threads (default: %(default)s)')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, assemble_spades, split_args=True)
+    return parser
+
+
+__commands__.append(('assemble_spades', parser_assemble_spades))
+
+def gapfill_sealer(
+    in_scaffold,
+    inBam,
+    out_scaffold,
+    k,
+    b,
+    P=4,
+    always_succeed=False,
+    threads=1,
+    sealer_opts=''
+):
+    ''' This step runs the Sealer tool from ABySS assembler to close gaps in the assembly.
+    '''
+    reads = list(map(util.file.mkstempfname, ['.reads.1.fastq', '.reads.2.fastq']))
+    samtools = tools.samtools.SamtoolsTool()
+    samtools.bam2fq( inBam, reads[0], reads[1] )
+    tools.abyss.AbyssTool().gapfill( in_scaffold, reads[0], reads[1], out_scaffold, 
+                                     k, b, sealer_opts=sealer_opts.split() )
+    os.unlink(reads[0])
+    os.unlink(reads[1])
+
+def parser_gapfill_sealer(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_scaffold', help='Scaffold with gaps (FASTA witht Ns)')
+    parser.add_argument('inBam', help='Input unaligned reads, BAM format.')
+    parser.add_argument('out_scaffold', help='Output assembly.')
+    parser.add_argument('-k', type=int, action='append', help='kmer sizes')
+    parser.add_argument('-b', type=int, help='bloom filter size (gb)')
+    parser.add_argument('-P', type=int, help='max paths')
+    parser.add_argument('--sealer_opts', help='Extra sealer options.')
+
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, gapfill_sealer, split_args=True)
+    return parser
+
+
+__commands__.append(('gapfill_sealer', parser_gapfill_sealer))
 
 
 def order_and_orient(inFasta, inReference, outFasta,
