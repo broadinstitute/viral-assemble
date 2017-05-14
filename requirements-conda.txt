@@ -1,3 +1,4 @@
+abyss=2.0.1
 blast=2.6.0
 bmtagger=3.101
 bwa=0.7.15

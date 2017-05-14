@@ -37,6 +37,7 @@ import tools.trinity
 import tools.mafft
 import tools.mummer
 import tools.muscle
+import tools.abyss
 
 # third-party
 import Bio.AlignIO
@@ -484,6 +485,32 @@ class PoorAssemblyError(Exception):
                 chr_idx, seq_len, non_n_count
             )
         )
+
+
+def gapfill_sealer(
+    in_scaffold,
+    inBam,
+    out_scaffold,
+    sealer_params='',
+    threads=1
+):
+    ''' This step runs the Sealer tool from ABySS assembler to close gaps in the assembly.
+    '''
+    tools.abyss.AbyssTool().gapfill( in_scaffold, inBam, out_scaffold, sealer_params=sealer_params, threads=threads )
+
+def parser_gapfill_sealer(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_scaffold', help='Scaffold with gaps (FASTA witht Ns)')
+    parser.add_argument('inBam', help='Input unaligned reads, BAM format.')
+    parser.add_argument('out_scaffold', help='Output assembly.')
+    parser.add_argument('--sealer_params', help='Sealer options.')
+    parser.add_argument('--threads', default=1, type=int, help='Number of threads (default: %(default)s)')
+
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, gapfill_sealer, split_args=True)
+    return parser
+
+
+__commands__.append(('gapfill_sealer', parser_gapfill_sealer))
 
 
 def impute_from_reference(

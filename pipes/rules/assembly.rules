@@ -54,7 +54,65 @@ rule assemble_trinity:
                 subdir=config["subdirs"]["assembly"]))
             shell("{config[bin_dir]}/assembly.py assemble_trinity {input} {params.clipDb} {output} --n_reads={params.n_reads} --outReads {params.subsamp_bam} --threads {params.numThreads} --JVMmemory 5g")
 
-rule orient_and_impute:
+
+rule order_and_orient:
+    ''' order_and_orient (MUMmer): take the de novo assembly,
+            align them to the known reference genome, switch it to the same
+            strand as the reference, and produce chromosome-level assemblies
+            (with runs of N's in between the de novo contigs).
+    '''
+    input:  
+        config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta',
+        expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" )
+    output: 
+        config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.fasta'
+
+    resources: mem=4
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short'),
+            refGenome=os.path.join(config["ref_genome_dir"],"reference"+".fasta"),
+            renamed_prefix="",
+            logid="{sample}",
+            scaffolded_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.fasta',
+            alternate_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-alternate_sequences.fasta'
+    run:
+            ono_extra = []
+            if config.get("assembly_nucmer_max_gap"):
+                ono_extra.extend(["--maxgap", str(config["assembly_nucmer_max_gap"])])
+            if config.get("assembly_nucmer_min_match"):
+                ono_extra.extend(["--minmatch", str(config["assembly_nucmer_min_match"])])
+            if config.get("assembly_nucmer_min_cluster"):
+                ono_extra.extend(["--mincluster", str(config["assembly_nucmer_min_cluster"])])
+            if config.get("scaffold_min_pct_contig_aligned"):
+                ono_extra.extend(["--min_pct_contig_aligned", str(config["scaffold_min_pct_contig_aligned"])])
+            ono_extra = " ".join(ono_extra)
+            shell("{config[bin_dir]}/assembly.py order_and_orient {input[0]} {params.refGenome} {params.scaffolded_fasta} {ono_extra} --outAlternateContigs {params.alternate_fasta}")
+            shell("{config[bin_dir]}/read_utils.py index_fasta_all {params.scaffolded_fasta}")
+
+
+rule fill_scaffold_gaps:
+    ''' Fill gaps in assembly, using the Sealer gap-filling tool from the ABYSS assembler.
+    '''
+    input:  scaffold=config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.fasta',
+            reads=config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
+    output: filled_scaffold=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-gapfilled.fasta'
+    resources: 
+            mem=12,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('long', '-q long'),
+            logid="{sample}",
+            numThreads=str(config.get("number_of_threads", 1)),
+            sealer_params = config.get("gapfill_sealer_params", "-k90 -k70 -k50 -k40 -k30 -P30 -b12G"),
+    run:   
+          if not params.sealer_params: shell("cp {input.scaffold} {output.filled_scaffold}")
+          else:
+              shell("{config[bin_dir]}/assembly.py gapfill_sealer {input.scaffold} {input.reads} {output.filled_scaffold} --sealer_params '{params.sealer_params}' --threads {params.numThreads}")
+              shell("{config[bin_dir]}/read_utils.py index_fasta_all {output.filled_scaffold}")
+
+
+
+rule impute_from_reference:
     ''' This step cleans up the Trinity assembly with a known reference genome.
         order_and_orient (MUMmer): take the de novo assembly,
             align them to the known reference genome, switch it to the same
@@ -75,7 +133,7 @@ rule orient_and_impute:
             which will be captured in this output.
     '''
     input:  
-        config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta',
+        config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-gapfilled.fasta',
         expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" )
     output: config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta'
     resources: mem=12
@@ -89,8 +147,6 @@ rule orient_and_impute:
             renamed_prefix="",
             replace_length=str(config.get("assembly_replace_length", 55)),
             logid="{sample}",
-            scaffolded_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.fasta',
-            alternate_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-alternate_sequences.fasta'
     run:
             ono_extra = []
             if config.get("assembly_nucmer_max_gap"):
@@ -102,8 +158,7 @@ rule orient_and_impute:
             if config.get("scaffold_min_pct_contig_aligned"):
                 ono_extra.extend(["--min_pct_contig_aligned", str(config["scaffold_min_pct_contig_aligned"])])
             ono_extra = " ".join(ono_extra)
-            shell("{config[bin_dir]}/assembly.py order_and_orient {input[0]} {params.refGenome} {params.scaffolded_fasta} {ono_extra} --outAlternateContigs {params.alternate_fasta}")
-            shell("{config[bin_dir]}/assembly.py impute_from_reference {params.scaffolded_fasta} {params.refGenome} {output} --newName {params.renamed_prefix}{wildcards.sample} --replaceLength {params.replace_length} --minLengthFraction {params.length} --minUnambig {params.min_unambig} --index")
+            shell("{config[bin_dir]}/assembly.py impute_from_reference {input[0]} {params.refGenome} {output} --newName {params.renamed_prefix}{wildcards.sample} --replaceLength {params.replace_length} --minLengthFraction {params.length} --minUnambig {params.min_unambig} --index")
 
 rule refine_assembly_1:
     ''' This a first pass refinement step where we take the scaffolded assembly,
