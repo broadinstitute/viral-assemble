@@ -92,6 +92,9 @@ def build_scafref_db(scafrefDir, refFasta, kmcKmerSize=35, clarkKmerSize=35,
 
     nsegs=util.file.fasta_length(refFasta)
 
+    shutil.copyfile(refFasta, os.path.join(scafrefDir, 'reference.fasta'))
+
+
     read_utils.index_fasta_all(scafrefFN, JVMmemory=JVMmemory, threads=threads, 
                                novoalign_license_path=novoalign_license_path)
 
@@ -113,19 +116,18 @@ def build_scafref_db(scafrefDir, refFasta, kmcKmerSize=35, clarkKmerSize=35,
     kmc.build_kmer_db(kmerDb=scafrefKmcDb,
                       inFiles=scafrefFN, kmerSize=kmcKmerSize,kmerOpts='-ci1')
     kmc.histogram(scafrefKmcDb, scafrefKmcDb+'.histogram.txt')
-    kmc.histogram(scafrefKmcDb, scafrefKmcDb+'.kmers.txt')
+    kmc.dump(scafrefKmcDb, scafrefKmcDb+'.kmers.txt')
     for cx in (1,2,3):
-        kmc.execute(tool_sfx='_tools',
-                    args=['reduce',os.path.join(kmcDir,'scafref'.format(cx)),
-                          '-ci1','-cx{}'.format(cx), 
-                          os.path.join(kmcDir,'scafref.cx{}'.format(cx))])
+        kmc.reduce(kmerDbIn=scafrefKmcDb, kmerDbOut=os.path.join(kmcDir, 'scafref.cx{}.kmc'.format(cx)),
+                   kmerDbIn_opts='-ci1 -cx{}'.format(cx))
 
     clarkTargsFN=os.path.join(clarkDir,'targets_addresses.txt')
 
     segsRecs = [ [] for seg_idx in range(nsegs) ]
 
+    refListFN=os.path.join(scafrefDir, 'reflist.txt')
 
-    with open(clarkTargsFN, 'wt') as outTargAddr:
+    with open(clarkTargsFN, 'wt') as outTargAddr, open(refListFN, 'wt') as refListOut:
         recs = list(Bio.SeqIO.parse(scafrefFN, 'fasta'))
         assert (len(recs) % nsegs)==0, "Number of ref seqs not a multiple of the number of ref segments"
         nrefs = int(len(recs) / nsegs)
@@ -135,24 +137,33 @@ def build_scafref_db(scafrefDir, refFasta, kmcKmerSize=35, clarkKmerSize=35,
         for ref_num in range(nrefs):
             ref_idx_in_list = ref_num*nsegs
             # we'll denote a ref by the id of its first segment
-            ref_id = util.genbank.parse_accession_str(recs[ref_idx_in_list].id)
+            ref_id = recs[ref_idx_in_list].id
 
             log.info('Processing ref {} ({}/{})'.format(ref_id,ref_num,nrefs))
-
-            refFN=os.path.join(refsDir, util.file.string_to_file_name(ref_id)+'.fa')
+            
+            refFNbase=util.file.string_to_file_name(ref_id)
+            refFN=os.path.join(refsDir, refFNbase+'.fa')
             Bio.SeqIO.write(recs[ref_idx_in_list:ref_idx_in_list+nsegs], refFN, 'fasta')
-            kmc.build_kmer_db(kmerDb=os.path.join(kmcDir, util.file.string_to_file_name(ref_id)+'.kmc'),
+            kmc.build_kmer_db(kmerDb=os.path.join(kmcDir, refFNbase+'.kmc'),
                               inFiles=refFN, kmerSize=kmcKmerSize,kmerOpts='-ci1')
-
+            
+            segFNs=[]
             for seg_idx in range(nsegs):
                 seg_rec = recs[ref_idx_in_list+seg_idx]
                 segsRecs[seg_idx].append(seg_rec)
-                seg_id = util.genbank.parse_accession_str(seg_rec.id)
+                seg_id = seg_rec.id
+
+
                 segFN=os.path.join(refsSplitDir,util.file.string_to_file_name(seg_id) + '.fa')
+                segFNs.append(segFN)
+                log.info('Procesing SEG {} ref_num={} ref_idx_in_list={} seg_id={} segFN={}'.format(seg_idx, ref_num, ref_idx_in_list, seg_id, segFN))
                 Bio.SeqIO.write([seg_rec], segFN, 'fasta')
-                targId='REF{:04d}_{}'.format(ref_num,util.file.string_to_file_name(seg_id))
+                targId='REF{:04d}_{}'.format(ref_num,refFNbase)
                 targId=targId[:25]
                 outTargAddr.write( segFN + ' ' + targId + '\n' )
+
+            refListOut.write('\t'.join([refFN] + segFNs) + '\n')
+
 
     for seg_idx in range(nsegs):
         segFasta=os.path.join(scafrefDir,'segs{}.fasta'.format(seg_idx))
@@ -208,6 +219,36 @@ def parser_choose_scafref(parser=argparse.ArgumentParser()):
 
 
 __commands__.append(('choose_scafref', parser_choose_scafref))
+
+
+
+def kmc_build_db(inFile, kmerDb, kmerSize, kmerOpts, histogram='', dump=''):
+    '''Build a kmc kmer database'''
+
+    kmc = tools.kmc.KmcTool()
+    kmc.build_kmer_db(inFiles=[inFile], kmerDb=kmerDb, kmerSize=kmerSize, kmerOpts=kmerOpts)
+    if histogram: kmc.histogram(kmerDb, histogram)
+    if dump: kmc.dump(kmerDb, dump)
+    
+    
+def parser_kmc_build_db(parser=argparse.ArgumentParser()):
+    parser.add_argument('inFile', help='Bam or fasta file to go into the database.')
+    parser.add_argument('kmerDb', help='kmer db name.')
+    parser.add_argument('kmerSize', help='kmer size.')
+    parser.add_argument('--kmerOpts', help='kmer opts.')
+    parser.add_argument('--histogram', help='also output histogram.')
+    parser.add_argument('--dump', help='also output dump.')
+    util.cmd.attach_main(parser, kmc_build_db, split_args=True)
+    return parser
+
+
+__commands__.append(('kmc_build_db', parser_kmc_build_db))
+
+
+def subtract_reads_from_refs(scafrefDir, readsKmcDb):
+    '''For each ref, see which kmers in that ref are _not_ in the db'''
+    
+    
 
 
 def full_parser():

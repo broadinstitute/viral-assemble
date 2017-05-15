@@ -11,6 +11,7 @@ import tempfile
 import random
 
 import tools
+import tools.samtools
 import util.file
 import util.misc
 
@@ -49,14 +50,27 @@ class KmcTool(tools.Tool):
     def build_kmer_db(self, kmerDb, inFiles, kmerSize, kmerOpts='', maxMem=12, threads=1, kmc_opts=''):
         '''Build kmer database, from inFiles (which can be fasta or fastq).'''
         assert inFiles, "no input files!"
+        if isinstance(inFiles,str): inFiles=[inFiles]
+        assert len(set([ os.path.splitext(f)[1] for f in inFiles ]))==1, "mixing different input types not supported"
         with tempfile.TemporaryDirectory('_kmc_build') as kmc_tmp_dir:
+
+            # convert any input bam files to fasta
+            if inFiles[0].endswith('.bam'):
+                inFilesNew=[]
+                samtools=tools.samtools.SamtoolsTool()
+                for f in inFiles:
+                    reads1 = util.file.mkstempfname(suffix='.1.fa', directory=kmc_tmp_dir)
+                    reads2 = util.file.mkstempfname(suffix='.2.fa', directory=kmc_tmp_dir)
+                    reads0 = util.file.mkstempfname(suffix='.0.fa', directory=kmc_tmp_dir)
+                    samtools.bam2fa(inBam=f, outFa1=reads1, outFa2=reads2, outFa0=reads0)
+                    inFilesNew += [reads1, reads2, reads0]
+                inFiles=inFilesNew
 
             log.debug('kmc_tmp_dir=' + kmc_tmp_dir)
             args=['-v', '-m'+str(maxMem), '-t'+str(threads), '-k'+str(kmerSize)]
             args += kmerOpts.split()
             args += kmc_opts.split()
 
-            if isinstance(inFiles,str): inFiles=[inFiles]
             if not all([ f.endswith('.fq') or f.endswith('.fastq') or f.endswith('.fq.gz') or f.endswith('.fastq.gz')
                          for f in inFiles ]): 
                 args += [ '-fm' ]
@@ -86,13 +100,13 @@ class KmcTool(tools.Tool):
         self.execute( tool_sfx='_tools', args=args )
 
 
-    def histogram(self, kmerDb, histogramFile, kmerDbOpts=''):
+    def histogram(self, kmerDb, histogramFile, kmerDbOpts='-ci1'):
         '''Output kmer histogram'''
         args=['-v', 'histogram', self._dbName(kmerDb)]+kmerDbOpts.split()+[histogramFile]
         self.execute( tool_sfx='_tools', args=args )
 
 
-    def dump_kmer_db(self, kmerDb, kmerListFile, kmerOpts=''):
+    def dump(self, kmerDb, kmerListFile, kmerDbOpts='-ci1'):
         '''Dump kmers and counts from kmerDb to kmerListFile'''
         args = ['dump', self._dbName(kmerDb)] + kmerDbOpts.split() + [kmerListFile]
         self.execute( tool_sfx='_tools', args=args )

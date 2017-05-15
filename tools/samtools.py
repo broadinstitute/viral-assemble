@@ -73,6 +73,7 @@ class SamtoolsTool(tools.Tool):
         else:
             self.execute('bam2fq', ['-1', outFq1, '-2', outFq2, inBam])
 
+
     def sort(self, inFile, outFile, args=None, threads=None):
         # inFile can be .sam, .bam, .cram
         # outFile can be .sam, .bam, .cram

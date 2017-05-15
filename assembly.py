@@ -15,6 +15,7 @@ import os
 import os.path
 import shutil
 import subprocess
+import pysam
 
 try:
     from itertools import zip_longest    # pylint: disable=E0611
@@ -951,6 +952,237 @@ def parser_refine_assembly(parser=argparse.ArgumentParser()):
 
 
 __commands__.append(('refine_assembly', parser_refine_assembly))
+
+
+
+
+def ambiguate_to_coverage(
+    inFasta,
+    inBam,
+    outBamLaxBef,
+    outBamStrictBef,
+    outBamStrictAft,
+    outBamLaxAft,
+    outFasta,
+    minDepth,
+    maxAlignStrictScore,
+    maxAlignLaxScore,
+        novo_params_lax,
+        novo_params_strict,
+        
+        JVMmemory=None,
+        threads=1,
+        gatk_path=None,
+        novoalign_license_path=None
+):
+    ''' Ambiguate bases in the assembly where needed to reach coverage of at least minDepth by reads
+    with alignment score of at most maxAlignStrictScore.
+    '''
+    picard_index = tools.picard.CreateSequenceDictionaryTool()
+    picard_mkdup = tools.picard.MarkDuplicatesTool()
+    samtools = tools.samtools.SamtoolsTool()
+    novoalign = tools.novoalign.NovoalignTool(license_path=novoalign_license_path)
+    gatk = tools.gatk.GATKTool(path=gatk_path)
+
+    novoalign.execute(inBam, inFasta, outBamStrictBef, options=novo_params_strict.split(), min_qual=1, 
+                      JVMmemory=JVMmemory)
+
+    novoalign.execute(inBam, inFasta, outBamLaxBef, options=novo_params_lax.split(), min_qual=1, 
+                      JVMmemory=JVMmemory)
+    
+
+    log.debug('pysam version:' + pysam.__version__)
+    refFasta = pysam.FastaFile(inFasta)
+    log.info('references in {}: {}'.format(inFasta, refFasta.references))
+
+    refOutputs=[]
+
+    for refIdx, refName in enumerate(refFasta.references):
+
+        refSeq = refFasta.fetch(refName)
+        log.info('refSeq {} has length {}'.format(refName, len(refSeq)))
+        log.info('refSeq={}'.format(refSeq))
+        refSeqAry=list(refSeq)
+
+        colsNeedingCover=set()
+        col2ReadsPassingStrict=dict()
+        readsPassingStrict=set()
+
+        def get_qn(a):
+            return '{}/{}'.format(a.query_name, '1' if a.is_read1 else ('2' if a.is_read2 else 'S'))
+
+        with pysam.AlignmentFile(outBamStrictBef) as f:
+            for pileupcolumn  in f.pileup(refName):
+                depthHere=0
+                readsHere=set()
+                for r in pileupcolumn.pileups:
+                    if not r.is_del and not r.is_refskip:
+                        depthHere += 1
+                        a=r.alignment
+                        qn = get_qn(a)
+                        readsHere.add(qn)
+
+                if depthHere < minDepth: 
+                    colsNeedingCover.add(pileupcolumn.reference_pos)
+                    col2ReadsPassingStrict[ pileupcolumn.reference_pos ] = readsHere
+
+        colsChanged=set()
+
+        ncolsRescued=0
+        ncolsFailed=0
+        colsResc=[]
+
+        readsRehabbedTried=set()
+        readsRehabbed=set()
+        colsRehabbed=set()
+        read2origScore=dict()
+
+        log.info('outBamLaxBef={}'.format(outBamLaxBef))
+        with pysam.AlignmentFile(outBamLaxBef) as f:
+            readsAdded=set()
+            for pileupcolumn  in f.pileup(refName):
+                if pileupcolumn.reference_pos not in colsNeedingCover: continue
+
+                log.info('======looking at ref col {}'.format(pileupcolumn.reference_pos))
+
+                for r in pileupcolumn.pileups:
+                    if not r.is_del and not r.is_refskip:
+                        a=r.alignment
+                        qn = get_qn(a)
+                        if qn not in col2ReadsPassingStrict[pileupcolumn.reference_pos] and qn not in readsRehabbedTried:
+                            log.info('adding read {} with score {} mq {}'.format(qn,a.get_tag('AS'),a.mapping_quality))
+                            readsRehabbedTried.add(qn)
+                            for readPos, refPos, refBase in a.get_aligned_pairs(matches_only=True, with_seq=True):
+                                refBaseOld=refSeqAry[refPos].upper()
+                                refBaseOpts=Bio.Data.IUPACData.ambiguous_dna_values[refBaseOld]
+
+                                # don't forget to also improve mapping of the read's pair, if needed
+                                if a.query_sequence[readPos] not in refBaseOpts:
+                                    refBaseNew=alleles_to_ambiguity(list(refBaseOpts+a.query_sequence[readPos]))
+                                    if refBaseNew != refBaseOld:
+                                        log.info('uneq in {}: refPos={} readPos={} refBaseOld={} qry={} refNew={}'
+                                                 .format(qn, refPos, readPos, refBaseOld, a.query_sequence[readPos],
+                                                         refBaseNew))
+                                        refSeqAry[refPos]=refBaseNew
+                                        readsRehabbed.add( qn )
+                                        read2origScore[qn] = a.get_tag('AS')
+                                        colsRehabbed.add(refPos)
+
+        log.info('readsRehabbed: {}'.format(readsRehabbed))
+        log.info('colsRehabbed: {}'.format(sorted(colsRehabbed)))
+        log.info('colsNotRehabbed()'.format(sorted(colsNeedingCover - colsRehabbed)))
+        refOutputs.append((refName, ''.join(refSeqAry)))
+    
+    with open(outFasta,'wt') as outf:
+        for line in util.file.fastaMaker(refOutputs):
+            outf.write(line)
+
+    read_utils.index_fasta_all(outFasta)
+
+    log.info('=========computing outBamLaxAft')
+    novoalign.execute(inBam, outFasta, outBamLaxAft, options=novo_params_lax.split(), min_qual=1, 
+                      JVMmemory=JVMmemory)
+
+    log.info('=========looking at outBamLaxAft')
+    readsRehabbedCheckedLax=set()
+    with pysam.AlignmentFile(outBamLaxAft) as f:
+        for pileupcolumn  in f.pileup(refName):
+            if pileupcolumn.reference_pos not in colsNeedingCover: continue
+
+            for r in pileupcolumn.pileups:
+                if not r.is_del and not r.is_refskip:
+                    a=r.alignment
+                    qn = get_qn(a)
+                    if qn in readsRehabbed and qn not in readsRehabbedCheckedLax:
+                        log.info('rd={} scoreBef={} scoreAft={}'.format(qn,read2origScore[qn],a.get_tag('AS')))
+                        readsRehabbedCheckedLax.add(qn)
+
+    log.info('=========computing outBamStrictAft')
+    
+    novoalign.execute(inBam, outFasta, outBamStrictAft, options=novo_params_strict.split(), min_qual=1, 
+                      JVMmemory=JVMmemory)
+
+    log.info('=========looking at outBamStrictAft')
+    with pysam.AlignmentFile(outBamStrictAft) as f:
+        for pileupcolumn  in f.pileup(refName):
+            if pileupcolumn.reference_pos not in colsNeedingCover: continue
+
+            for r in pileupcolumn.pileups:
+                if not r.is_del and not r.is_refskip:
+                    a=r.alignment
+                    qn = get_qn(a)
+                    if qn not in readsPassingStrict:
+                        log.info('new strict read in col {}: rd={} scoreBef={} scoreAft={}'.
+                                 format(pileupcolumn.reference_pos, qn,read2origScore.get(qn,'unknown'),
+                                        a.get_tag('AS')))
+
+
+def parser_ambiguate_to_coverage(parser=argparse.ArgumentParser()):
+    parser.add_argument('--inFasta', help='The input reference')
+    parser.add_argument('--inBam', help='Reads aligned to inFasta.')
+
+    parser.add_argument(
+        '--outBamLaxBef',
+        default=None,
+        help='Reads aligned to inFasta under novo_params_lax'
+    )
+    parser.add_argument(
+        '--outBamStrictBef',
+        default=None,
+        help='Reads aligned to inFasta under novo_params_strict'
+    )
+    parser.add_argument(
+        '--outBamStrictAft',
+        default=None,
+        help='Reads aligned to outFasta under novo_params_strict'
+    )
+    parser.add_argument(
+        '--outBamLaxAft',
+        default=None,
+        help='Reads aligned to outFasta under novo_params_lax'
+    )
+    parser.add_argument(
+        '--novo_params_lax',
+        default='-r Random -l 40 -g 40 -x 20 -t 502',
+        help='Lax alignment params'
+    )
+    parser.add_argument(
+        '--novo_params_strict',
+        default='-r Random -l 40 -g 40 -x 20 -t 100',
+        help='Strict alignment params'
+    )
+
+    parser.add_argument('--outFasta', help='The ambiguated reference')
+    parser.add_argument('--minDepth', type=int, help='Only ambiguate where needed to reach the given depth.')
+    parser.add_argument('--maxAlignStrictScore', type=int, help='Max align score for reads used to determine depth')
+    parser.add_argument('--maxAlignLaxScore', type=int, help='Max align score for reads used to determine depth')
+
+    parser.add_argument(
+        '--JVMmemory',
+        default=tools.gatk.GATKTool.jvmMemDefault,
+        help='JVM virtual memory size (default: %(default)s)'
+    )
+    parser.add_argument(
+        '--GATK_PATH',
+        default=None,
+        dest="gatk_path",
+        help='A path containing the GATK jar file. This overrides the GATK_ENV environment variable or the GATK conda package. (default: %(default)s)'
+    )
+    parser.add_argument(
+        '--NOVOALIGN_LICENSE_PATH',
+        default=None,
+        dest="novoalign_license_path",
+        help='A path to the novoalign.lic file. This overrides the NOVOALIGN_LICENSE_PATH environment variable. (default: %(default)s)'
+    )
+    parser.add_argument('--threads', default=1, help='Number of threads (default: %(default)s)')
+
+
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, ambiguate_to_coverage, split_args=True)
+    return parser
+
+__commands__.append(('ambiguate_to_coverage', parser_ambiguate_to_coverage))
+
 
 
 def unambig_count(seq):

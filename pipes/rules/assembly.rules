@@ -287,7 +287,8 @@ rule refine_assembly_1:
     input:  config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta',
             config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
     output: config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4-refined.fasta',
-            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3.vcf.gz'
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3.vcf.gz',
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3.realigned.bam'
     resources: 
             mem=7,
             cores=int(config.get("number_of_threads", 1))
@@ -297,7 +298,7 @@ rule refine_assembly_1:
             novoalign_options = config.get("refine_assembly_1_novoalign_params", "-r Random -l 30 -g 40 -x 20 -t 502"),
             min_coverage = "2",
             numThreads=str(config.get("number_of_threads", 1))
-    shell:  "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {params.numThreads}"
+    shell:  "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --outBam {output[2]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {params.numThreads}"
 
 rule refine_assembly_2:
     ''' This a second pass refinement step very similar to the first.
@@ -311,7 +312,8 @@ rule refine_assembly_2:
     input:  config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4-refined.fasta',
             config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
     output: config["data_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.fasta',
-            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4.vcf.gz'
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4.vcf.gz',
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4.realigned.bam'
     resources: 
             mem=7,
             cores=int(config.get("number_of_threads", 1))
@@ -321,7 +323,7 @@ rule refine_assembly_2:
             novoalign_options = config.get("refine_assembly_2_novoalign_params", "-r Random -l 40 -g 40 -x 20 -t 100"),
             min_coverage = "3",
             numThreads=str(config.get("number_of_threads", 1))
-    shell:  "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {params.numThreads}"
+    shell:  "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --outBam {output[2]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {params.numThreads}"
 
 rule map_reads_to_self:
     ''' After the final assembly is produced, we also produce BAM files with all reads
@@ -334,6 +336,176 @@ rule map_reads_to_self:
             config["data_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.fasta'
     output: config["data_dir"]+'/'+config["subdirs"]["align_self"]+'/{sample}.bam',
             config["data_dir"]+'/'+config["subdirs"]["align_self"]+'/{sample}.mapped.bam'
+    resources: 
+            mem=4,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('long', '-q long'),
+            logid="{sample}",
+            aligner_options = config.get('map_reads_to_self_novoalign_params', "-r Random -l 40 -g 40 -x 20 -t 100 -k") if config.get('map_reads_to_self_aligner', "novoalign")=="novoalign" else "",
+            aligner = config.get('map_reads_to_self_aligner', "novoalign"),
+            numThreads=str(config.get("number_of_threads", 1))
+    run:
+            makedirs([os.path.join(config["data_dir"], config["subdirs"]["align_self"]),
+                os.path.join(config["reports_dir"], "assembly")])
+            shell("{config[bin_dir]}/read_utils.py align_and_fix {input} --outBamAll {output[0]} --outBamFiltered {output[1]} --aligner novoalign --aligner_options '{params.aligner_options}' --threads {params.numThreads}")
+
+#########################################################################
+
+rule compute_trimmed_rmduped_cleaned_reads:
+    ''' Compute a trimmed and rmdupped version of cleaned reads.
+    '''
+    input:  config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
+    output: config["tmp_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.trim.rmdup.bam'
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short'),
+            n_reads=str(2000000),
+            logid="{sample}",
+            clipDb=config["trim_clip_db"],
+            subsamp_bam=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.subsamp.bam',
+    run:
+            makedirs(expand("{dir}/{subdir}",
+                dir=[config["data_dir"],config["tmp_dir"]],
+                subdir=config["subdirs"]["per_sample"]))
+            shell("{config[bin_dir]}/assembly.py trim_rmdup_subsamp {input} {params.clipDb} {output} --n_reads={params.n_reads}")
+
+            
+            
+
+rule compute_kmc_kmer_db_for_cleaned:
+    ''' Compute a kmc kmer db
+    '''
+    input:  config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
+    output: 
+        config["tmp_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.k{kmerSize}.kmc',
+        config["tmp_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.k{kmerSize}.kmc.hist.txt',
+        config["tmp_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.k{kmerSize}.kmc.dump.txt'
+
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short'),
+            logid="{sample}"
+    run:
+            shell("{config[bin_dir]}/scafref.py kmc_build_db {input} {output[0]} {wildcards.kmerSize} --kmerOpts='-ci3' --histogram {output[1]} --dump {output[2]}")
+
+            
+rule compute_kmc_kmer_db_for_cleaned_trim_rmdup:
+    ''' Compute a kmc kmer db
+    '''
+    input:  config["tmp_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.trim.rmdup.bam'
+    output: 
+        config["tmp_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.trim.rmdup.k{kmerSize}.kmc',
+        config["tmp_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.trim.rmdup.k{kmerSize}.kmc.hist.txt',
+        config["tmp_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.trim.rmdup.k{kmerSize}.kmc.dump.txt'
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short'),
+            logid="{sample}"
+    run:
+            shell("{config[bin_dir]}/scafref.py kmc_build_db {input} {output[0]} {wildcards.kmerSize} --kmerOpts='-ci3' --histogram {output[1]} --dump {output[2]}")
+
+
+            
+rule compute_kmc_kmer_db_generic:
+    ''' Compute a kmc kmer db
+    '''
+    input:  "{X}.bam"
+    output: 
+        "{X}.bam.k{kmerSize}.kmc", "{X}.bam.k{kmerSize}.kmc.hist.txt", "{X}.bam.k{kmerSize}.dump.txt"
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short')
+    run:
+            shell("{config[bin_dir]}/scafref.py kmc_build_db {input} {output[0]} {wildcards.kmerSize} --kmerOpts='-ci1' --histogram {output[1]} --dump {output[2]}")
+
+
+
+
+rule build_scafref:
+    ''' Compute a kmc kmer db
+    '''
+    input:  'scafref/scafref.fasta'
+    output: 'scafref/scafref.fasta.indexing.done'
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short')
+    run:
+            shell("{config[bin_dir]}/scafref.py build_scafref_db scafref ref_genome/reference.fasta")
+            
+
+            
+rule refine_assembly_2a_ambiguate_to_coverage:
+    ''' Increase coverage by ambiguating the reference
+    '''
+    input:  config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4-refined.fasta',
+            #config["data_dir"]+'/'+config["subdirs"]["source"]+'/{sample}.bam'
+            config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam',
+    output: config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4-refined-ambiguated.fasta',
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4.laxAlignBef.bam',
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4.strictAlignBef.bam',
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4.strictAlignAft.bam',
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4.laxAlignAft.bam'
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('long', '-q long'),
+            logid="{sample}",
+            novoalign_options_lax = "-r Random -l 40 -g 40 -x 20 -t 300",
+            novoalign_options_strict = "-r Random -l 40 -g 40 -x 20 -t 100",
+            min_coverage = "3",
+            numThreads=str(config.get("number_of_threads", 1))
+    shell:  "{config[bin_dir]}/assembly.py ambiguate_to_coverage --inFasta {input[0]} --inBam {input[1]} --outFasta {output[0]} --outBamLaxBef {output[1]} --maxAlignStrictScore 100 --maxAlignLaxScore 300 --minDepth {params.min_coverage}  --threads {params.numThreads} --novo_params_lax '{params.novoalign_options_lax}'  --novo_params_strict '{params.novoalign_options_strict}' --outBamStrictBef {output[2]} --outBamStrictAft {output[3]} --outBamLaxAft {output[4]}"
+
+
+    
+rule refine_assembly_2b:
+    ''' This a second pass refinement step very similar to the first.
+        The only differences are that Novoalign mapping parameters are
+        more conservative and the input consensus sequence has already
+        been refined once. We also require higher minimum read coverage
+        (3 instead of 2) in order to call a non-ambiguous base.
+        The output of this step is the final assembly for this sample.
+        Final FASTA file is indexed for Picard, Samtools, and Novoalign.
+    '''
+    input:  config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4-refined-ambiguated.fasta',
+            config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
+    output: config["data_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.2b.fasta',
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.2b.assembly4.vcf.gz',
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.2b.assembly4.realigned.bam'
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('long', '-q long'),
+            logid="{sample}",
+            novoalign_options = config.get("refine_assembly_2_novoalign_params", "-r Random -l 40 -g 40 -x 20 -t 100"),
+            min_coverage = "3",
+            numThreads=str(config.get("number_of_threads", 1))
+    shell:  "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --outBam {output[2]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {params.numThreads}"
+
+rule map_reads_to_self_2b:
+    ''' After the final assembly is produced, we also produce BAM files with all reads
+        mapped back to its own consensus.  Outputs several BAM files, sorted and indexed:
+            {sample}.bam        - all raw reads aligned to self
+            {sample}.mapped.bam - only mapped reads, duplicates removed by Picard,
+                                  realigned with GATK IndelRealigner
+    '''
+    input:  config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam',
+            config["data_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.2b.fasta'
+    output: config["data_dir"]+'/'+config["subdirs"]["align_self"]+'/{sample}.2b.bam',
+            config["data_dir"]+'/'+config["subdirs"]["align_self"]+'/{sample}.2b.mapped.bam'
     resources: 
             mem=4,
             cores=int(config.get("number_of_threads", 1))

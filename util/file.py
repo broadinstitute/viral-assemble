@@ -104,6 +104,18 @@ def tempfname(*args, **kwargs):
         if os.path.isfile(fn): os.unlink(fn)
 
 
+@contextlib.contextmanager
+def tempfnames(suffixes, *args, **kwargs):
+    '''Create a setof tempfile names on context entry, delete the files (if they exist) on context exit.'''
+    fns = [mkstempfname(sfx, *args, **kwargs) for sfx in suffixes]
+    try:
+        yield fns
+    finally:
+        for fn in fns: 
+            if os.path.isfile(fn): 
+                os.unlink(fn)
+
+
 def set_tmp_dir(name):
     proposed_prefix = ['tmp']
     if name:
