@@ -13,6 +13,7 @@ import time
 from collections import OrderedDict
 import csv
 import math
+import pandas
 import shutil
 
 import pysam
@@ -859,6 +860,125 @@ __commands__.append(('align_and_plot_coverage', parser_align_and_plot_coverage))
 
 # =======================
 
+class AssemblyBenchmarking(object):
+    """Code for comparing assemblies"""
+
+    def __init__( self, db_dir ):
+        self.db_dir = db_dir
+
+    def put_stat( self, sample, asm, stat, value ):
+        fname = self.__get_stat_fname( sample, asm, stat )
+        util.file.mkdir_p( os.path.dirname( fname ) )
+        util.file.dump_file( fname, value )
+        log.debug('put_stat: sample={} asm={} stat={} value={} fname={}'.format(sample, asm, stat, value, fname))
+
+    def get_stat( self, sample, asm, stat ):
+        FN = self.__get_stat_fname( sample, asm, stat )
+        return float( util.file.slurp_file( FN ) ) if  os.path.exists( FN ) else None
+
+    def __get_stat_fname( self, sample, asm, stat ):
+        """Return the name of the file where the given statistic is stored"""
+        return os.path.join( self.db_dir, util.file.string_to_file_name( sample ), 
+                             util.file.string_to_file_name( asm ), util.file.string_to_file_name( stat ) + '.dat' )
+
+    def find_largest_changes( self, asm1, asm2, samples, stats, out_dir, include_plots=False ):
+        """For a pair of assemblers, find the largest differences between their performance."""
+
+        util.file.mkdir_p(out_dir)
+        with open( os.path.join( out_dir, 'statsumm.tsv' ), 'w' ) as statsumm:
+            statLines=[]
+            for stat in stats:
+                logging.info('find_largest_changes: stat=%s', stat)
+                deltas = []
+                sign2ndeltas = collections.defaultdict(int)
+                
+                for sample in samples:
+                    stat_asm1 = self.get_stat( sample, asm1, stat )
+                    stat_asm2 = self.get_stat( sample, asm2, stat )
+                    if stat_asm1 is not None and stat_asm2 is not None:
+                        diff = stat_asm1 - stat_asm2
+                        sign2ndeltas[ np.sign(diff) ] += 1
+                        if diff != 0:
+                            logging.info( 'sample=%s stat=%s diff=%f', sample, stat, diff )
+                        deltas.append( diff  )
+                if not deltas: 
+                    logging.warn('no stats for ' + stat)
+                    continue
+
+                nonzero_deltas=[v for v in deltas if v != 0]
+                pos_deltas=[v for v in deltas if v > 0]
+                neg_deltas=[v for v in deltas if v < 0]
+                
+                if include_plots:
+                    import matplotlib as mp
+                    mp.use('agg')
+                    import matplotlib.pyplot as pp
+
+                    fig=pp.figure()
+                    pp.xlabel( 'delta ' + stat )
+                    pp.suptitle( asm1 + ' vs. ' + asm2 )
+                    pp.title( 'no diff for %d of %d (%f %%)' % 
+                              ( len(deltas)-sign2ndeltas[0],
+                                len(deltas), 
+                                util.misc.perc(len(deltas)-sign2ndeltas[0],len(deltas))))
+
+                    pp.hist(nonzero_deltas)
+                    util.file.mkdir_p( out_dir )
+                    pp.savefig( os.path.join( out_dir, util.file.string_to_file_name(stat) + '.png' ) )
+                    pp.close(fig)
+
+                def num2str(x): return '%.1f' % x
+
+                statLines.append((float(np.max(list(map(abs,deltas)))),
+                                  (stat, len(deltas), sign2ndeltas[0], sign2ndeltas[-1], sign2ndeltas[+1],
+                                   ','.join(map(num2str,sorted(neg_deltas))),
+                                   ','.join(map(num2str,sorted(pos_deltas,reverse=True))))))
+
+            statLines.sort(reverse=True)
+            util.file.tabwrite( statsumm, 'stat', 'n', 'n_no_chg', 'n_neg', 'n_pos', 'max_neg', 'max_pos' )
+            for maxDiff, statLine in statLines:
+                util.file.tabwrite(statsumm, *statLine)
+
+
+    def import_quast_stats( self, quast_dir, asms ):
+        """Import assembly stats computed by QUAST"""
+        
+        logging.info('quast_dir='+quast_dir)
+        for sample in os.listdir(quast_dir):
+            logging.info('sample='+sample)
+            z = pandas.read_csv( os.path.join( quast_dir, sample, 'report.tsv' ), sep = '\t' )
+            for t in z.itertuples(index=False):
+                for asm_idx, asm in enumerate(asms):
+                    value=t[1+asm_idx]
+                    stat=t[0]
+                    if util.misc.is_convertible_to(value,float):
+                        # logging.info('sample=%s stat=%s asm_idx=%d asm=%s value=%s',
+                        #              sample, stat, asm_idx, asm, value)
+                        self.put_stat(sample=sample, asm=asm, stat=stat, value=value)
+
+# end: class AssemblyBenchmarking
+
+def export_benchmark_data(benchmark_db_dir, benchmark_method_id, assembly_stats_file):
+    """Export benchmark data from this project to the benchmarking database"""
+    ab = AssemblyBenchmarking(benchmark_db_dir)
+    z = pandas.read_csv( assembly_stats_file, sep = '\t' )
+    colNames = [ c[0] for c in z.iteritems() ]
+    for t in z.itertuples(index=False):
+        sample=t[0]
+        for colName, colVal in zip(colNames[1:], t[1:]):
+            ab.put_stat(sample=sample, asm=benchmark_method_id, stat=colName, value=colVal)
+
+def parser_export_benchmark_data(parser=argparse.ArgumentParser()):
+    parser.add_argument('benchmark_db_dir', help='Benchmark db location.')
+    parser.add_argument('benchmark_method_id', help='Assembly method ID.')
+    parser.add_argument('assembly_stats_file', help='Assembly stats file.')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None)))
+    util.cmd.attach_main(parser, export_benchmark_data, split_args=True)
+    return parser
+
+__commands__.append(('export_benchmark_data', parser_export_benchmark_data))
+
+# =======================
 
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)

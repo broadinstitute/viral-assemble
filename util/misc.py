@@ -411,3 +411,16 @@ def which(application_binary_name):
         if os.path.exists(full_path) and os.access(full_path, os.X_OK):
             link_resolved_path = os.path.realpath(full_path)
             return link_resolved_path
+
+def is_convertible_to( x, aType ):
+    """Test if a value is convertible to a given type"""
+    try:
+        dummy = aType(x)
+        return True
+    except ValueError: return False
+
+def perc(num,den):
+    """Compute an integer percentage"""
+    assert float(num)>=0 and float(den)>0
+    return int(100.0*(float(num)/float(den)))
+            

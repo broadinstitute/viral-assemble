@@ -493,3 +493,28 @@ def line_count(infname):
 def touch(fname, times=None):
     with open(fname, 'a'):
         os.utime(fname, times)
+
+def dump_file( fname, value ):
+    """store string in file"""
+    with open( fname, 'w' )  as out: 
+        out.write( str( value ) )
+
+def slurp_file( fname ):
+    """Read entire file into one string"""
+    if not os.path.isfile( fname ): raise IOError( 'File not found: %s' % fname )
+    with open( fname ) as f:
+        return f.read()
+
+def tabjoin( *args, **kwargs ):
+    """Join args by tab"""
+    sep = kwargs.get( 'sep', '\t' )
+    return sep.join( map( str, args ) )
+
+def tabwriten( f, *args, **kwargs ):
+    """Write a tab-separated line to a file"""
+    f.write( tabjoin( *args, **kwargs ) )
+
+def tabwrite( f, *args, **kwargs ):
+    """Write a tab-separated line to a file, followed by a newline"""
+    tabwriten( f, *args, **kwargs )
+    f.write( '\n' )
