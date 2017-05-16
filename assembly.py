@@ -1074,9 +1074,12 @@ class ContigModifier(object):
 
     def call_reference_ns(self):
         log.debug("populating N's from reference...")
+        ns_replaced=0
         for i in range(self.len):
             if self.consensus[i].upper() == "N":
                 self.consensus[i] = self.ref[i]
+                ns_replaced += 1
+        log.debug("populated {} Ns from reference".format(ns_replaced))
 
     def call_reference_ambiguous(self):
         ''' This is not normally used by default in our pipeline '''
@@ -1108,7 +1111,7 @@ class ContigModifier(object):
         ''' This replaces everything within <replace_length> of the ends of the
             reference genome with the reference genome.
         '''
-        log.debug("replacing 5' ends...")
+        log.debug("replacing 5' ends (length {})...".format(replace_length))
         ct = 0
         for i in range(self.len):
             if self.ref[i] != "-":
@@ -1119,7 +1122,7 @@ class ContigModifier(object):
                 break
 
     def replace_3ends(self, replace_length):
-        log.debug("replacing 3' ends...")
+        log.debug("replacing 3' ends (length {})...".format(replace_length))
         ct = 0
         for i in reversed(range(self.len)):
             if self.ref[i] != "-":
