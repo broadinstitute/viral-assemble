@@ -38,6 +38,7 @@ import tools.mafft
 import tools.mummer
 import tools.muscle
 import tools.abyss
+import tools.gap2seq
 
 # third-party
 import Bio.AlignIO
@@ -511,6 +512,65 @@ def parser_gapfill_sealer(parser=argparse.ArgumentParser()):
 
 
 __commands__.append(('gapfill_sealer', parser_gapfill_sealer))
+
+
+def gapfill_gap2seq(
+    in_scaffold,
+    inBam,
+    out_scaffold,
+    params='',
+    threads=1
+):
+    ''' This step runs the Sealer tool from ABySS assembler to close gaps in the assembly.
+    '''
+    tools.gap2seq.Gap2SeqTool().gapfill( in_scaffold, inBam, out_scaffold, gap2seq_params=params, threads=threads )
+
+def parser_gapfill_gap2seq(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_scaffold', help='Scaffold with gaps (FASTA witht Ns)')
+    parser.add_argument('inBam', help='Input unaligned reads, BAM format.')
+    parser.add_argument('out_scaffold', help='Output assembly.')
+    parser.add_argument('--gap2seq_params', help='Gap2Seq options.')
+    parser.add_argument('--threads', default=1, type=int, help='Number of threads (default: %(default)s)')
+
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, gapfill_gap2seq, split_args=True)
+    return parser
+
+
+__commands__.append(('gapfill_gap2seq', parser_gapfill_gap2seq))
+
+
+
+def gapfill(
+    in_scaffold,
+    inBam,
+    out_scaffold,
+    method,
+    params='',
+    threads=1
+):
+    ''' This step runs the Sealer tool from ABySS assembler to close gaps in the assembly.
+    '''
+    if method=='sealer': gapfill_sealer(in_scaffold, inBam, out_scaffold, params, threads)
+    elif method=='gap2seq': gapfill_gap2seq(in_scaffold, inBam, out_scaffold, params, threads)
+    else: raise RuntimeError('Unknown gapfill method: {}'.format(methtod))
+        
+
+def parser_gapfill(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_scaffold', help='Scaffold with gaps (FASTA witht Ns)')
+    parser.add_argument('inBam', help='Input unaligned reads, BAM format.')
+    parser.add_argument('out_scaffold', help='Output assembly.')
+    parser.add_argument('method', help='Method to use.')
+    parser.add_argument('--params', help='Method options.')
+    parser.add_argument('--threads', default=1, type=int, help='Number of threads (default: %(default)s)')
+
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, gapfill, split_args=True)
+    return parser
+
+
+__commands__.append(('gapfill', parser_gapfill))
+
 
 
 def impute_from_reference(

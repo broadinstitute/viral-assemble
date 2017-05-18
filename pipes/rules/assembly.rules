@@ -91,7 +91,7 @@ rule order_and_orient:
 
 
 rule fill_scaffold_gaps:
-    ''' Fill gaps in assembly, using the Sealer gap-filling tool from the ABYSS assembler.
+    ''' Fill gaps in assembly
     '''
     input:  scaffold=config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.fasta',
             reads=config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
@@ -103,14 +103,16 @@ rule fill_scaffold_gaps:
             UGER=config.get('UGER_queues', {}).get('long', '-q long'),
             logid="{sample}",
             numThreads=str(config.get("number_of_threads", 1)),
-            sealer_params = config.get("gapfill_sealer_params", "-k90 -k70 -k50 -k40 -k30 -P30 -b12G"),
+            gapfill_method = config.get("gapfill_method", "none"),
+            gapfill_params = config.get("gapfill_params_" + config.get("gapfill_method", "none"), ""),
+            filled_scaffold_method=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-gapfilled.' + config.get("gapfill_method","none") + '.fasta'
     run:   
-          if not params.sealer_params: shell("cp {input.scaffold} {output.filled_scaffold}")
+          if params.gapfill_method not in ("sealer","gap2seq"): 
+              shell("cp {input.scaffold} {output.filled_scaffold}")
           else:
-              shell("{config[bin_dir]}/assembly.py gapfill_sealer {input.scaffold} {input.reads} {output.filled_scaffold} --sealer_params '{params.sealer_params}' --threads {params.numThreads}")
-              shell("{config[bin_dir]}/read_utils.py index_fasta_all {output.filled_scaffold}")
-
-
+              shell("{config[bin_dir]}/assembly.py gapfill {input.scaffold} {input.reads} {params.filled_scaffold_method} {params.gapfill_method} --params '{params.gapfill_params}' --threads {params.numThreads}")
+              shell("cp {params.filled_scaffold_method} {output.filled_scaffold}")
+          shell("{config[bin_dir]}/read_utils.py index_fasta_all {output.filled_scaffold}")
 
 rule impute_from_reference:
     ''' This step cleans up the Trinity assembly with a known reference genome.

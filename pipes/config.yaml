@@ -161,7 +161,11 @@ ref_guided_consensus_novoalign_params: "-r Random -l 30 -g 40 -x 20 -t 502"
 
 # Parameters for gap-filling with Sealer. Set to blank ("") to skip this step.
 # See https://github.com/bcgsc/abyss/blob/master/Sealer/README.md#suggested-parameters-for-first-run
-gapfill_sealer_params: "-k90 -k70 -k50 -k40 -k30 -P30 -b12G"
+
+gapfill_method: "sealer"
+
+gapfill_params_sealer: "-k90 -k70 -k50 -k40 -k30 -P30 -b12G"
+gapfill_params_gap2seq: ""
 
 # The number of threads to use for tools supporting multiple threads.
 # Should equal the number of CPU cores present on the machine(s)
