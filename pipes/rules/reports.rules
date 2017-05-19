@@ -120,12 +120,13 @@ rule assembly_report:
             " --reads_dir {config[data_dir]}/{config[subdirs][per_sample]}" \
             " --raw_reads_dir {config[data_dir]}/{config[subdirs][source]}"
 
+
 rule export_benchmark_data:
     '''Export benchmark data to central database'''
-    input: config["reports_dir"]+'/assembly/{sample}.txt'
-    output: touch(config["reports_dir"]+'/assembly/{sample}.benchmark_data_exported')
+    input: cfg_dir("reports_dir")+'/assembly/{sample}.txt'
+    output: touch(cfg_dir('reports_dir')+'/assembly/{sample}.benchmark_data_exported')
     run: 
-        if config.get("benchmark_db_dir","") and config.get("benchmark_method_id",""):
+        if config.get("benchmark_db_dir","") and config.get("method_id",""):
             shell("{config[bin_dir]}/reports.py export_benchmark_data {config[benchmark_db_dir]} {config[benchmark_method_id]} {input}")
 
         
