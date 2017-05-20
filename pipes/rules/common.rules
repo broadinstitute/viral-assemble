@@ -1,3 +1,5 @@
+import os
+import os.path
 
 # imports needed for download_file() and webfile_readlines()
 import re
@@ -74,3 +76,14 @@ def webfile_readlines(uriToGet):
         cleanedLine = line.decode("utf-8").strip()
         if len(cleanedLine) > 0:
             yield cleanedLine
+
+def cfg_dir(cfg_names):
+    """Construct a path from components defined in the config file.
+
+    Args:
+       cfg_names: a string where the components are space-separated, e.g.
+       'data assembly' becomes 'config["data"]+"/"+config["assembly"]
+    """
+
+    return os.path.join(*[config.get(c) for c in cfg_names.split()])
+

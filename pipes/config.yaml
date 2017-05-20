@@ -265,14 +265,19 @@ genbank:
   sequencing_technology: "Illumina HiSeq 2500; Nextera LC"
   comment: "Please be aware that the annotation is done automatically with little or no manual curation."
 
+# ================  ==== [ Multiple analysis methods ] =========================
+
+# Directory under which method-specific dirs are stored
+methods_dir: "methods"
+
+# Method ID for this analysis method.
+method_id: "default"
+
 # ============================ [ Benchmarking ] ================================
 
 # Location of benchmarking database.  Various analysis benchmarks are deposited
 # into this database, if defined.
-benchmark_db_dir: ""
-
-# Method ID for this analysis method.
-benchmark_method_id: "viral-ngs-1.17.0"
+benchmark_db_dir: "/idi/sabeti-scratch/shared-resources/benchmarks"
 
 # ================== [ Institution-specific parameters ] =======================
 

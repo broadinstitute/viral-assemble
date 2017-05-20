@@ -980,6 +980,28 @@ __commands__.append(('export_benchmark_data', parser_export_benchmark_data))
 
 # =======================
 
+def find_largest_changes(asm1, asm2, samples, stats, out_dir, include_plots=False ):
+    """For a pair of assembly methods, find the largest differences between their performance."""
+    
+    AssemblyBenchmarking().find_largest_changes(asm1, asm2, samples, stats, out_dir, include_plots)
+        
+
+def parser_find_largest_changes(parser=argparse.ArgumentParser()):
+    parser.add_argument('asm1', help='Assembly method 1.')
+    parser.add_argument('asm2', help='Assembly method 2.')
+    parser.add_argument('samples', help='Samples to compare.')
+    parser.add_argument('parent_method_dir', help='Parent method directory.', default='.')
+
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None)))
+    util.cmd.attach_main(parser, find_largest_changes, split_args=True)
+    return parser
+
+__commands__.append(('find_largest_changes', parser_find_largest_changes))
+
+
+# =======================
+
+
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
 
