@@ -27,6 +27,7 @@ rule depletion:
     output: config["tmp_dir"] +'/'+config["subdirs"]["depletion"]+'/{sample}.bmtagger_depleted.bam',
             config["tmp_dir"] +'/'+config["subdirs"]["depletion"]+'/{sample}.rmdup.bam',
             config["data_dir"]+'/'+config["subdirs"]["depletion"]+'/{sample}.cleaned.bam'
+    benchmark: config["log_dir"]+"/benchmarks/{sample}.depletion.txt"
     resources: mem=15
     params: LSF=config.get('LSF_queues', {}).get('long', '-q forest'),
             UGER=config.get('UGER_queues', {}).get('long', '-q long'),
@@ -56,6 +57,7 @@ rule filter_to_taxon:
         expand('{lastal_ref_db_dir}/lastal.suf', lastal_ref_db_dir=config["lastal_ref_db_dir"]),
         expand('{lastal_ref_db_dir}/lastal.tis', lastal_ref_db_dir=config["lastal_ref_db_dir"])
     output: config["data_dir"]+'/'+config["subdirs"]["depletion"]+'/{sample}.taxfilt.bam'
+    benchmark: config["log_dir"]+"/benchmarks/{sample}.filter_to_taxon.txt"
     resources: mem=8
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
             UGER=config.get('UGER_queues', {}).get('long', '-q long'),
