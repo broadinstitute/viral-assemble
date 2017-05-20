@@ -100,7 +100,6 @@ def process_cfg_includes(cfg, seen=None, std_include=None):
        seen: set of config files already loaded (to catch circular includes)
        std_include: the standard config file from the viral-ngs code checkout, pipes/config.yaml .
     '''
-    print('process_cfg_includes: cfg={} seen={} std_include={}'.format(cfg, seen, std_include))
     if seen is None: seen = set()
     seenOrig = copy.deepcopy(seen)
     result=dict()

@@ -37,7 +37,7 @@ rule assemble_trinity:
         and random subsample to no more than 100k reads.
     '''
     input:  config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.taxfilt.bam'
-    output: config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta'
+    output: contigs=config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta'
     benchmark: config["log_dir"]+"/benchmarks/{sample}.assemble_trinity.txt"
     resources: 
             mem=7,
@@ -136,14 +136,13 @@ rule impute_from_reference:
             which will be captured in this output.
     '''
     input:  
-        config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-gapfilled.fasta',
-        expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" )
-    output: config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta'
+        scaffold=rules.fill_scaffold_gaps.output.filled_scaffold,
+        refGenome=expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" )
+    output: imputed_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta'
     benchmark: config["log_dir"]+"/benchmarks/{sample}.orient_and_impute.txt"
     resources: mem=12
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
             UGER=config.get('UGER_queues', {}).get('short', '-q short'),
-            refGenome=os.path.join(config["ref_genome_dir"],"reference"+".fasta"),
             # length should be defined as a fraction/percentage cutoff, relative to 
             # reference length for a given sequence. float is in the config.yaml file
             length = str(config["assembly_min_length_fraction_of_reference"]),
@@ -162,7 +161,8 @@ rule impute_from_reference:
             if config.get("scaffold_min_pct_contig_aligned"):
                 ono_extra.extend(["--min_pct_contig_aligned", str(config["scaffold_min_pct_contig_aligned"])])
             ono_extra = " ".join(ono_extra)
-            shell("{config[bin_dir]}/assembly.py impute_from_reference {input[0]} {params.refGenome} {output} --newName {params.renamed_prefix}{wildcards.sample} --replaceLength {params.replace_length} --minLengthFraction {params.length} --minUnambig {params.min_unambig} --index")
+            shell("{config[bin_dir]}/assembly.py impute_from_reference {input.scaffold} {input.refGenome} {output.imputed_fasta} --newName {params.renamed_prefix}{wildcards.sample} --replaceLength {params.replace_length} --minLengthFraction {params.length} --minUnambig {params.min_unambig} --index")
+
 
 rule refine_assembly_1:
     ''' This a first pass refinement step where we take the scaffolded assembly,
