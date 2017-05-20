@@ -38,6 +38,7 @@ rule assemble_trinity:
     '''
     input:  config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.taxfilt.bam'
     output: config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta'
+    benchmark: config["log_dir"]+"/benchmarks/{sample}.assemble_trinity.txt"
     resources: 
             mem=7,
             cores=int(config.get("number_of_threads", 1))
@@ -78,6 +79,7 @@ rule orient_and_impute:
         config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta',
         expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" )
     output: config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta'
+    benchmark: config["log_dir"]+"/benchmarks/{sample}.orient_and_impute.txt"
     resources: mem=12
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
             UGER=config.get('UGER_queues', {}).get('short', '-q short'),
@@ -121,6 +123,7 @@ rule refine_assembly_1:
             config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
     output: config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4-refined.fasta',
             config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3.vcf.gz'
+    benchmark: config["log_dir"]+"/benchmarks/{sample}.refine_assembly_1.txt"
     resources: 
             mem=7,
             cores=int(config.get("number_of_threads", 1))
@@ -145,6 +148,7 @@ rule refine_assembly_2:
             config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
     output: config["data_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.fasta',
             config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4.vcf.gz'
+    benchmark: config["log_dir"]+"/benchmarks/{sample}.refine_assembly_2.txt"
     resources: 
             mem=7,
             cores=int(config.get("number_of_threads", 1))
@@ -167,6 +171,7 @@ rule map_reads_to_self:
             config["data_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.fasta'
     output: config["data_dir"]+'/'+config["subdirs"]["align_self"]+'/{sample}.bam',
             config["data_dir"]+'/'+config["subdirs"]["align_self"]+'/{sample}.mapped.bam'
+    benchmark: config["log_dir"]+"/benchmarks/{sample}.map_reads_to_self.txt"
     resources: 
             mem=4,
             cores=int(config.get("number_of_threads", 1))
