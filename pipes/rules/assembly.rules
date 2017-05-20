@@ -37,7 +37,7 @@ rule assemble_trinity:
         and random subsample to no more than 100k reads.
     '''
     input:  config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.taxfilt.bam'
-    output: config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta'
+    output: contigs=config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta'
     benchmark: config["log_dir"]+"/benchmarks/{sample}.assemble_trinity.txt"
     resources: 
             mem=7,
@@ -76,14 +76,14 @@ rule orient_and_impute:
             which will be captured in this output.
     '''
     input:  
-        config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta',
-        expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" )
-    output: config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta'
+        contigs=rules.assemble_trinity.output.contigs,
+        refGenome=expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" )
+    output: scaffolded_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.fasta',
+            imputed_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta'
     benchmark: config["log_dir"]+"/benchmarks/{sample}.orient_and_impute.txt"
     resources: mem=12
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
             UGER=config.get('UGER_queues', {}).get('short', '-q short'),
-            refGenome=os.path.join(config["ref_genome_dir"],"reference"+".fasta"),
             # length should be defined as a fraction/percentage cutoff, relative to 
             # reference length for a given sequence. float is in the config.yaml file
             length = str(config["assembly_min_length_fraction_of_reference"]),
@@ -91,7 +91,6 @@ rule orient_and_impute:
             renamed_prefix="",
             replace_length=str(config.get("assembly_replace_length", 55)),
             logid="{sample}",
-            scaffolded_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.fasta',
             alternate_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-alternate_sequences.fasta'
     run:
             ono_extra = []
@@ -104,8 +103,8 @@ rule orient_and_impute:
             if config.get("scaffold_min_pct_contig_aligned"):
                 ono_extra.extend(["--min_pct_contig_aligned", str(config["scaffold_min_pct_contig_aligned"])])
             ono_extra = " ".join(ono_extra)
-            shell("{config[bin_dir]}/assembly.py order_and_orient {input[0]} {params.refGenome} {params.scaffolded_fasta} {ono_extra} --outAlternateContigs {params.alternate_fasta}")
-            shell("{config[bin_dir]}/assembly.py impute_from_reference {params.scaffolded_fasta} {params.refGenome} {output} --newName {params.renamed_prefix}{wildcards.sample} --replaceLength {params.replace_length} --minLengthFraction {params.length} --minUnambig {params.min_unambig} --index")
+            shell("{config[bin_dir]}/assembly.py order_and_orient {input.contigs} {input.refGenome} {output.scaffolded_fasta} {ono_extra} --outAlternateContigs {params.alternate_fasta}")
+            shell("{config[bin_dir]}/assembly.py impute_from_reference {output.scaffolded_fasta} {input.refGenome} {output.imputed_fasta} --newName {params.renamed_prefix}{wildcards.sample} --replaceLength {params.replace_length} --minLengthFraction {params.length} --minUnambig {params.min_unambig} --index")
 
 rule refine_assembly_1:
     ''' This a first pass refinement step where we take the scaffolded assembly,

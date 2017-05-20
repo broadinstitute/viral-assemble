@@ -107,8 +107,8 @@ if config.get("spikeins_db"):
 rule assembly_report:
     input: config["data_dir"]+'/'+config["subdirs"]["align_self"]+'/{sample}.bam',
            config["data_dir"]+'/'+config["subdirs"]["align_self"]+'/{sample}.mapped.bam',
-           config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta',
-           config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.fasta'
+           rules.assemble_trinity.output.contigs,
+           rules.orient_and_impute.output.scaffolded_fasta
     output: config["reports_dir"]+'/assembly/{sample}.txt'
     resources: mem=2
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
@@ -127,7 +127,7 @@ rule export_benchmark_data:
     output: touch(cfg_dir('reports_dir')+'/assembly/{sample}.benchmark_data_exported')
     run: 
         if config.get("benchmark_db_dir","") and config.get("method_id",""):
-            shell("{config[bin_dir]}/reports.py export_benchmark_data {config[benchmark_db_dir]} {config[benchmark_method_id]} {input}")
+            shell("{config[bin_dir]}/reports.py export_benchmark_data {config[benchmark_db_dir]} {config[method_id]} {input}")
 
         
         

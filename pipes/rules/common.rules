@@ -91,7 +91,6 @@ def cfg_dir(cfg_names):
 
 def process_cfg_includes(cfg, seen=None, std_include=None):
     '''Add bindings from any (nested) config includes'''
-    print('process_cfg_includes: cfg={} seen={} std_include={}'.format(cfg, seen, std_include))
     if seen is None: seen = set()
     seenOrig = copy.deepcopy(seen)
     result=dict()
