@@ -34,6 +34,7 @@ import tools.gatk
 import tools.novoalign
 import tools.trimmomatic
 import tools.trinity
+import tools.spades
 import tools.mafft
 import tools.mummer
 import tools.muscle
@@ -337,6 +338,65 @@ def parser_assemble_trinity(parser=argparse.ArgumentParser()):
 
 
 __commands__.append(('assemble_trinity', parser_assemble_trinity))
+
+
+
+def assemble_spades(
+    inBam,
+    outFasta,
+    min_contig_len=300,
+    always_succeed=False,
+    threads=1,
+):
+    ''' This step runs the SPAdes assembler.
+    '''
+    picard_opts = {
+                 'CLIPPING_ATTRIBUTE': tools.picard.SamToFastqTool.illumina_clipping_attribute,
+                 'CLIPPING_ACTION': 'X'
+    }
+
+    subsampfq = list(map(util.file.mkstempfname, ['.subsamp.1.fastq', '.subsamp.2.fastq', '.subsamp.unpaired.fastq']))
+    tools.picard.SamToFastqTool().execute(inBam, subsampfq[0], subsampfq[1], 
+                                          outFastqUnpaired=subsampfq[2],
+                                          picardOptions=tools.picard.PicardTools.dict_to_picard_opts(picard_opts))
+    try:
+        tools.spades.SpadesTool().assemble(reads_fwd=subsampfq[0], reads_bwd=subsampfq[1], reads_unpaired=subsampfq[2],
+                                           contigs_out=outFasta)
+    except subprocess.CalledProcessError as e:
+        if always_succeed:
+            log.warn("denovo assembly (SPAdes) failed to assemble input, emitting empty output instead.")
+            util.file.touch(outFasta)
+        else:
+            raise DenovoAssemblyError((0,0,0,0,0,0))
+    os.unlink(subsampfq[0])
+    os.unlink(subsampfq[1])
+    os.unlink(subsampfq[2])
+
+def parser_assemble_spades(parser=argparse.ArgumentParser()):
+    parser.add_argument('inBam', help='Input unaligned reads, BAM format.')
+    parser.add_argument('outFasta', help='Output assembly.')
+    parser.add_argument(
+        '--min_contig_len',
+        default=300,
+        type=int,
+        help='Discard contigs shorter than this many basepairs (default %(default)s)'
+    )
+    parser.add_argument(
+        "--always_succeed",
+        help="""If SPAdes fails (usually because insufficient reads to assemble),
+                        emit an empty fasta file as output. Default is to throw a DenovoAssemblyError.""",
+        default=False,
+        action="store_true",
+        dest="always_succeed"
+    )
+    parser.add_argument('--threads', default=1, help='Number of threads (default: %(default)s)')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, assemble_spades, split_args=True)
+    return parser
+
+
+__commands__.append(('assemble_spades', parser_assemble_spades))
+
 
 
 def order_and_orient(inFasta, inReference, outFasta,
