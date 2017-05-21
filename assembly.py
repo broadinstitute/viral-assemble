@@ -344,7 +344,6 @@ __commands__.append(('assemble_trinity', parser_assemble_trinity))
 def assemble_spades(
     inBam,
     outFasta,
-    min_contig_len=300,
     always_succeed=False,
     threads=1,
 ):
@@ -375,12 +374,6 @@ def assemble_spades(
 def parser_assemble_spades(parser=argparse.ArgumentParser()):
     parser.add_argument('inBam', help='Input unaligned reads, BAM format.')
     parser.add_argument('outFasta', help='Output assembly.')
-    parser.add_argument(
-        '--min_contig_len',
-        default=300,
-        type=int,
-        help='Discard contigs shorter than this many basepairs (default %(default)s)'
-    )
     parser.add_argument(
         "--always_succeed",
         help="""If SPAdes fails (usually because insufficient reads to assemble),

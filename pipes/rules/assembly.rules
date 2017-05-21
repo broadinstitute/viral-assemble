@@ -66,14 +66,13 @@ rule assemble_spades:
             cores=int(config.get("number_of_threads", 1))
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
             UGER=config.get('UGER_queues', {}).get('short', '-q short'),
-            min_contig_len=str(config["trinity_min_contig_len"]),
             logid="{sample}",
             numThreads=str(config.get("number_of_threads", 1))
     run:
             makedirs(expand("{dir}/{subdir}",
                 dir=[config["data_dir"],config["tmp_dir"]],
                 subdir=config["subdirs"]["assembly"]))
-            shell("{config[bin_dir]}/assembly.py assemble_spades {input} {output}")
+            shell("{config[bin_dir]}/assembly.py assemble_spades {input} {output} --always_succeed")
 
 rule combine_de_novo_contigs:
     '''Combine de novo contigs obtained by different assemblers'''
