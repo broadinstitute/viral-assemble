@@ -10,11 +10,13 @@ import logging
 import glob
 import os
 import time
+import collections
 from collections import OrderedDict
 import csv
 import math
 import pandas
 import shutil
+import numpy
 
 import pysam
 from pybedtools import BedTool
@@ -860,6 +862,7 @@ __commands__.append(('align_and_plot_coverage', parser_align_and_plot_coverage))
 
 # =======================
 
+
 class AssemblyBenchmarking(object):
     """Code for comparing assemblies"""
 
@@ -874,6 +877,8 @@ class AssemblyBenchmarking(object):
 
     def get_stat( self, sample, asm, stat ):
         FN = self.__get_stat_fname( sample, asm, stat )
+        log.debug('get_stat: sample={} asm={} stat={} FN={} exists={}'.format(sample, asm, stat, FN, 
+                                                                              os.path.exists(FN)))
         return float( util.file.slurp_file( FN ) ) if  os.path.exists( FN ) else None
 
     def __get_stat_fname( self, sample, asm, stat ):
@@ -887,16 +892,16 @@ class AssemblyBenchmarking(object):
         util.file.mkdir_p(out_dir)
         with open( os.path.join( out_dir, 'statsumm.tsv' ), 'w' ) as statsumm:
             statLines=[]
-            for stat in stats:
+            for stat in stats.split(','):
                 logging.info('find_largest_changes: stat=%s', stat)
                 deltas = []
                 sign2ndeltas = collections.defaultdict(int)
                 
-                for sample in samples:
+                for sample in samples.split(','):
                     stat_asm1 = self.get_stat( sample, asm1, stat )
                     stat_asm2 = self.get_stat( sample, asm2, stat )
                     if stat_asm1 is not None and stat_asm2 is not None:
-                        diff = stat_asm1 - stat_asm2
+                        diff = stat_asm2 - stat_asm1
                         sign2ndeltas[ np.sign(diff) ] += 1
                         if diff != 0:
                             logging.info( 'sample=%s stat=%s diff=%f', sample, stat, diff )
@@ -980,24 +985,26 @@ __commands__.append(('export_benchmark_data', parser_export_benchmark_data))
 
 # =======================
 
-def find_largest_changes(asm1, asm2, samples, stats, out_dir, include_plots=False ):
+def find_largest_changes(db_dir, asm1, asm2, samples, stats, out_dir, include_plots=False ):
     """For a pair of assembly methods, find the largest differences between their performance."""
     
-    AssemblyBenchmarking().find_largest_changes(asm1, asm2, samples, stats, out_dir, include_plots)
+    AssemblyBenchmarking(db_dir).find_largest_changes(asm1, asm2, samples, stats, out_dir, include_plots)
         
 
 def parser_find_largest_changes(parser=argparse.ArgumentParser()):
+    parser.add_argument('db_dir', help='Location of stats database.')
     parser.add_argument('asm1', help='Assembly method 1.')
     parser.add_argument('asm2', help='Assembly method 2.')
     parser.add_argument('samples', help='Samples to compare.')
-    parser.add_argument('parent_method_dir', help='Parent method directory.', default='.')
+    parser.add_argument('stats', help='Stats to compare.')
+    parser.add_argument('out_dir', help='Where to put results.')
+    parser.add_argument('--include_plots', default=False, action='store_true', help='Include plots')
 
     util.cmd.common_args(parser, (('loglevel', None), ('version', None)))
     util.cmd.attach_main(parser, find_largest_changes, split_args=True)
     return parser
 
 __commands__.append(('find_largest_changes', parser_find_largest_changes))
-
 
 # =======================
 
