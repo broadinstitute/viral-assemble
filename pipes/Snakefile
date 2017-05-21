@@ -9,10 +9,13 @@
 
 __author__ = 'Daniel Park <dpark@broadinstitute.org>'
 
-import os
+import os, platform
 
 configfile: "config.yaml"
 pipesDir = os.path.join(os.path.expanduser(config['bin_dir']), 'pipes', 'rules')
+if 'linux_only' in config and platform.system()=='Linux':
+    for d in config['linux_only']:
+        config.update(d)
 
 include: os.path.join(pipesDir, 'common.rules')
 set_env_vars()

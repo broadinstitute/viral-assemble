@@ -162,7 +162,9 @@ ref_guided_consensus_novoalign_params: "-r Random -l 30 -g 40 -x 20 -t 502"
 # Parameters for gap-filling with Sealer. Set to blank ("") to skip this step.
 # See https://github.com/bcgsc/abyss/blob/master/Sealer/README.md#suggested-parameters-for-first-run
 
-gapfill_method: "gap2seq"
+gapfill_method: "sealer"
+linux_only:
+  - gapfill_method: "gap2seq"
 
 gapfill_params_sealer: "-k90 -k70 -k50 -k40 -k30 -P30 -b12G"
 gapfill_params_gap2seq: ""
