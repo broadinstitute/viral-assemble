@@ -59,7 +59,7 @@ class TestSimpleDryRuns(TestCaseWithTmp):
     def setUp(self):
         super(TestSimpleDryRuns, self).setUp()
         self.workdir = setup_dummy_simple()
-        self.env = {'GATK_PATH': os.environ.get('GATK_PATH'), 'NOVOALIGN_PATH': os.environ.get('NOVOALIGN_PATH')}
+        self.env = {'NOVOALIGN_PATH': os.environ.get('NOVOALIGN_PATH')}
 
     def tearDown(self):
         for k, v in self.env.items():

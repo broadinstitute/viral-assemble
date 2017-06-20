@@ -861,11 +861,6 @@ def parser_gatk_ug(parser=argparse.ArgumentParser()):
         default=tools.gatk.GATKTool.jvmMemDefault,
         help='JVM virtual memory size (default: %(default)s)'
     )
-    parser.add_argument(
-        '--GATK_PATH',
-        default=None,
-        help='A path containing the GATK jar file. This overrides the GATK_ENV environment variable or the GATK conda package. (default: %(default)s)'
-    )
     util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, main_gatk_ug)
     return parser
@@ -873,7 +868,7 @@ def parser_gatk_ug(parser=argparse.ArgumentParser()):
 
 def main_gatk_ug(args):
     '''Call genotypes using the GATK UnifiedGenotyper.'''
-    tools.gatk.GATKTool(path=args.GATK_PATH).ug(
+    tools.gatk.GATKTool().ug(
         args.inBam, args.refFasta,
         args.outVcf, options=args.options.split(),
         JVMmemory=args.JVMmemory
@@ -893,11 +888,6 @@ def parser_gatk_realign(parser=argparse.ArgumentParser()):
         default=tools.gatk.GATKTool.jvmMemDefault,
         help='JVM virtual memory size (default: %(default)s)'
     )
-    parser.add_argument(
-        '--GATK_PATH',
-        default=None,
-        help='A path containing the GATK jar file. This overrides the GATK_ENV environment variable or the GATK conda package. (default: %(default)s)'
-    )
     util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, main_gatk_realign)
     parser.add_argument('--threads', default=1, help='Number of threads (default: %(default)s)')
@@ -906,7 +896,7 @@ def parser_gatk_realign(parser=argparse.ArgumentParser()):
 
 def main_gatk_realign(args):
     '''Local realignment of BAM files with GATK IndelRealigner.'''
-    tools.gatk.GATKTool(path=args.GATK_PATH).local_realign(
+    tools.gatk.GATKTool().local_realign(
         args.inBam, args.refFasta,
         args.outBam, JVMmemory=args.JVMmemory,
         threads=args.threads, 
@@ -928,7 +918,6 @@ def align_and_fix(
     JVMmemory=None,
     threads=1,
     skip_mark_dupes=False,
-    gatk_path=None,
     novoalign_license_path=None
 ):
     ''' Take reads, align to reference with Novoalign, optionally mark duplicates
@@ -991,7 +980,7 @@ def align_and_fix(
     tools.samtools.SamtoolsTool().index(bam_marked)
 
     bam_realigned = mkstempfname('.realigned.bam')
-    tools.gatk.GATKTool(path=gatk_path).local_realign(bam_marked, refFastaCopy, bam_realigned, JVMmemory=JVMmemory, threads=threads)
+    tools.gatk.GATKTool().local_realign(bam_marked, refFastaCopy, bam_realigned, JVMmemory=JVMmemory, threads=threads)
     os.unlink(bam_marked)
 
     if outBamAll:
@@ -1028,12 +1017,6 @@ def parser_align_and_fix(parser=argparse.ArgumentParser()):
                         help='If specified, duplicate reads will not be marked in the resulting output file.',
                         dest="skip_mark_dupes",
                         action='store_true')
-    parser.add_argument(
-        '--GATK_PATH',
-        default=None,
-        dest="gatk_path",
-        help='A path containing the GATK jar file. This overrides the GATK_ENV environment variable or the GATK conda package. (default: %(default)s)'
-    )
     parser.add_argument(
         '--NOVOALIGN_LICENSE_PATH',
         default=None,

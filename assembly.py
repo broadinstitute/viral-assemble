@@ -681,7 +681,6 @@ def refine_assembly(
     already_realigned_bam=None,
     JVMmemory=None,
     threads=1,
-    gatk_path=None,
     novoalign_license_path=None
 ):
     ''' This a refinement step where we take a crude assembly, align
@@ -706,7 +705,7 @@ def refine_assembly(
     picard_mkdup = tools.picard.MarkDuplicatesTool()
     samtools = tools.samtools.SamtoolsTool()
     novoalign = tools.novoalign.NovoalignTool(license_path=novoalign_license_path)
-    gatk = tools.gatk.GATKTool(path=gatk_path)
+    gatk = tools.gatk.GATKTool()
 
     # Create deambiguated genome for GATK
     deambigFasta = util.file.mkstempfname('.deambig.fasta')
@@ -835,12 +834,6 @@ def parser_refine_assembly(parser=argparse.ArgumentParser()):
         '--JVMmemory',
         default=tools.gatk.GATKTool.jvmMemDefault,
         help='JVM virtual memory size (default: %(default)s)'
-    )
-    parser.add_argument(
-        '--GATK_PATH',
-        default=None,
-        dest="gatk_path",
-        help='A path containing the GATK jar file. This overrides the GATK_ENV environment variable or the GATK conda package. (default: %(default)s)'
     )
     parser.add_argument(
         '--NOVOALIGN_LICENSE_PATH',

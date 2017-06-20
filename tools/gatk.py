@@ -1,9 +1,5 @@
 '''
-    GATK genotyping toolkit from the Broad Institute
-
-    This software has different licenses depending on use cases.
-    As such, we do not have an auto-downloader. The user must have GATK
-    pre-installed on their own and available in $GATK_PATH.
+    GATK4 genotyping toolkit from the Broad Institute
 '''
 
 import tools
@@ -21,28 +17,15 @@ import tempfile
 _log = logging.getLogger(__name__)
 
 
-TOOL_NAME = 'gatk'
-TOOL_VERSION = '3.6'
+TOOL_NAME = 'gatk4'
+TOOL_VERSION = '4.0a1.2.7.2'
 
 class GATKTool(tools.Tool):
     jvmMemDefault = '2g'
 
-    def __init__(self, path=None):
+    def __init__(self):
         self.tool_version = None
-        install_methods = []
-        for jarpath in [path, os.environ.get('GATK_PATH')]:
-            if jarpath:
-                if not jarpath.endswith('.jar'):
-                    jarpath = os.path.join(jarpath, 'GenomeAnalysisTK.jar')
-                install_methods.append(
-                    tools.PrexistingUnixCommand(
-                        jarpath,
-                        verifycmd='java -jar %s --version &> /dev/null' % jarpath,
-                        verifycode=0,
-                        require_executability=False
-                    )
-                )
-        install_methods.append(tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION))
+        install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION)]
         tools.Tool.__init__(self, install_methods=install_methods)
 
     def execute(self, command, gatkOptions=None, JVMmemory=None):    # pylint: disable=W0221

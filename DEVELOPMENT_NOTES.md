@@ -23,7 +23,7 @@ A few notes on testing:
 - Tox is present for convenience (local use only, not currently in use on Travis)
 - `py.test` is used in place of `nose` or the built-in `unittest` framework for its generative testing, fixtures, and parallelized execution of tests. 
 - `.flake8`, `.pylintrc`, and `.style.yapf` are available in the repository root, and should be used when running the associated tools
-- During Travis tests an encrypted tarball of third-party resources is downloaded into the build environment to provide a licensed copy of GATK and Novoalign. For security, forks of viral-ngs [will not have](https://docs.travis-ci.com/user/pull-requests#Security-Restrictions-when-testing-Pull-Requests) the encrypted resources available for testing on Travis, nor will pull requests from forks.
+- For security, forks of viral-ngs [will not have](https://docs.travis-ci.com/user/pull-requests#Security-Restrictions-when-testing-Pull-Requests) the encrypted resources available for testing on Travis, nor will pull requests from forks.
 - Many tests for viral-ngs depend on static input files distributed with the repository. The test input files reside in `viral-ngs/test/input/<TestClassName>`. Within specific unit tests, class-specific test input files may be accessed via the function `util.file.get_test_input_path(self)`. The parent directory for all static test files can be accessed via `util.file.get_test_path()`
 
 ### Building documentation
