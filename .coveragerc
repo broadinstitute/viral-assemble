@@ -1,7 +1,9 @@
 # .coveragerc to control test coverage report
 [run]
 branch = True
-omit = tools/conda-tools/*
+omit = 
+		tools/conda-tools/*
+		test/pytest-testmon/*
 
 source = 
 		broad_utils
