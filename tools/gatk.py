@@ -25,7 +25,10 @@ class GATKTool(tools.Tool):
 
     def __init__(self):
         self.tool_version = None
-        install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION)]
+        install_methods = [tools.CondaPackage(
+            TOOL_NAME,
+            version=TOOL_VERSION,
+            executable='gatk-launch')]
         tools.Tool.__init__(self, install_methods=install_methods)
 
     def execute(self, command, gatkOptions=None, JVMmemory=None):    # pylint: disable=W0221
@@ -35,15 +38,12 @@ class GATKTool(tools.Tool):
             JVMmemory = self.jvmMemDefault
 
         # the conda version wraps the jar file with a shell script
-        if self.install_and_get_path().endswith(".jar"):
-            tool_cmd = [
-                'java', '-Xmx' + JVMmemory, '-Djava.io.tmpdir=' + tempfile.gettempdir(), '-jar', self.install_and_get_path(),
-                '-T', command
-            ] + list(map(str, gatkOptions))
-        else:
-            tool_cmd = [
-                self.install_and_get_path(), '-Xmx' + JVMmemory, '-Djava.io.tmpdir=' + tempfile.gettempdir(), '-T', command
-            ] + list(map(str, gatkOptions))
+        tool_cmd = [
+            self.install_and_get_path(),
+            '--sparkRunner', 'LOCAL',
+            '--javaOptions', '-Xmx%s -Djava.io.tmpdir=%s' % (JVMmemory, tempfile.gettempdir()),
+            command
+        ] + list(map(str, gatkOptions))
 
         _log.debug(' '.join(tool_cmd))
         subprocess.check_call(tool_cmd)
@@ -58,17 +58,7 @@ class GATKTool(tools.Tool):
         return self.tool_version
 
     def _get_tool_version(self):
-        if self.install_and_get_path().endswith(".jar"):
-            cmd = [
-                'java', '-Djava.io.tmpdir=' + tempfile.gettempdir(), '-jar', self.install_and_get_path(),
-                '--version'
-            ]
-        else:
-            cmd = [
-                self.install_and_get_path(), '--version'
-            ]
-
-        self.tool_version = util.misc.run_and_print(cmd, buffered=False, silent=True).stdout.decode("utf-8").strip()
+         self.tool_version = TOOL_VERSION
 
     def ug(self, inBam, refFasta, outVcf, options=None, JVMmemory=None, threads=1):
         options = options or ["--min_base_quality_score", 15, "-ploidy", 4]
