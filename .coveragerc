@@ -1,8 +1,21 @@
 # .coveragerc to control test coverage report
-# source is not used here because it is specified in pytest.ini
 [run]
 branch = True
 omit = tools/conda-tools/*
+
+source = 
+		broad_utils
+		illumina
+		assembly
+		interhost
+		intrahost
+		metagenomics
+		ncbi
+		read_utils
+		reports
+		taxon_filter
+		tools
+		util
 
 [report]
 

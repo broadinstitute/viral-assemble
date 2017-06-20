@@ -5,7 +5,8 @@ except ImportError:
     import ConfigParser as configparser
 import hashlib
 import json
-import os
+import os, os.path
+import errno
 import random
 import sqlite3
 import sys
@@ -185,7 +186,18 @@ class SourceTree():
             self.changed_files[filename] = parse_file(filename=filename, rootdir=self.rootdir, source_code=code)
         return self.changed_files[filename]
 
-
+def mkdir_p(dirpath):
+    ''' Verify that the directory given exists, and if not, create it.  Returns dirpath.
+    '''
+    try:
+        os.makedirs(dirpath)
+    except OSError as exc:  # Python >2.5
+        if exc.errno == errno.EEXIST and os.path.isdir(dirpath):
+            pass
+        else:
+            raise
+    return dirpath
+    
 class TestmonData(object):
 
     # If you change the SQLlite schema, you should bump this number
@@ -202,7 +214,7 @@ class TestmonData(object):
         self.covdata_cumulative = coverage.CoverageData()
 
     def init_connection(self):
-        self.datafile = os.path.join(self.rootdir, '.testmondata')
+        self.datafile = os.path.join(mkdir_p(os.environ.get('CACHE_DIR') or self.rootdir), '.testmondata')
         self.connection = None
 
         new_db = not os.path.exists(self.datafile)
