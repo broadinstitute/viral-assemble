@@ -3,7 +3,7 @@
 branch = True
 omit = 
 		tools/conda-tools/*
-		test/pytest-testmon/*
+		test/*
 
 source = 
 		broad_utils
