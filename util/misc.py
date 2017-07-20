@@ -35,6 +35,16 @@ def histogram(items):
         out[i] += 1
     return out
 
+def grouper(iterable, n, fillvalue=None):
+    '''Collect data into fixed-length chunks or blocks.
+    From https://docs.python.org/3/library/itertools.html#itertools-recipes
+
+    >>> tuple(grouper('ABCDEFG', 3, 'x'))
+    (('A', 'B', 'C'), ('D', 'E', 'F'), ('G', 'x', 'x'))
+
+    '''
+    args = [iter(iterable)] * n
+    return itertools.zip_longest(*args, fillvalue=fillvalue)
 
 def freqs(items, zero_checks=None):
     ''' Given a list of comparable, non-unique items, produce an iterator of
@@ -196,6 +206,12 @@ except ImportError:
                 stderr.close()
                 os.remove(stderr_fn)
 
+def mean(iterable):
+    '''Return the arithmetic mean of the values in the iterable.  Impemented here to avoid the need to
+    import the heavy-weight numpy when you just need numpy.mean() .
+    '''
+    vals = tuple(iterable)
+    return sum(vals) / float(len(vals))
 
 def run_and_print(args, stdout=None, stderr=None,
                   stdin=None, shell=False, env=None, cwd=None,

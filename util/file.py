@@ -7,7 +7,8 @@ __version__ = "PLACEHOLDER"
 __date__ = "PLACEHOLDER"
 
 import contextlib
-import os, os.path
+import os
+import os.path
 import gzip
 import tempfile
 import shutil
@@ -150,6 +151,11 @@ def mkdir_p(dirpath):
 def open_or_gzopen(fname, *opts):
     return fname.endswith('.gz') and gzip.open(fname, *opts) or open(fname, *opts)
 
+def gunzip(gz_fname, out_fname):
+    '''Unzip a file compressed with gzip, onto a new file.'''
+    with gzip.open(gz_fname, 'rb') as f_in:
+        with open(out_fname, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
 
 def read_tabfile_dict(inFile):
     ''' Read a tab text file (possibly gzipped) and return contents as an
