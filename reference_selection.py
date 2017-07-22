@@ -30,8 +30,8 @@ _log = logging.getLogger(__name__)   # pylint: disable=C0103
 
 _DB_FORMAT_VERSION = "1.0"
 
-def _db_format_string(clark_variant):
-    return '|'.join(('RefSelDB_'+ _DB_FORMAT_VERSION, 'CLARK'+clark_variant+'_'+tools.clark.TOOL_VERSION))
+def _db_format_string():
+    return '|'.join(('RefSelDB_'+ _DB_FORMAT_VERSION, tools.clark.TOOL_NAME, tools.clark.TOOL_VERSION))
 
 class _RefSelPaths(object):  # pylint: disable=R0902
     '''File and directory paths used by the refsel module.'''
@@ -75,8 +75,12 @@ class _RefSelPaths(object):  # pylint: disable=R0902
 
 # end: class _RefSelPaths(object)
 
+# =========================
+# ***  build_refsel_db  ***
+# =========================
+
 def build_refsel_db(refs_fasta, n_segments_per_genome, refsel_dir, # pylint: disable=R0914
-                    kmer_sizes=None, clark_variant=''):
+                    kmer_sizes=None, clark_variant='light'):
     '''Construct the refsel database.  The database is written to the directory `refsel_dir` .
 
     Args:
@@ -87,14 +91,14 @@ def build_refsel_db(refs_fasta, n_segments_per_genome, refsel_dir, # pylint: dis
             must be a multiple of this number.
         refsel_dir: directory under which the refsel database will be stored
         kmer_sizes: kmer size(s) for which to build the database.  If not given, defaults for (31,) for CLARK and
-            (27,) for CLARK-l (the low-memory, less-precise variant of CLARK).  Only the first kmer size is currently
-            used for reference selection, but this may change in the future.
+            (27,) for CLARK-l (the low-memory, less-precise 'light' variant of CLARK).  Only the first kmer size is 
+            currently used for reference selection, but this may change in the future.
         clark_variant: which variant of the CLARK metagenomics tool to use.
-            Options are '' (default), '-l' (light) and '-S' (spaced-kmer).  The light variant uses less memory
-            but is less precise.  The spaced-kmer memory is the most memory-hungry and most precise; its use is
-            still experimental.
+            Options are 'standard' and 'light' (default).  The light variant uses less memory
+            but is less precise.
     '''
 
+    assert clark_variant in ('standard', 'light')
     _sanity_check_ref_genomes(refs_fasta, n_segments_per_genome)
 
     from util.file import mkdir_p, dump_file
@@ -112,7 +116,7 @@ def build_refsel_db(refs_fasta, n_segments_per_genome, refsel_dir, # pylint: dis
 
     shutil.copyfile(refs_fasta, paths.refs_fasta)
 
-    kmer_sizes = util.misc.make_seq(kmer_sizes or (27 if clark_variant=='-l' else 31))
+    kmer_sizes = util.misc.make_seq(kmer_sizes or (27 if clark_variant=='light' else 31))
     dump_file(paths.n_segments_per_genome, n_segments_per_genome)
     dump_file(paths.kmer_sizes, ','.join(map(str, kmer_sizes)))
 
@@ -192,7 +196,7 @@ def build_refsel_db(refs_fasta, n_segments_per_genome, refsel_dir, # pylint: dis
                        '-R', paths.clark_test,
                        '-k', str(kmer_size)], variant=clark_variant)
 
-    dump_file(paths.db_format, _db_format_string(clark_variant))
+    dump_file(paths.db_format, _db_format_string())
 
 # end: def build_refsel_db(self, refs_fasta, n_segments_per_genome, kmer_sizes)
 
@@ -228,6 +232,25 @@ def _sanity_check_ref_genomes(refs_fasta, n_segments_per_genome, segment_len_mar
 
 # end: _sanity_check_ref_genomes(self, refs_fasta, n_segments_per_genome, segment_len_margin=.1)
 
+def parser_build_refsel_db(parser=argparse.ArgumentParser()):
+    '''Create parser for build_refsel_db command'''
+    parser.add_argument('refs_fasta',
+                        help='Reference genomes; segments of each genome must be consequtive fasta records, '
+                        'always listed in the same segment order.')
+    parser.add_argument('n_segments_per_genome', type=int, help='Number of segments in each reference genome.')
+    parser.add_argument('refsel_dir', help='Directory where to put the refsel database.')
+    parser.add_argument('--clark_variant', default='light', 
+                        help='CLARK tool variant to use ("standard" or "light"); light variant, the default, '
+                        'uses less memory but is less precise')
+    util.cmd.attach_main(parser, build_refsel_db, split_args=True)
+    return parser
+
+__commands__.append(('build_refsel_db', parser_build_refsel_db))
+
+# ====================
+# ***  select_ref  ***
+# ====================
+
 def select_ref(refsel_dir, contigs, out_ref, min_contig_len=200):  # pylint: disable=R0914
     '''Choose a reference closest to the sample.
 
@@ -245,8 +268,9 @@ def select_ref(refsel_dir, contigs, out_ref, min_contig_len=200):  # pylint: dis
     paths = _RefSelPaths(refsel_dir)
     del refsel_dir  # make sure all paths are accessed via the `paths` object
 
+    assert slurp_file(paths.db_format) == _db_format_string(), 'Database format mismatch'
+
     clark_variant = slurp_file(paths.clark_variant)
-    assert slurp_file(paths.db_format) == _db_format_string(clark_variant), 'Database format mismatch'
 
     # for now, just use the first kmer size
     kmer_size = int(slurp_file(paths.kmer_sizes).strip().split(',')[0])
@@ -289,21 +313,6 @@ def select_ref(refsel_dir, contigs, out_ref, min_contig_len=200):  # pylint: dis
         assert found, 'Closest reference not found -- should not happen'
 
 # end: def select_ref(refsel_dir, contigs, out_ref)
-
-def parser_build_refsel_db(parser=argparse.ArgumentParser()):
-    '''Create parser for build_refsel_db command'''
-    parser.add_argument('refs_fasta',
-                        help='Reference genomes; segments of each genome must be consequtive fasta records, '
-                        'always listed in the same segment order.')
-    parser.add_argument('n_segments_per_genome', type=int, help='Number of segments in each reference genome.')
-    parser.add_argument('refsel_dir', help='Directory where to put the refsel database.')
-    parser.add_argument('--clark_variant', default='', help='CLARK tool variant to use ("-l" for light variant '
-                        'which uses less memory but is less precise)')
-    util.cmd.attach_main(parser, build_refsel_db, split_args=True)
-    return parser
-
-
-__commands__.append(('build_refsel_db', parser_build_refsel_db))
 
 def parser_select_ref(parser=argparse.ArgumentParser(description='Select reference closest to sample')):
     '''Create parser for select_ref command'''

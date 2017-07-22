@@ -17,20 +17,22 @@ class ClarkTool(tools.Tool):
 
     def __init__(self, install_methods=None):
         if install_methods is None:
-            install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, executable='CLARK', env='clark_env')]
+            install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, executable='CLARK')]
         tools.Tool.__init__(self, install_methods=install_methods)
 
     def version(self):
         return TOOL_VERSION
 
-    def execute(self, args, variant='', stdout=None):  # pylint: disable=W0221
+    def execute(self, args, variant='standard', stdout=None):  # pylint: disable=W0221
         '''Run a CLARK command.
 
         Args:
             args: list of command-line arguments
-            variant: CLARK variant to run ('' for default, '-l' for light, '-S' for spaced-kmer)
+            variant: CLARK variant to run ('standard' or 'light')
         '''
-        tool_cmd = [self.install_and_get_path()+variant] + args
+
+        assert variant in ('standard', 'light')
+        tool_cmd = [self.install_and_get_path()+('-l' if variant=='light' else '')] + args
         _log.debug(' '.join(tool_cmd))
         if stdout:
             stdout = open(stdout, 'w')
