@@ -28,7 +28,7 @@ import Bio.Alphabet
 
 _log = logging.getLogger(__name__)   # pylint: disable=C0103
 
-_DB_FORMAT_VERSION = "1.0"
+_DB_FORMAT_VERSION = "1.1"
 
 def _db_format_string():
     '''Return a string identifying the format of the refsel database.'''
