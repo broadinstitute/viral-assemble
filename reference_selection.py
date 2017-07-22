@@ -31,6 +31,7 @@ _log = logging.getLogger(__name__)   # pylint: disable=C0103
 _DB_FORMAT_VERSION = "1.0"
 
 def _db_format_string():
+    '''Return a string identifying the format of the refsel database.'''
     return '|'.join(('RefSelDB_'+ _DB_FORMAT_VERSION, tools.clark.TOOL_NAME, tools.clark.TOOL_VERSION))
 
 class _RefSelPaths(object):  # pylint: disable=R0902
@@ -51,9 +52,9 @@ class _RefSelPaths(object):  # pylint: disable=R0902
         self.refs_segments_dir = join(refsel_dir, 'refs_segments')
 
         self.clark_dir = join(refsel_dir, 'CLARK')
-        self.clark_variant = join(refsel_dir, 'variant')
+        self.clark_variant = join(self.clark_dir, 'clark_variant')
         self.clark_targets_addresses = join(self.clark_dir, 'targets_addresses.txt')
-        self.clark_test = join(self.clark_dir, 'refsel.test')
+        self.clark_result_on_refs = join(self.clark_dir, 'clark_result_on_refs.tsv')
 
     # end: def __init__(self, refsel_dir)
 
@@ -71,7 +72,6 @@ class _RefSelPaths(object):  # pylint: disable=R0902
     def clark_db_dir(self, kmer_size):
         '''Path to CLARK database directory for given kmer size'''
         return os.path.join(self.clark_dir, 'k'+str(kmer_size))
-
 
 # end: class _RefSelPaths(object)
 
@@ -193,7 +193,7 @@ def build_refsel_db(refs_fasta, n_segments_per_genome, refsel_dir, # pylint: dis
                        '-D', paths.clark_db_dir(kmer_size)+'/',
                        '-O', paths.refs_fasta,
                        '-m', '0', '--extended',
-                       '-R', paths.clark_test,
+                       '-R', paths.clark_result_on_refs,
                        '-k', str(kmer_size)], variant=clark_variant)
 
     dump_file(paths.db_format, _db_format_string())
