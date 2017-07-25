@@ -54,7 +54,6 @@ class _RefSelPaths(object):  # pylint: disable=R0902
         self.clark_dir = join(refsel_dir, 'CLARK')
         self.clark_variant = join(self.clark_dir, 'clark_variant')
         self.clark_targets_addresses = join(self.clark_dir, 'targets_addresses.txt')
-        self.clark_result_on_refs = join(self.clark_dir, 'clark_result_on_refs.tsv')
 
     # end: def __init__(self, refsel_dir)
 
@@ -189,12 +188,13 @@ def build_refsel_db(refs_fasta, n_segments_per_genome, refsel_dir, # pylint: dis
     for kmer_size in kmer_sizes:
         _log.info('Building CLARK database for kmer size %d', kmer_size)
         mkdir_p(paths.clark_db_dir(kmer_size))
-        clark.execute(['-T', paths.clark_targets_addresses,
-                       '-D', paths.clark_db_dir(kmer_size)+'/',
-                       '-O', paths.refs_fasta,
-                       '-m', '0', '--extended',
-                       '-R', paths.clark_result_on_refs,
-                       '-k', str(kmer_size)], variant=clark_variant)
+        with util.file.tempfname(suffix='clark-db-bld') as dummy_result_fname:
+            clark.execute(['-T', paths.clark_targets_addresses,
+                           '-D', paths.clark_db_dir(kmer_size)+'/',
+                           '-O', segment_fname,
+                           '-m', '0', '--extended',
+                           '-R', dummy_result_fname,
+                           '-k', str(kmer_size)], variant=clark_variant)
 
     dump_file(paths.db_format, _db_format_string())
 
