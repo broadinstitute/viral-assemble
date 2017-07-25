@@ -191,9 +191,13 @@ def build_refsel_db(refs_fasta, n_segments_per_genome, refsel_dir, # pylint: dis
         with util.file.tempfname(suffix='clark-db-bld') as dummy_result_fname:
             clark.execute(['-T', paths.clark_targets_addresses,
                            '-D', paths.clark_db_dir(kmer_size)+'/',
+                           # CLARK does not have a separate "build-the-database" command; you give it a 
+                           # FASTA file to classify, and then if the database isn't built yet it'll build it
+                           # before classifying the file.  Here we just need the database, so we give CLARK a
+                           # random single-segment file to classify, and discard the result.
                            '-O', segment_fname,
-                           '-m', '0', '--extended',
                            '-R', dummy_result_fname,
+                           '-m', '0',
                            '-k', str(kmer_size)], variant=clark_variant)
 
     dump_file(paths.db_format, _db_format_string())
