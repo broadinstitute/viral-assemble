@@ -8,7 +8,7 @@ import subprocess
 import tools
 
 TOOL_NAME = 'clark'
-TOOL_VERSION = '1.2.3'
+TOOL_VERSION = '1.2.3.1'
 
 _log = logging.getLogger(__name__)   # pylint: disable=C0103
 
