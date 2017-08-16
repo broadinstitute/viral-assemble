@@ -78,14 +78,13 @@ class _RefSelPaths(object):  # pylint: disable=R0902
 # ***  build_refsel_db  ***
 # =========================
 
-def build_refsel_db(refs_fasta, n_segments_per_genome, refsel_dir, # pylint: disable=R0914
+def build_refsel_db(refs_segments, refs_defs, n_segments_per_genome, refsel_dir, # pylint: disable=R0914
                     kmer_sizes=None, clark_variant='light'):
     '''Construct the refsel database.  The database is written to the directory `refsel_dir` .
 
     Args:
-        refs_fasta: fasta file giving the reference genomes.  For multi-segment genomes, the segments of
-            each genome must be in consequtive fasta records.  Thus, for a 2-segment genome, this
-            file looks like: genome_1_segment_1, genome_1_segment_2, genome_2_segment_1, genome_2_segment_2, etc.
+        refs_segments: fasta file giving the nucleotide sequences of the segments of the reference genomes.
+        refs_defs: text file defining the segments comprising each reference, and 
         n_segments_per_genome: number of segments in the genome.  The number of fasta records in `refs_fasta`
             must be a multiple of this number.
         refsel_dir: directory under which the refsel database will be stored
