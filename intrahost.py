@@ -604,14 +604,14 @@ def merge_to_vcf(
                                 reverse=True))
                             # naive filter (quick and dirty)
                             if naive_filter:
-                                # require 2 libraries for every allele call
-                                row['allele_counts'] = list((a, n) for a, n in row['allele_counts']
-                                                            if row['n_libs'][a] >= 2)
+                                # # require 2 libraries for every allele call
+                                # row['allele_counts'] = list((a, n) for a, n in row['allele_counts']
+                                #                              if row['n_libs'][a] >= 2)
                                 # recompute total read counts for remaining
                                 tot_n = sum(n for a, n in row['allele_counts'])
-                                # require allele frequency >= 0.5%
+                                # require allele frequency >= 1%
                                 row['allele_counts'] = list((a, n) for a, n in row['allele_counts']
-                                                            if tot_n > 0 and float(n) / tot_n >= 0.005)
+                                                            if tot_n > 0 and float(n) / tot_n >= 0.01)
                                 # drop this position:sample if no variation left
                                 if len(row['allele_counts']) < 2:
                                     log.info(
@@ -861,9 +861,8 @@ def parser_merge_to_vcf(parser=argparse.ArgumentParser()):
                         default=False,
                         action="store_true",
                         dest="naive_filter",
-                        help="""If set, keep only the alleles that have at least
-            two independent libraries of support and allele freq > 0.005.
-            Default is false (do not filter at this stage).""")
+                        help="""If set, keep only the alleles that have 
+            allele freq > 0.01. Default is false (do not filter at this stage).""")
     parser.add_argument("--parse_accession",
                         default=False,
                         action="store_true",
