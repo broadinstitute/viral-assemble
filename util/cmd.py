@@ -200,10 +200,12 @@ def main_argparse(commands, description):
         os.environ['TMPDIR'] = tempfile.tempdir  # this is for running R
         try:
             ret = args.func_main(args)
+        except Exception as e:
+            log.exception("Exception occurred while running %s: %s", args.command, str(e))
+            raise
         finally:
             if (hasattr(args, 'tmp_dirKeep') and args.tmp_dirKeep) or util.file.keep_tmp():
-                log.exception(
-                    "Exception occurred while running %s, saving tmp_dir at %s", args.command, tempfile.tempdir)
+                log.exception("After running %s, saving tmp_dir at %s", args.command, tempfile.tempdir)
             else:
                 shutil.rmtree(tempfile.tempdir)
     else:

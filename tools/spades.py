@@ -27,7 +27,7 @@ class SpadesTool(tools.Tool):
 
     def __init__(self, install_methods=None):
         if install_methods is None:
-            install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, executable='spades.py',
+            install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, executable='rnaspades.py',
                                                   verifycmd='echo spades.py --help', env='spades_env')]
         tools.Tool.__init__(self, install_methods=install_methods)
 
@@ -88,7 +88,7 @@ class SpadesTool(tools.Tool):
                 if contigs_untrusted: args += [ '--untrusted-contigs', contigs_untrusted ]
                 if kmer_size: args += [ '-k', kmer_size ]
                 if spades_opts: args += shlex.split(spades_opts)
-                args += [ '--rna', '-m' + str(mem_limit_gb), '-t', str(threads), '-o', spades_dir ]
+                args += [ '-m' + str(mem_limit_gb), '-t', str(threads), '-o', spades_dir, '--fast' ]
 
                 transcripts_fname = os.path.join(spades_dir, ('hard_filtered_' if filter_contigs else '') + 'transcripts.fasta')
 

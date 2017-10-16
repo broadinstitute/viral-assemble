@@ -31,6 +31,50 @@ rule all_assemble_failures:
 
 
 
+rule trim_cleaned:
+    ''' This step trims cleaned reads
+    '''
+    input:  config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
+    output: config["tmp_dir"] +'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.trim.bam',
+            config["tmp_dir"] +'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.trim.1.fastq',
+            config["tmp_dir"] +'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.trim.2.fastq',
+            config["tmp_dir"] +'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.trim.0.fastq'
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short'),
+            n_reads=str(config["trinity_n_reads"]),
+            logid="{sample}",
+            clipDb=config["trim_clip_db"],
+            numThreads=str(config.get("number_of_threads", 1))
+    run:
+            shell("{config[bin_dir]}/assembly.py trim_rmdup_subsamp2 {input} {params.clipDb} {output}")
+
+
+
+rule trim_raw:
+    ''' This step trims cleaned reads
+    '''
+    input:  config["data_dir"]+'/'+config["subdirs"]["source"]+'/{sample}.bam'
+    output: config["tmp_dir"] +'/'+config["subdirs"]["per_sample"]+'/{sample}.raw.trim.bam',
+            config["tmp_dir"] +'/'+config["subdirs"]["per_sample"]+'/{sample}.raw.trim.1.fastq',
+            config["tmp_dir"] +'/'+config["subdirs"]["per_sample"]+'/{sample}.raw.trim.2.fastq',
+            config["tmp_dir"] +'/'+config["subdirs"]["per_sample"]+'/{sample}.raw.trim.0.fastq'
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('short', '-q short'),
+            n_reads=str(config["trinity_n_reads"]),
+            logid="{sample}",
+            clipDb=config["trim_clip_db"],
+            numThreads=str(config.get("number_of_threads", 1))
+    run:
+            shell("{config[bin_dir]}/assembly.py trim_rmdup_subsamp2 {input} {params.clipDb} {output}")
+
+
+
 rule assemble_trinity:
     ''' This step runs the Trinity assembler.
         First trim reads with trimmomatic, rmdup with prinseq,
@@ -57,7 +101,7 @@ rule assemble_trinity:
 rule assemble_spades:
     ''' This step runs the SPAdes assembler.
     '''
-    input:  taxfilt_reads=config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.taxfilt.bam',
+    input:  taxfilt_reads=config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam',
             subsamp_bam=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.subsamp.bam',
             contigs_trinity=config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta'
     output: contigs_spades=config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-spades.fasta',
@@ -67,7 +111,6 @@ rule assemble_spades:
             cores=int(config.get("number_of_threads", 1))
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
             UGER=config.get('UGER_queues', {}).get('short', '-q short'),
-            n_reads=str(config["trinity_n_reads"]),
             logid="{sample}",
             clipDb=config["trim_clip_db"],
             subsamp_bam=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.subsamp.bam',
@@ -76,8 +119,8 @@ rule assemble_spades:
             makedirs(expand("{dir}/{subdir}",
                 dir=[config["data_dir"],config["tmp_dir"]],
                 subdir=config["subdirs"]["assembly"]))
-            shell("{config[bin_dir]}/assembly.py assemble_spades {input.taxfilt_reads} {output.contigs_spades}")
-            shell("cat {input.contigs_trinity} {output.contigs_spades} > {output.contigs_trinity_spades}")
+            shell("{config[bin_dir]}/assembly.py assemble_spades {input.taxfilt_reads} {output.contigs_spades} --contigsTrusted {input.contigs_trinity}")
+            shell("cat {output.contigs_spades} > {output.contigs_trinity_spades}")
 
 rule orient_and_impute:
     ''' This step cleans up the Trinity assembly with a known reference genome.
@@ -102,7 +145,7 @@ rule orient_and_impute:
     input:  
         config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity-spades.fasta',
         expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["ref_genome_dir"], ref_name="reference" ),
-        taxfilt_reads=config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.taxfilt.bam'
+        taxfilt_reads=config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam'
     output: config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta'
     resources: mem=12
     params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
@@ -183,6 +226,61 @@ rule refine_assembly_2:
             min_coverage = "3",
             numThreads=str(config.get("number_of_threads", 1))
     shell:  "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {params.numThreads}"
+
+rule refine_assembly_1_trim_raw:
+    ''' This a first pass refinement step where we take the scaffolded assembly,
+        align all reads back to it, and modify the assembly to the majority
+        allele at each position based on read pileups.
+        This step now considers both SNPs as well as indels called by GATK
+        and will correct the consensus based on GATK calls.
+        Reads are aligned with Novoalign with permissive mapping thresholds,
+        then PCR duplicates are removed with Picard (in order to debias the
+        allele counts in the pileups), and realigned with GATK's
+        IndelRealigner (in order to call indels).
+        Output FASTA file is indexed for Picard, Samtools, and Novoalign.
+    '''
+    input:  config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta',
+            config["tmp_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.raw.trim.bam'
+    output: config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4-refined.raw.trim.fasta',
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3.vcf.gz',
+            outBam=config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3.realign.bam'
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('long', '-q long'),
+            logid="{sample}",
+            novoalign_options = config.get("refine_assembly_1_novoalign_params", "-r Random -l 30 -g 40 -x 20 -t 502"),
+            min_coverage = "2",
+            numThreads=str(config.get("number_of_threads", 1))
+    shell:  "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --outBam {output.outBam} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {params.numThreads}"
+
+
+rule refine_assembly_2_trim_raw:
+    ''' This a second pass refinement step very similar to the first.
+        The only differences are that Novoalign mapping parameters are
+        more conservative and the input consensus sequence has already
+        been refined once. We also require higher minimum read coverage
+        (3 instead of 2) in order to call a non-ambiguous base.
+        The output of this step is the final assembly for this sample.
+        Final FASTA file is indexed for Picard, Samtools, and Novoalign.
+    '''
+    input:  config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4-refined.raw.trim.fasta',
+            config["tmp_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.raw.trim.bam'
+    output: config["data_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.raw.trim.fasta',
+            config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4.vcf.gz',
+            outBam=config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4.realign.bam',
+    resources: 
+            mem=7,
+            cores=int(config.get("number_of_threads", 1))
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('long', '-q long'),
+            logid="{sample}",
+            novoalign_options = config.get("refine_assembly_2_novoalign_params", "-r Random -l 40 -g 40 -x 20 -t 100"),
+            min_coverage = "3",
+            numThreads=str(config.get("number_of_threads", 1))
+    shell:  "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --outBam {output.outBam} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {params.numThreads}"
+
 
 rule map_reads_to_self:
     ''' After the final assembly is produced, we also produce BAM files with all reads

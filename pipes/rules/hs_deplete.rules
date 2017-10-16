@@ -65,6 +65,29 @@ rule filter_to_taxon:
     shell:  "{config[bin_dir]}/taxon_filter.py filter_lastal_bam {input[0]} {params.lastalDb} {output}"
 
 
+rule filter_to_taxon_raw:
+    ''' This step reduces the read set to a specific taxon (usually the genus
+        level or greater for the virus of interest).
+    '''
+    input:  
+        config["data_dir"]+'/'+config["subdirs"]["source"]+'/{sample}.bam',
+        expand('{lastal_ref_db_dir}/lastal.bck', lastal_ref_db_dir=config["lastal_ref_db_dir"]),
+        expand('{lastal_ref_db_dir}/lastal.des', lastal_ref_db_dir=config["lastal_ref_db_dir"]),
+        expand('{lastal_ref_db_dir}/lastal.prj', lastal_ref_db_dir=config["lastal_ref_db_dir"]),
+        expand('{lastal_ref_db_dir}/lastal.sds', lastal_ref_db_dir=config["lastal_ref_db_dir"]),
+        expand('{lastal_ref_db_dir}/lastal.ssp', lastal_ref_db_dir=config["lastal_ref_db_dir"]),
+        expand('{lastal_ref_db_dir}/lastal.suf', lastal_ref_db_dir=config["lastal_ref_db_dir"]),
+        expand('{lastal_ref_db_dir}/lastal.tis', lastal_ref_db_dir=config["lastal_ref_db_dir"])
+    output: config["data_dir"]+'/'+config["subdirs"]["depletion"]+'/{sample}.taxfilt.raw.bam'
+    resources: mem=8
+    params: LSF=config.get('LSF_queues', {}).get('short', '-W 4:00'),
+            UGER=config.get('UGER_queues', {}).get('long', '-q long'),
+            lastalDb=os.path.join(config["lastal_ref_db_dir"], "lastal"),
+            logid="{sample}"
+    shell:  "{config[bin_dir]}/taxon_filter.py filter_lastal_bam {input[0]} {params.lastalDb} {output}"
+
+
+    
 class MergeInputException(Exception):
     '''Cannot find merging multiplexed sample inputs'''
 

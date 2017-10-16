@@ -17,7 +17,7 @@ pipesDir = os.path.join(os.path.expanduser(config['bin_dir']), 'pipes', 'rules')
 include: os.path.join(pipesDir, 'common.rules')
 set_env_vars()
 
-include: os.path.join(pipesDir, 'demux.rules')
+#include: os.path.join(pipesDir, 'demux.rules')
 include: os.path.join(pipesDir, 'hs_deplete.rules')
 include: os.path.join(pipesDir, 'assembly.rules')
 include: os.path.join(pipesDir, 'metagenomics.rules')

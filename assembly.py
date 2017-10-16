@@ -135,7 +135,7 @@ def trim_rmdup_subsamp_reads(inBam, clipDb, outBam, n_reads=100000):
     # --- subsampling ---
 
     # if we have too few paired reads after trimming and de-duplication, we can incorporate unpaired reads to reach the desired count
-    if n_rmdup_paired * 2 < n_reads:
+    if True or n_rmdup_paired * 2 < n_reads:
         # the unpaired reads from the trim operation, and the singletons from Prinseq
         unpaired_concat = util.file.mkstempfname('.unpaired.fastq')
 
@@ -265,6 +265,38 @@ def parser_trim_rmdup_subsamp(parser=argparse.ArgumentParser()):
 
 
 __commands__.append(('trim_rmdup_subsamp', parser_trim_rmdup_subsamp))
+
+def trim_rmdup_subsamp2(inBam, clipDb, outBam, outFastq1, outFastq2, outFastq0, n_reads=1000000):
+    ''' Take reads through Trimmomatic, Prinseq, and subsampling.
+        This should probably move over to read_utils.
+    '''
+    trim_rmdup_subsamp_reads(inBam, clipDb, outBam, n_reads=n_reads)
+    tools.picard.SamToFastqTool().execute(outBam, outFastq1, outFastq2, outFastq0=outFastq0, illuminaClipping=True)
+
+def parser_trim_rmdup_subsamp2(parser=argparse.ArgumentParser()):
+    parser.add_argument('inBam', help='Input reads, unaligned BAM format.')
+    parser.add_argument('clipDb', help='Trimmomatic clip DB.')
+    parser.add_argument(
+        'outBam',
+        help="""Output reads, unaligned BAM format (currently, read groups and other
+                header information are destroyed in this process)."""
+    )
+    parser.add_argument('outFastq1')
+    parser.add_argument('outFastq2')
+    parser.add_argument('outFastq0')
+    parser.add_argument(
+        '--n_reads',
+        default=1000000,
+        type=int,
+        help='Subsample reads to no more than this many individual reads. Note that paired reads are given priority, and unpaired reads are included to reach the count if there are too few paired reads to reach n_reads. (default %(default)s)'
+    )
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, trim_rmdup_subsamp2, split_args=True)
+    return parser
+
+
+__commands__.append(('trim_rmdup_subsamp2', parser_trim_rmdup_subsamp2))
+
 
 
 def assemble_trinity(
