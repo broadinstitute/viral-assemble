@@ -14,6 +14,7 @@ import math
 import os
 import tempfile
 import shutil
+import sys
 
 from Bio import SeqIO
 
@@ -22,6 +23,7 @@ import util.file
 import util.misc
 from util.file import mkstempfname
 import tools.bwa
+import tools.cdhit
 import tools.picard
 import tools.samtools
 import tools.mvicuna
@@ -69,37 +71,6 @@ def parser_purge_unmated(parser=argparse.ArgumentParser()):
 
 __commands__.append(('purge_unmated', parser_purge_unmated))
 
-# =========================
-# ***  fastq_to_fasta   ***
-# =========================
-
-
-def fastq_to_fasta(inFastq, outFasta):
-    ''' Convert from fastq format to fasta format.
-        Warning: output reads might be split onto multiple lines.
-    '''
-
-    # Do this with biopython rather than prinseq, because if the latter fails
-    #    it doesn't return an error. (On the other hand, prinseq
-    #    can guarantee that output lines are not split...)
-    inFile = util.file.open_or_gzopen(inFastq)
-    outFile = util.file.open_or_gzopen(outFasta, 'w')
-    for rec in SeqIO.parse(inFile, 'fastq'):
-        SeqIO.write([rec], outFile, 'fasta')
-    inFile.close()
-    outFile.close()
-    return 0
-
-
-def parser_fastq_to_fasta(parser=argparse.ArgumentParser()):
-    parser.add_argument('inFastq', help='Input fastq file.')
-    parser.add_argument('outFasta', help='Output fasta file.')
-    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
-    util.cmd.attach_main(parser, fastq_to_fasta, split_args=True)
-    return parser
-
-
-__commands__.append(('fastq_to_fasta', parser_fastq_to_fasta))
 
 # ===============================
 # ***  index_fasta_samtools   ***
@@ -481,6 +452,32 @@ def parser_fastq_to_bam(parser=argparse.ArgumentParser()):
 
 __commands__.append(('fastq_to_bam', parser_fastq_to_bam))
 
+
+def join_paired_fastq(
+        inFastqs,
+        output,
+        outFormat
+):
+    ''' Join paired fastq reads into single reads with Ns
+    '''
+    inFastqs = list(inFastqs)
+    if output == '-':
+        output = sys.stdout
+    SeqIO.write(util.file.join_paired_fastq(inFastqs, output_format=outFormat), output, outFormat)
+    return 0
+
+
+def parser_join_paired_fastq(parser=argparse.ArgumentParser()):
+    parser.add_argument('output', help='Output file.')
+    parser.add_argument('inFastqs', nargs='+', help='Input fastq file (2 if paired, 1 if interleaved)')
+    parser.add_argument('--outFormat', default='fastq', help='Output file format.')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, join_paired_fastq, split_args=True)
+    return parser
+
+__commands__.append(('join_paired_fastq', parser_join_paired_fastq))
+
+
 # ======================
 # ***  split_reads   ***
 # ======================
@@ -510,7 +507,7 @@ def split_bam(inBam, outBams):
 
     # dump to bigsam
     bigsam = mkstempfname('.sam')
-    samtools.view([], inBam, bigsam)
+    samtools.view(['-@', '3'], inBam, bigsam)
 
     # split bigsam into little ones
     with util.file.open_or_gzopen(bigsam, 'rt') as inf:
@@ -656,6 +653,67 @@ def mvicuna_fastqs_to_readlist(inFastq1, inFastq2, readList):
                     line_num += 1
     os.unlink(outFastq1)
     os.unlink(outFastq2)
+
+
+def rmdup_cdhit_bam(inBam, outBam, max_mismatches=None, jvm_memory=None):
+    ''' Remove duplicate reads from BAM file using cd-hit-dup.
+    '''
+    max_mismatches = max_mismatches or 4
+    tmp_dir = tempfile.mkdtemp()
+
+    tools.picard.SplitSamByLibraryTool().execute(inBam, tmp_dir)
+
+    s2fq_tool = tools.picard.SamToFastqTool()
+    cdhit = tools.cdhit.CdHit()
+    out_bams = []
+    for f in os.listdir(tmp_dir):
+        out_bam = mkstempfname('.bam')
+        out_bams.append(out_bam)
+        library_sam = os.path.join(tmp_dir, f)
+
+        in_fastqs = mkstempfname('.1.fastq'), mkstempfname('.2.fastq')
+
+        s2fq_tool.execute(library_sam, in_fastqs[0], in_fastqs[1])
+        if not os.path.getsize(in_fastqs[0]) > 0 and not os.path.getsize(in_fastqs[1]) > 0:
+            continue
+
+        out_fastqs = mkstempfname('.1.fastq'), mkstempfname('.2.fastq')
+        options = {
+            '-e': max_mismatches,
+        }
+        if in_fastqs[1] is not None and os.path.getsize(in_fastqs[1]) > 10:
+            options['-i2'] = in_fastqs[1]
+            options['-o2'] = out_fastqs[1]
+
+        log.info("executing cd-hit-est on library " + library_sam)
+        # cd-hit-dup cannot operate on piped fastq input because it reads twice
+        cdhit.execute('cd-hit-dup', in_fastqs[0], out_fastqs[0], options=options, background=True)
+
+        tools.picard.FastqToSamTool().execute(out_fastqs[0], out_fastqs[1], f, out_bam, JVMmemory=jvm_memory)
+        for fn in in_fastqs:
+            os.unlink(fn)
+
+    with util.file.fifo(name='merged.sam') as merged_bam:
+        merge_opts = ['SORT_ORDER=queryname']
+        tools.picard.MergeSamFilesTool().execute(out_bams, merged_bam, picardOptions=merge_opts, JVMmemory=jvm_memory, background=True)
+        tools.picard.ReplaceSamHeaderTool().execute(merged_bam, inBam, outBam, JVMmemory=jvm_memory)
+
+
+def parser_rmdup_cdhit_bam(parser=argparse.ArgumentParser()):
+    parser.add_argument('inBam', help='Input reads, BAM format.')
+    parser.add_argument('outBam', help='Output reads, BAM format.')
+    parser.add_argument(
+        '--JVMmemory',
+        default=tools.picard.FilterSamReadsTool.jvmMemDefault,
+        help='JVM virtual memory size (default: %(default)s)',
+        dest='jvm_memory'
+    )
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, rmdup_cdhit_bam, split_args=True)
+    return parser
+
+
+__commands__.append(('rmdup_cdhit_bam', parser_rmdup_cdhit_bam))
 
 
 def rmdup_mvicuna_bam(inBam, outBam, JVMmemory=None):
@@ -900,7 +958,7 @@ def parser_gatk_realign(parser=argparse.ArgumentParser()):
     )
     util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, main_gatk_realign)
-    parser.add_argument('--threads', default=1, help='Number of threads (default: %(default)s)')
+    parser.add_argument('--threads', type=int, default=None, help='Number of threads (default: all available cores)')
     return parser
 
 
@@ -909,7 +967,7 @@ def main_gatk_realign(args):
     tools.gatk.GATKTool(path=args.GATK_PATH).local_realign(
         args.inBam, args.refFasta,
         args.outBam, JVMmemory=args.JVMmemory,
-        threads=args.threads, 
+        threads=args.threads,
     )
     return 0
 
@@ -926,7 +984,7 @@ def align_and_fix(
     aligner_options='',
     aligner="novoalign",
     JVMmemory=None,
-    threads=1,
+    threads=None,
     skip_mark_dupes=False,
     gatk_path=None,
     novoalign_license_path=None
@@ -945,7 +1003,7 @@ def align_and_fix(
     shutil.copyfile(refFasta, refFastaCopy)
 
     tools.picard.CreateSequenceDictionaryTool().execute(refFastaCopy, overwrite=True)
-    tools.samtools.SamtoolsTool().faidx(refFastaCopy, overwrite=True)    
+    tools.samtools.SamtoolsTool().faidx(refFastaCopy, overwrite=True)
 
     if aligner_options is None:
         if aligner=="novoalign":
@@ -955,7 +1013,7 @@ def align_and_fix(
 
     bam_aligned = mkstempfname('.aligned.bam')
     if aligner=="novoalign":
-        
+
         tools.novoalign.NovoalignTool(license_path=novoalign_license_path).index_fasta(refFastaCopy)
 
         tools.novoalign.NovoalignTool(license_path=novoalign_license_path).execute(
@@ -1003,21 +1061,21 @@ def parser_align_and_fix(parser=argparse.ArgumentParser()):
         '--outBamAll',
         default=None,
         help='''Aligned, sorted, and indexed reads.  Unmapped and duplicate reads are
-                retained. By default, duplicate reads are marked. If "--skipMarkDupes" 
+                retained. By default, duplicate reads are marked. If "--skipMarkDupes"
                 is specified duplicate reads are included in outout without being marked.'''
     )
     parser.add_argument(
         '--outBamFiltered',
         default=None,
-        help='''Aligned, sorted, and indexed reads.  Unmapped reads are removed from this file, 
-                as well as any marked duplicate reads. Note that if "--skipMarkDupes" is provided, 
+        help='''Aligned, sorted, and indexed reads.  Unmapped reads are removed from this file,
+                as well as any marked duplicate reads. Note that if "--skipMarkDupes" is provided,
                 duplicates will be not be marked and will be included in the output.'''
     )
     parser.add_argument('--aligner_options', default=None, help='aligner options (default for novoalign: "-r Random", bwa: "-T 30"')
     parser.add_argument('--aligner', choices=['novoalign', 'bwa'], default='novoalign', help='aligner (default: %(default)s)')
     parser.add_argument('--JVMmemory', default='4g', help='JVM virtual memory size (default: %(default)s)')
-    parser.add_argument('--threads', default=1, help='Number of threads (default: %(default)s)')
-    parser.add_argument('--skipMarkDupes', 
+    parser.add_argument('--threads', type=int, default=None, help='Number of threads (default: all available cores)')
+    parser.add_argument('--skipMarkDupes',
                         help='If specified, duplicate reads will not be marked in the resulting output file.',
                         dest="skip_mark_dupes",
                         action='store_true')
@@ -1043,7 +1101,8 @@ __commands__.append(('align_and_fix', parser_align_and_fix))
 # =========================
 
 
-def bwamem_idxstats(inBam, refFasta, outBam=None, outStats=None):
+def bwamem_idxstats(inBam, refFasta, outBam=None, outStats=None,
+        min_score_to_filter=None, aligner_options=None):
     ''' Take reads, align to reference with BWA-MEM and perform samtools idxstats.
     '''
 
@@ -1057,7 +1116,13 @@ def bwamem_idxstats(inBam, refFasta, outBam=None, outStats=None):
     samtools = tools.samtools.SamtoolsTool()
     bwa = tools.bwa.Bwa()
 
-    bwa.mem(inBam, refFasta, bam_aligned)
+    ref_indexed = util.file.mkstempfname('.reference.fasta')
+    shutil.copyfile(refFasta, ref_indexed)
+    bwa.index(ref_indexed)
+
+    bwa_opts = [] if aligner_options is None else aligner_options.split()
+    bwa.mem(inBam, ref_indexed, bam_aligned, options=bwa_opts,
+            min_score_to_filter=min_score_to_filter)
 
     if outStats is not None:
         samtools.idxstats(bam_aligned, outStats)
@@ -1071,12 +1136,54 @@ def parser_bwamem_idxstats(parser=argparse.ArgumentParser()):
     parser.add_argument('refFasta', help='Reference genome, FASTA format, pre-indexed by Picard and Novoalign.')
     parser.add_argument('--outBam', help='Output aligned, indexed BAM file', default=None)
     parser.add_argument('--outStats', help='Output idxstats file', default=None)
+    parser.add_argument(
+        '--minScoreToFilter',
+        dest="min_score_to_filter",
+        type=int,
+        help=("Filter bwa alignments using this value as the minimum allowed "
+              "alignment score. Specifically, sum the alignment scores across "
+              "all alignments for each query (including reads in a pair, "
+              "supplementary and secondary alignments) and then only include, "
+              "in the output, queries whose summed alignment score is at least "
+              "this value. This is only applied when the aligner is 'bwa'. "
+              "The filtering on a summed alignment score is sensible for reads "
+              "in a pair and supplementary alignments, but may not be "
+              "reasonable if bwa outputs secondary alignments (i.e., if '-a' "
+              "is in the aligner options). (default: not set - i.e., do not "
+              "filter bwa's output)")
+    )
+    parser.add_argument(
+        '--alignerOptions',
+        dest="aligner_options",
+        help="bwa options (default: bwa defaults)")
     util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, bwamem_idxstats, split_args=True)
     return parser
 
-
 __commands__.append(('bwamem_idxstats', parser_bwamem_idxstats))
+
+
+def parser_extract_tarball(parser=argparse.ArgumentParser()):
+    parser.add_argument('tarfile', help='Input tar file. May be "-" for stdin.')
+    parser.add_argument('out_dir', help='Output directory')
+    parser.add_argument('--compression',
+        help='Compression type (default: %(default)s). Auto-detect is incompatible with stdin input unless pipe_hint is specified.',
+        choices=('gz', 'bz2', 'lz4', 'zip', 'none', 'auto'),
+        default='auto')
+    parser.add_argument('--pipe_hint',
+        help='If tarfile is stdin, you can provide a file-like URI string for pipe_hint which ends with a common compression file extension if you want to use compression=auto.',
+        default=None)
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, main_extract_tarball, split_args=True)
+    return parser
+def main_extract_tarball(*args, **kwargs):
+    ''' Extract an input .tar, .tgz, .tar.gz, .tar.bz2, .tar.lz4, or .zip file
+        to a given directory (or we will choose one on our own). Emit the
+        resulting directory path to stdout.
+    '''
+    print(util.file.extract_tarball(*args, **kwargs))
+__commands__.append(('extract_tarball', parser_extract_tarball))
+
 
 # =========================
 

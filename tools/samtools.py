@@ -22,17 +22,18 @@ import re
 import os.path
 import subprocess
 import tempfile
+import contextlib
 from collections import OrderedDict
 from decimal import *
 
-#import pysam
+import pysam
 
 import tools
 import util.file
 import util.misc
 
 TOOL_NAME = 'samtools'
-TOOL_VERSION = '1.3.1'
+TOOL_VERSION = '1.6'
 
 log = logging.getLogger(__name__)
 
@@ -40,9 +41,17 @@ log = logging.getLogger(__name__)
 class SamtoolsTool(tools.Tool):
 
     def __init__(self, install_methods=None):
-        if install_methods is None:
-            install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION)]
-        tools.Tool.__init__(self, install_methods=install_methods)
+        self.installed_method = True
+
+    def install(self):
+        pass
+
+    def is_installed(self):
+        return True
+
+    def install_and_get_path(self):
+        # the conda version wraps the jar file with a shell script
+        return 'samtools'
 
     def version(self):
         return TOOL_VERSION
@@ -73,13 +82,49 @@ class SamtoolsTool(tools.Tool):
         else:
             self.execute('bam2fq', ['-1', outFq1, '-2', outFq2, inBam])
 
+    def bam2fq_pipe(self, inBam):
+        tool_cmd = [self.install_and_get_path(), 'bam2fq', '-n', inBam]
+        log.debug(' '.join(tool_cmd) + ' |')
+        p = subprocess.Popen(tool_cmd, stdout=subprocess.PIPE)
+        return p.stdout
+
+    def bam2fa(self, inBam, outFa1, outFa2=None, outFa0=None):
+        if outFa2 is None:
+            args = ['-n']
+        else:
+            args = ['-1', outFa1, '-2', outFa2]
+        if outFa0:
+            args += ['-0', outFa0]
+        args += [inBam]
+        if outFa2 is None:
+            self.execute('fasta', args, stdout=outFa1)
+        else:
+            self.execute('fasta', args)
+
+    def bam2fa_pipe(self, inBam):
+        tool_cmd = [self.install_and_get_path(), 'fasta', '-n', inBam]
+        log.debug(' '.join(tool_cmd) + ' |')
+        p = subprocess.Popen(tool_cmd, stdout=subprocess.PIPE)
+        return p.stdout
+
+    @contextlib.contextmanager
+    def bam2fq_tmp(self, inBam):
+        with util.file.tempfnames(('.1.fq', '.2.fq')) as (reads1, reads2):
+            self.bam2fq(inBam, reads1, reads2)
+            yield reads1, reads2
+
+    @contextlib.contextmanager
+    def bam2fa_tmp(self, inBam):
+        with util.file.tempfnames(('.1.fa', '.2.fa')) as (reads1, reads2):
+            self.bam2fa(inBam, reads1, reads2)
+            yield reads1, reads2
+
     def sort(self, inFile, outFile, args=None, threads=None):
         # inFile can be .sam, .bam, .cram
         # outFile can be .sam, .bam, .cram
         args = args or []
-        threads = threads or util.misc.available_cpu_count()
         if '-@' not in args:
-            args.extend(('-@', str(threads)))
+            args.extend(('-@', str(util.misc.sanitize_thread_count(threads))))
         if '-T' not in args and os.path.isdir(tempfile.tempdir):
             args.extend(('-T', tempfile.tempdir))
 
@@ -133,7 +178,7 @@ class SamtoolsTool(tools.Tool):
 
     def removeDoublyMappedReads(self, inBam, outBam):
         #opts = ['-b', '-f 2']
-        opts = ['-b', '-F' '1028', '-f', '2']
+        opts = ['-b', '-F' '1028', '-f', '2', '-@', '3']
         self.view(opts, inBam, outBam)
 
     def filterByCigarString(self, inBam, outBam, 
@@ -147,44 +192,20 @@ class SamtoolsTool(tools.Tool):
               '^((?:[0-9]+[ID]){1}(?:[0-9]+[MNIDSHPX=])+)|((?:[0-9]+[MNIDSHPX=])+(?:[0-9]+[ID]){1})$'
 
         '''
-        in_args = [self.install_and_get_path(), 'view', '-h', inBam]
-
         regex = re.compile(regexToMatchForRemoval)
-
-        # an input samtools process to read a bam file
-        # bufsize 0=unbuffered, 1=linebuffered, -1=system buffered (usually fully)
-        in_process = subprocess.Popen(in_args, bufsize=1, stdout=subprocess.PIPE,
-                                    universal_newlines=True)
-
-        # an output samtools process to write filtered output via stdin
-        out_args = [self.install_and_get_path(), 'view', '-h', '-o', outBam]
-        out_process = subprocess.Popen(out_args, stdin=subprocess.PIPE)
-
-        # process the lines individually and write them or not, depending on 
-        # whether they match regexToMatchForRemoval
-        # Use while and readline() instead of "for line in in_process.stdout"
-        # to avoid Python readahead bug: https://bugs.python.org/issue3907
-        while True:
-            line = in_process.stdout.readline()
-            if not line or line=='':
-                break
-            # always write header lines, so skip the cigar string check
-            if not line.startswith('@'):
-                # cigar strings are in column 6
-                cigar_string = line.split('\t')[5]
-
-                # perform a regex match
-                matches = regex.search(cigar_string)
-                # if the regex was found (or not, if inverted)
-                if (not invertResult and matches) or (invertResult and not matches):
-                    # continue to the next read (don't write out this one)
-                    continue
-
-            # otherwise write out the line to samtools' stdin
-            out_process.stdin.write(line.encode("utf-8"))
-
-        # close stdin stream of the output process so it can terminate
-        out_process.stdin.close()
+        with pysam.AlignmentFile(inBam, 'rb', check_sq=False) as inb:
+            with pysam.AlignmentFile(outBam, 'wb', header=inb.header) as outf:
+                # process the lines individually and write them or not, depending on 
+                # whether they match regexToMatchForRemoval
+                for read in inb:
+                    # perform a regex match
+                    matches = regex.search(read.cigarstring)
+                    # if the regex was found (or not, if inverted)
+                    if (not invertResult and matches) or (invertResult and not matches):
+                        # continue to the next read (don't write out this one)
+                        continue
+                    # otherwise write out the line
+                    outf.write(read)
 
 
     def downsample(self, inBam, outBam, probability):
@@ -194,7 +215,7 @@ class SamtoolsTool(tools.Tool):
         if float(probability) <= 0 or float(probability) > 1:
             raise Exception("Probability must be in range (0,1]. This value was given: %s" % probability)
 
-        opts = ['-s', str(1) + '.' + str(probability).split('.')[1]]    # -s subsamples: seed.fraction
+        opts = ['-s', str(1) + '.' + str(probability).split('.')[1], '-@', '3']    # -s subsamples: seed.fraction
         self.view(opts, inBam, outBam)
 
     def downsample_to_approx_count(self, inBam, outBam, read_count):

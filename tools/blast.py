@@ -1,11 +1,17 @@
 "Tools in the blast+ suite."
-import tools
+
+import logging
 import os
+import subprocess
+
+import tools
+import tools.samtools
 import util.misc
 
 TOOL_NAME = "blast"
 TOOL_VERSION = "2.6.0"
 
+_log = logging.getLogger(__name__)
 
 class BlastTools(tools.Tool):
     """'Abstract' base class for tools in the blast+ suite.
@@ -32,6 +38,46 @@ class BlastTools(tools.Tool):
 class BlastnTool(BlastTools):
     """ Tool wrapper for blastn """
     subtool_name = 'blastn'
+
+    def get_hits_pipe(self, inPipe, db, threads=None):
+
+        # run blastn and emit list of read IDs
+        threads = util.misc.sanitize_thread_count(threads)
+        cmd = [self.install_and_get_path(),
+            '-db', db,
+            '-word_size', 16,
+            '-num_threads', threads,
+            '-evalue', '1e-6',
+            '-outfmt', 6,
+            '-max_target_seqs', 1,
+        ]
+        cmd = [str(x) for x in cmd]
+        _log.debug('| ' + ' '.join(cmd) + ' |')
+        blast_pipe = subprocess.Popen(cmd, stdin=inPipe, stdout=subprocess.PIPE)
+
+        # strip tab output to just query read ID names and emit
+        last_read_id = None
+        for line in blast_pipe.stdout:
+            line = line.decode('UTF-8').rstrip('\n\r')
+            read_id = line.split('\t')[0]
+            # only emit if it is not a duplicate of the previous read ID
+            if read_id != last_read_id:
+                last_read_id = read_id
+                yield read_id
+
+        if blast_pipe.poll():
+            raise subprocess.CalledProcessError(blast_pipe.returncode, cmd)
+
+    def get_hits_bam(self, inBam, db, threads=None):
+        return self.get_hits_pipe(
+            tools.samtools.SamtoolsTool().bam2fa_pipe(inBam),
+            db,
+            threads=threads)
+
+    def get_hits_fasta(self, inFasta, db, threads=None):
+        with open(inFasta, 'rt') as inf:
+            for hit in self.get_hits_pipe(inf, db, threads=threads):
+                yield hit
 
 
 class MakeblastdbTool(BlastTools):

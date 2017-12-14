@@ -29,6 +29,7 @@ import util.file
 import util.misc
 import tools.samtools
 import tools.bwa
+import tools.fastqc
 import assembly
 import interhost
 from util.stats import mean, median
@@ -530,7 +531,7 @@ def plot_coverage(
     num_mapped_reads = samtools.count(in_bam, opts=["-F", "4"])
     if num_mapped_reads == 0:
         raise Exception(
-            """The bam file specified appears to have zero mapped reads. 'plot_coverage' requires an aligned bam file. You can try 'align_and_plot_coverage' if you don't mind a simple bwa alignment. \n File: %s"""
+            """The bam file specified appears to have zero mapped reads. 'plot_coverage' requires an aligned bam file. You can try 'align_and_plot_coverage' if the plot input bam file contains reads and you don't mind a simple bwa alignment. \n File: %s"""
             % in_bam
         )
 
@@ -543,16 +544,22 @@ def plot_coverage(
     if plot_only_non_duplicates:
         # TODO: this is probably not necessary since "samtools depth" does not count marked duplicates
         # write a new bam file; exclude reads with the 1024 flag set (PCR or optical duplicates)
-        samtools.view(["-F", "1024"], in_bam, bam_dupe_processed)
+        samtools.view(["-F", "1024", '-@', '3'], in_bam, bam_dupe_processed)
     else:
         bam_dupe_processed = in_bam
 
-    # call samtools sort
+    # only sort if not sorted
     bam_sorted = util.file.mkstempfname('.sorted.bam')
-    samtools.sort(bam_dupe_processed, bam_sorted, args=["-O", "bam"])
-
-    if plot_only_non_duplicates:
-        os.unlink(bam_dupe_processed)
+    should_remove_sorted = True
+    if not util.file.bam_is_sorted(bam_dupe_processed):
+        samtools.sort(bam_dupe_processed, bam_sorted, args=["-O", "bam"])
+        if plot_only_non_duplicates:
+            os.unlink(bam_dupe_processed)
+    else:
+        bam_sorted = bam_dupe_processed
+        if not plot_only_non_duplicates:
+            # in this case we are passing through the original in_bam directly
+            should_remove_sorted = False
 
     # call samtools index
     samtools.index(bam_sorted)
@@ -594,7 +601,11 @@ def plot_coverage(
         bt.genome_coverage(d=True).saveas(coverage_tsv_file)
     else:
         samtools.depth(bam_sorted, coverage_tsv_file, opts)
-    os.unlink(bam_sorted)
+
+    # only remove the sorted bam if it is not the original input bam
+    # which we use directly in some casess 
+    if should_remove_sorted:
+        os.unlink(bam_sorted)
 
     # ---- create plot based on coverage_tsv_file ----
 
@@ -602,7 +613,7 @@ def plot_coverage(
     domain_max = 0
     with open(coverage_tsv_file, "r") as tabfile:
         for row in csv.reader(tabfile, delimiter='\t'):
-            segment_depths.setdefault(row[0], []).append(int(row[2]))
+            segment_depths.setdefault(row[0], []).append(float(row[2]))
             domain_max += 1
 
     domain_max = 0
@@ -730,7 +741,7 @@ def align_and_plot_coverage(
         if aligner=="novoalign":
             aligner_options = '-r Random -l 40 -g 40 -x 20 -t 100 -k'
         elif aligner=='bwa':
-            aligner_options = '' # use defaults
+            aligner_options = '-1' # hidden option to work around kernel/cpu bug; disables multithreaded file read: https://github.com/lh3/bwa/issues/102
 
     samtools = tools.samtools.SamtoolsTool()
 
@@ -844,7 +855,7 @@ def parser_align_and_plot_coverage(parser=argparse.ArgumentParser()):
               "filter bwa's output)")
     )
     parser.add_argument('--aligner', choices=['novoalign', 'bwa'], default='bwa', help='aligner (default: %(default)s)')
-    parser.add_argument('--aligner_options', default=None, help='aligner options (default for novoalign: "-r Random -l 40 -g 40 -x 20 -t 100 -k", bwa: "-T 30"')
+    parser.add_argument('--aligner_options', default=None, help='aligner options (default for novoalign: "-r Random -l 40 -g 40 -x 20 -t 100 -k", bwa: bwa defaults')
     parser.add_argument(
         '--NOVOALIGN_LICENSE_PATH',
         default=None,
@@ -859,6 +870,14 @@ def parser_align_and_plot_coverage(parser=argparse.ArgumentParser()):
 
 __commands__.append(('align_and_plot_coverage', parser_align_and_plot_coverage))
 
+
+
+def parser_fastqc(parser=argparse.ArgumentParser()):
+    parser.add_argument('inBam', help='Input reads, BAM format.')
+    parser.add_argument('outHtml', help='Output report, HTML format.')
+    util.cmd.attach_main(parser, tools.fastqc.FastQC().execute, split_args=True)
+    return parser
+__commands__.append(('fastqc', parser_fastqc))
 
 # =======================
 

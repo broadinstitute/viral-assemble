@@ -15,10 +15,11 @@ import shutil
 import tempfile
 import argparse
 import itertools
+import pytest
 import tools.mummer
 import tools.novoalign
 import tools.picard
-from test import TestCaseWithTmp
+from test import TestCaseWithTmp, _CPUS
 
 
 def makeFasta(seqs, outFasta):
@@ -35,7 +36,7 @@ class TestCommandHelp(unittest.TestCase):
             helpstring = parser.format_help()
 
 
-class TestAssemble(TestCaseWithTmp):
+class TestRefineAssemble(TestCaseWithTmp):
     ''' Test edge cases of the de novo assembly pipeline '''
 
     def test_empty_input_bam_assembly(self):
@@ -49,12 +50,12 @@ class TestAssemble(TestCaseWithTmp):
         novoalign.index_fasta(inFasta)
 
         inBam = os.path.join(util.file.get_test_input_path(), 'empty.bam')
-        
+
         outFasta = util.file.mkstempfname('.refined.fasta')
 
         # run refine_assembly
         args = [inFasta, inBam, outFasta, "--chr_names", 'G5012.3', "--min_coverage", '3', "--novo_params",
-                "-r Random -l 30 -g 40 -x 20 -t 502"]
+                "-r Random -l 30 -g 40 -x 20 -t 502 -c {}".format(_CPUS)]
         args = assembly.parser_refine_assembly(argparse.ArgumentParser()).parse_args(args)
         args.func_main(args)
 
@@ -78,7 +79,7 @@ class TestAssemble(TestCaseWithTmp):
 
         # run refine_assembly
         args = [inFasta, inBam, outFasta, "--chr_names", 'G5012.3', "--min_coverage", '3', "--novo_params",
-                "-r Random -l 30 -g 40 -x 20 -t 502"]
+                "-r Random -l 30 -g 40 -x 20 -t 502 -c {}".format(_CPUS)]
         args = assembly.parser_refine_assembly(argparse.ArgumentParser()).parse_args(args)
         args.func_main(args)
 
@@ -97,12 +98,12 @@ class TestAssemble(TestCaseWithTmp):
         novoalign.index_fasta(inFasta)
 
         inBam = os.path.join(util.file.get_test_input_path(), 'empty.bam')
-        
+
         outFasta = util.file.mkstempfname('.refined.fasta')
 
         # run refine_assembly
         args = [inFasta, inBam, outFasta, "--chr_names", 'G5012.3', "--min_coverage", '3', "--novo_params",
-                "-r Random -l 30 -g 40 -x 20 -t 502"]
+                "-r Random -l 30 -g 40 -x 20 -t 502 -c {}".format(_CPUS)]
         args = assembly.parser_refine_assembly(argparse.ArgumentParser()).parse_args(args)
         print(args)
         args.func_main(args)
@@ -120,7 +121,7 @@ class TestAssembleTrinity(TestCaseWithTmp):
         inBam = os.path.join(inDir, '..', 'G5012.3.subset.bam')
         clipDb = os.path.join(inDir, 'clipDb.fasta')
         outFasta = util.file.mkstempfname('.fasta')
-        assembly.assemble_trinity(inBam, clipDb, outFasta, threads=4)
+        assembly.assemble_trinity(inBam, clipDb, outFasta)
         self.assertGreater(os.path.getsize(outFasta), 0)
         contig_lens = list(sorted(len(seq.seq) for seq in Bio.SeqIO.parse(outFasta, 'fasta')))
         self.assertEqual(contig_lens, [328, 348, 376, 381])
@@ -131,7 +132,7 @@ class TestAssembleTrinity(TestCaseWithTmp):
         inBam = os.path.join(inDir, 'empty.bam')
         clipDb = os.path.join(inDir, 'TestAssembleTrinity', 'clipDb.fasta')
         outFasta = util.file.mkstempfname('.fasta')
-        assembly.assemble_trinity(inBam, clipDb, outFasta, threads=4, always_succeed=True)
+        assembly.assemble_trinity(inBam, clipDb, outFasta, always_succeed=True)
         self.assertEqual(os.path.getsize(outFasta), 0)
         os.unlink(outFasta)
 
@@ -142,8 +143,43 @@ class TestAssembleTrinity(TestCaseWithTmp):
         outFasta = util.file.mkstempfname('.fasta')
         self.assertRaises(assembly.DenovoAssemblyError,
             assembly.assemble_trinity,
-            inBam, clipDb, outFasta, threads=4, always_succeed=False)
+            inBam, clipDb, outFasta, always_succeed=False)
 
+
+class TestAssembleSpades(TestCaseWithTmp):
+    ''' Test the assemble_spades command (no validation of output) '''
+
+    def test_assembly(self):
+        inDir = util.file.get_test_input_path(self)
+        inBam = os.path.join(inDir, '..', 'G5012.3.subset.bam')
+        clipDb = os.path.join(inDir, 'clipDb.fasta')
+        with util.file.tempfname('.fasta') as outFasta:
+            assembly.assemble_spades(in_bam=inBam, clip_db=clipDb, out_fasta=outFasta)
+            self.assertGreater(os.path.getsize(outFasta), 0)
+            contig_lens = list(sorted(len(seq.seq) for seq in Bio.SeqIO.parse(outFasta, 'fasta')))
+            print('test_assembly_contigs_lens:', contig_lens)
+            self.assertEqual(contig_lens, [168, 170, 177, 180, 184, 187, 190, 191, 195, 197, 211, 243, 244, 247, 328, 348, 430])
+
+    def test_assembly_with_previously_assembled_contigs(self):
+        inDir = util.file.get_test_input_path(self)
+        inBam = os.path.join(inDir, '..', 'G5012.3.subset.bam')
+        clipDb = os.path.join(inDir, 'clipDb.fasta')
+        previously_assembled_contigs = os.path.join(inDir, 'trinity_contigs.fasta')
+        with util.file.tempfname('.fasta') as outFasta:
+            assembly.assemble_spades(in_bam=inBam, clip_db=clipDb, contigs_untrusted=previously_assembled_contigs,
+                                     out_fasta=outFasta, mem_limit_gb=1)
+            self.assertGreater(os.path.getsize(outFasta), 0)
+            contig_lens = list(sorted(len(seq.seq) for seq in Bio.SeqIO.parse(outFasta, 'fasta')))
+            print('test_assembly_with_previously_assembled_contigs_contigs_lens:', contig_lens)
+            self.assertEqual(contig_lens, [168, 170, 177, 180, 184, 187, 190, 191, 195, 197, 211, 243, 244, 321, 328, 348, 430])
+
+    def test_empty_input_succeed(self):
+        inDir = util.file.get_test_input_path()
+        inBam = os.path.join(inDir, 'empty.bam')
+        clipDb = os.path.join(inDir, 'clipDb.fasta')
+        with util.file.tempfname('fasta') as outFasta:
+            assembly.assemble_spades(in_bam=inBam, clip_db=clipDb, out_fasta=outFasta)
+            self.assertEqual(os.path.getsize(outFasta), 0)
 
 class TestTrimRmdupSubsamp(TestCaseWithTmp):
     ''' Test the trim_rmdup_subsamp command '''
@@ -235,6 +271,20 @@ class TestOrderAndOrient(TestCaseWithTmp):
         self.assertEqualContents(outFasta, expected)
         os.unlink(outFasta)
 
+    def test_lassa_multisegment_refsel(self):
+        with util.file.tempfnames(('.out.fasta', '.out_ref.fasta', '.stats.tsv')) \
+             as (outFasta, outReference, outStats):
+            contigs, expected, expectedStats = self.inputs('contigs.lasv.fasta', 
+                                                           'expected.lasv.fasta', 
+                                                           'expected.refsel.lasv.stats.tsv')
+            refs = [self.input('ref.lasv.{}.fasta'.format(strain))
+                    for strain in ('josiah', 'pinneo', 'KGH_G502', 'BNI_Nig08_A19')]
+            assembly.order_and_orient(contigs, refs, outFasta,
+                                      outReference=outReference, outStats=outStats)
+            self.assertEqualContents(outFasta, expected)
+            self.assertEqualFasta(outReference, refs[0])
+            self.assertEqualContents(outStats, expectedStats)
+
     def test_influenza_multisegment(self):
         inDir = util.file.get_test_input_path(self)
         outFasta = util.file.mkstempfname('.fasta')
@@ -258,6 +308,17 @@ class TestOrderAndOrient(TestCaseWithTmp):
         self.assertEqual(
             str(Bio.SeqIO.read(outFasta, 'fasta').seq),
             str(Bio.SeqIO.read(expected, 'fasta').seq))
+
+    def test_ebov_palindrome_refsel(self):
+        # this tests a scenario where show-aligns has more alignments than show-tiling
+        with util.file.tempfnames(('.out.fasta', '.stats.tsv')) as (outFasta, outStats):
+            contigs, refs, expected, expectedStats = self.inputs('contigs.ebov.doublehit.fasta',
+                                                                 'refs.ebov.fasta',
+                                                                 'expected.ebov.doublehit.fasta',
+                                                                 'expected.refsel.ebov.stats.tsv')
+            assembly.order_and_orient(contigs, refs, outFasta, n_genome_segments=1, outStats=outStats)
+            self.assertEqualFastaSeqs(outFasta, expected)
+            self.assertEqualContents(outStats, expectedStats)
 
     def test_hiv_wraparound(self):
         # this tests a misassembly from Trinity and checks that we still use some of the contig
@@ -311,6 +372,18 @@ class TestOrderAndOrient(TestCaseWithTmp):
         self.assertEqual(
             str(Bio.SeqIO.read(outFasta, 'fasta').seq),
             str(Bio.SeqIO.read(expected, 'fasta').seq))
+
+class TestGap2Seq(TestCaseWithTmp):
+    '''Test gap-filling tool Gap2Seq'''
+
+    def test_gapfill(self):
+        join = os.path.join
+        inDir = util.file.get_test_input_path()
+        in_scaffold = join(inDir, 'TestOrderAndOrient', 'expected.ebov.doublehit.fasta')
+        with util.file.tempfname(suffix='.filled.fasta') as filled:
+            assembly.gapfill_gap2seq(in_scaffold=in_scaffold,
+                                     in_bam=join(inDir, 'G5012.3.testreads.bam'), out_scaffold=filled, random_seed=23923937)
+            self.assertEqualContents(filled, join(inDir, 'TestGap2Seq', 'expected.ebov.doublehit.gapfill.fasta'))
 
 
 class TestImputeFromReference(TestCaseWithTmp):
@@ -672,5 +745,3 @@ class TestContigChooser(unittest.TestCase):
         alt_seqs = ['AA', 'GGA', 'aa', 'GGA', 'T', 'GGC', 'aa']
         actual = tools.mummer.contig_chooser(alt_seqs, 1)
         self.assertEqual(actual[0], 'T')
-
-

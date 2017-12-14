@@ -24,8 +24,6 @@ class TestCommandHelp(unittest.TestCase):
             helpstring = parser.format_help()
 
 
-
-
 class TestSampleSheet(TestCaseWithTmp):
 
     def test_miseq(self):
@@ -63,6 +61,24 @@ class TestSampleSheet(TestCaseWithTmp):
     def test_tabfile(self):
         inDir = util.file.get_test_input_path(self)
         samples = illumina.SampleSheet(os.path.join(inDir, 'SampleSheet-custom-1.txt'))
+        self.assertEqual(samples.num_indexes(), 2)
+        self.assertEqual(len(samples.get_rows()), 24)
+
+    def test_tabfile_win_endings(self):
+        inDir = util.file.get_test_input_path(self)
+        samples = illumina.SampleSheet(os.path.join(inDir, 'SampleSheet-custom-1_win-endings.txt'))
+        self.assertEqual(samples.num_indexes(), 2)
+        self.assertEqual(len(samples.get_rows()), 24)
+
+    def test_gz_tabfile_win_endings(self):
+        inDir = util.file.get_test_input_path(self)
+        samples = illumina.SampleSheet(os.path.join(inDir, 'SampleSheet-custom-1_win-endings.txt.gz'))
+        self.assertEqual(samples.num_indexes(), 2)
+        self.assertEqual(len(samples.get_rows()), 24)
+
+    def test_tabfile_macos9_endings(self):
+        inDir = util.file.get_test_input_path(self)
+        samples = illumina.SampleSheet(os.path.join(inDir, 'SampleSheet-custom-1_macos9-endings.txt'))
         self.assertEqual(samples.num_indexes(), 2)
         self.assertEqual(len(samples.get_rows()), 24)
 
@@ -116,6 +132,8 @@ class TestIlluminaDir(TestCaseWithTmp):
             self.assertTrue(os.path.isdir(idir.get_BCLdir()))
         with illumina.IlluminaDirectory(os.path.join(inDir, 'bcl-plain.tar.bz2')) as idir:
             self.assertTrue(os.path.isdir(idir.get_BCLdir()))
+        with illumina.IlluminaDirectory(os.path.join(inDir, 'bcl-plain.tar.lz4')) as idir:
+            self.assertTrue(os.path.isdir(idir.get_BCLdir()))
 
     def test_tarball_indented(self):
         inDir = util.file.get_test_input_path(self)
@@ -134,6 +152,12 @@ class TestIlluminaDir(TestCaseWithTmp):
     def test_tarball_uncompressed(self):
         inDir = util.file.get_test_input_path(self)
         with illumina.IlluminaDirectory(os.path.join(inDir, 'bcl-both-uncompressed.tar')) as idir:
+            self.assertTrue(os.path.isdir(idir.get_BCLdir()))
+            self.assertEqual(len(idir.get_SampleSheet().get_rows()), 15)
+
+    def test_tarball_deep_dir_tree(self):
+        inDir = util.file.get_test_input_path(self)
+        with illumina.IlluminaDirectory(os.path.join(inDir, 'bcl-both-broad_full_path.tar.gz')) as idir:
             self.assertTrue(os.path.isdir(idir.get_BCLdir()))
             self.assertEqual(len(idir.get_SampleSheet().get_rows()), 15)
 

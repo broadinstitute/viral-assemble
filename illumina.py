@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import xml.etree.ElementTree
 from collections import defaultdict
+import concurrent.futures
 
 import util.cmd
 import util.file
@@ -62,7 +63,7 @@ def parser_illumina_demux(parser=argparse.ArgumentParser()):
                                 nargs='*',
                                 help='Picard IlluminaBasecallsToSam ' + opt.upper() + ' (default: %(default)s)',
                                 default=tools.picard.IlluminaBasecallsToSamTool.defaults.get(opt))
-        elif opt == 'read_structure':
+        elif opt in ('read_structure', 'num_processors'):
             pass
         else:
             parser.add_argument('--' + opt,
@@ -72,7 +73,7 @@ def parser_illumina_demux(parser=argparse.ArgumentParser()):
     parser.add_argument('--JVMmemory',
                         help='JVM virtual memory size (default: %(default)s)',
                         default=tools.picard.IlluminaBasecallsToSamTool.jvmMemDefault)
-    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.common_args(parser, (('threads', tools.picard.IlluminaBasecallsToSamTool.defaults['num_processors']), ('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, main_illumina_demux)
     return parser
 
@@ -105,6 +106,47 @@ def main_illumina_demux(args):
     else:
         samples = illumina.get_SampleSheet(only_lane=args.lane)
 
+
+    link_locs=False
+    # For HiSeq-4000/X runs, If Picard's CheckIlluminaDirectory is
+    # called with LINK_LOCS=true, symlinks with absolute paths
+    # may be created, pointing from tile-specific *.locs to the 
+    # single s.locs file in the Intensities directory.
+    # These links may break if the run directory is moved.
+    # We should begin by removing broken links, if present,
+    # and call CheckIlluminaDirectory ourselves if a 's.locs'
+    # file is present, but only if the directory check fails
+    # since link_locs=true tries to create symlinks even if they 
+    # (or the files) already exist
+    try:
+        tools.picard.CheckIlluminaDirectoryTool().execute(
+            illumina.get_BCLdir(),
+            args.lane,
+            illumina.get_RunInfo().get_read_structure(),
+            link_locs=link_locs
+        )
+    except subprocess.CalledProcessError as e:
+        log.warning("CheckIlluminaDirectory failed for %s", illumina.get_BCLdir())
+        if os.path.exists(os.path.join(illumina.get_intensities_dir(), "s.locs")):
+            # recurse to remove broken links in directory
+            log.info("This run has an 's.locs' file; checking for and removing broken per-tile symlinks...")
+            broken_links = util.file.find_broken_symlinks(illumina.get_intensities_dir())
+            if len(broken_links):
+                for lpath in broken_links:
+                    log.info("Removing broken symlink: %s", lpath)
+                    os.unlink(lpath)
+
+            # call CheckIlluminaDirectory with LINK_LOCS=true
+            link_locs=True
+
+            log.info("Checking run directory with Picard...")
+            tools.picard.CheckIlluminaDirectoryTool().execute(
+                illumina.get_BCLdir(),
+                args.lane,
+                illumina.get_RunInfo().get_read_structure(),
+                link_locs=link_locs
+            )
+
     # Picard ExtractIlluminaBarcodes
     extract_input = util.file.mkstempfname('.txt', prefix='.'.join(['barcodeData', flowcell, str(args.lane)]))
     barcodes_tmpdir = tempfile.mkdtemp(prefix='extracted_barcodes-')
@@ -123,7 +165,11 @@ def main_illumina_demux(args):
         JVMmemory=args.JVMmemory)
 
     if args.commonBarcodes:
-        count_and_sort_barcodes(barcodes_tmpdir, args.commonBarcodes)
+        # this step can take > 2 hours on a large high-output flowcell
+        # so kick it to the background while we demux
+        #count_and_sort_barcodes(barcodes_tmpdir, args.commonBarcodes)
+        executor = concurrent.futures.ProcessPoolExecutor()
+        executor.submit(count_and_sort_barcodes, barcodes_tmpdir, args.commonBarcodes)
 
     # Picard IlluminaBasecallsToSam
     basecalls_input = util.file.mkstempfname('.txt', prefix='.'.join(['library_params', flowcell, str(args.lane)]))
@@ -132,6 +178,8 @@ def main_illumina_demux(args):
                       if hasattr(args, opt) and getattr(args, opt) != None)
     picardOpts['run_start_date'] = run_date
     picardOpts['read_structure'] = read_structure
+    if args.threads:
+        picardOpts['num_processors'] = args.threads
     if not picardOpts.get('sequencing_center') and illumina.get_RunInfo():
         picardOpts['sequencing_center'] = illumina.get_RunInfo().get_machine()
     tools.picard.IlluminaBasecallsToSamTool().execute(
@@ -144,10 +192,14 @@ def main_illumina_demux(args):
         JVMmemory=args.JVMmemory)
 
     # clean up
+    if args.commonBarcodes:
+        log.info("waiting for commonBarcodes output to finish...")
+        executor.shutdown(wait=True)
     os.unlink(extract_input)
     os.unlink(basecalls_input)
     shutil.rmtree(barcodes_tmpdir)
     illumina.close()
+    log.info("illumina_demux complete")
     return 0
 
 
@@ -305,28 +357,40 @@ def count_and_sort_barcodes(barcodes_dir, outSummary, truncateToLength=None, inc
     tile_barcode_files = [os.path.join(barcodes_dir, filename) for filename in os.listdir(barcodes_dir)]
 
     # count all of the barcodes present in the tile files
+    log.info("reading barcodes in all tile files")
     barcode_counts = defaultdict(lambda: 0)
-    for filePath in tile_barcode_files:
-        with open(filePath) as infile:
-            for line in infile:
-                # split the barcode file by tabs using the Python csv module
-                row = next(csv.reader([line.rstrip('\n')], delimiter='\t'))
-                # add the barcode for the current line to the count
-                if "." not in row[0] or includeNoise:
-                    barcode_counts[row[0]] += 1
+
+    def sum_reducer(accumulator, element):
+        for key, value in element.items():
+            accumulator[key] = accumulator.get(key, 0) + value
+        return accumulator
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=len(tile_barcode_files)) as executor:
+        futures = [executor.submit(util.file.count_occurrences_in_tsv, filePath, include_noise=includeNoise) for filePath in tile_barcode_files]
+        for future in concurrent.futures.as_completed(futures):
+            barcode_counts = sum_reducer(barcode_counts, future.result())
 
     # sort the counts, descending. Truncate the result if desired
+    log.info("sorting counts")
+    illumina_reference = IlluminaIndexReference()
     count_to_write = truncateToLength if truncateToLength else len(barcode_counts)
-    sorted_counts = list((k[:8], ",".join([x for x in IlluminaIndexReference().guess_index(k[:8], distance=1)] or ["Unknown"]), k[8:], ",".join([x for x in IlluminaIndexReference().guess_index(k[8:], distance=1)] or ["Unknown"]), barcode_counts[k]) for k in sorted(barcode_counts, key=barcode_counts.get, reverse=True)[:count_to_write])
+    barcode_pairs_sorted_by_count = sorted(barcode_counts, key=barcode_counts.get, reverse=True)[:count_to_write]
+
+    mapped_counts = (   (k[:8], ",".join([x for x in illumina_reference.guess_index(k[:8], distance=1)] or ["Unknown"]), 
+                        k[8:], ",".join([x for x in illumina_reference.guess_index(k[8:], distance=1)] or ["Unknown"]), 
+                        barcode_counts[k]) 
+                    for k in barcode_pairs_sorted_by_count)
 
     # write the barcodes and their corresponding counts
+    log.info("writing output")
     with open(outSummary, 'w') as tsvfile:
         writer = csv.writer(tsvfile, delimiter='\t')
         # write the header unless the user has specified not to do so
         if not omitHeader:
             writer.writerow(("Barcode1", "Likely_Index_Names1", "Barcode2", "Likely_Index_Names2", "Count"))
-        for barcode_count_tuple in sorted_counts:
-            writer.writerow(barcode_count_tuple)
+        writer.writerows(mapped_counts)
+
+    log.info("done")
 
 # ============================
 # ***  IlluminaDirectory   ***
@@ -369,38 +433,26 @@ class IlluminaDirectory(object):
 
     def _fix_path(self):
         assert self.path is not None
-        if not os.path.isdir(os.path.join(self.path, 'Data', 'Intensities', 'BaseCalls')):
-            # this is not the correct root-level directory
-            # sometimes this points to one level up
-            subdirs = list(os.path.join(self.path, x) for x in os.listdir(self.path)
-                           if os.path.isdir(os.path.join(self.path, x)))
-            if len(subdirs) != 1:
-                raise Exception('cannot find Data/Intensities/BaseCalls/ inside %s (subdirectories: %s)' %
-                                (self.uri, str(subdirs)))
-            self.path = subdirs[0]
-            if not os.path.isdir(os.path.join(self.path, 'Data', 'Intensities', 'BaseCalls')):
-                raise Exception('cannot find Data/Intensities/BaseCalls/ inside %s (%s)' % (self.uri, self.path))
+        # this is not the correct root-level directory
+        # sometimes this points to one level up
+        while True:
+            if os.path.isdir(os.path.join(self.path, 'Data', 'Intensities', 'BaseCalls')):
+                # found it! self.path is correct
+                break
+            else:
+                subdirs = list(os.path.join(self.path, x) for x in os.listdir(self.path)
+                               if os.path.isdir(os.path.join(self.path, x)))
+                if len(subdirs) == 1:
+                    # follow the rabbit hole
+                    self.path = subdirs[0]
+                else:
+                    # don't know where to go now!
+                    raise Exception('cannot find Data/Intensities/BaseCalls/ inside %s (%s)' % (self.uri, self.path))
 
     def _extract_tarball(self, tarfile):
-        if not os.path.isfile(tarfile):
-            raise Exception('file does not exist: %s' % tarfile)
         self.tempDir = tempfile.mkdtemp(prefix='IlluminaDirectory-')
-        if tarfile.lower().endswith('.zip'):
-            untar_cmd = ['unzip', '-q', tarfile, '-d', self.tempDir]
-        else:
-            if tarfile.lower().endswith('.tar.gz') or tarfile.lower().endswith('.tgz'):
-                compression_option = 'z'
-            elif tarfile.lower().endswith('.tar.bz2'):
-                compression_option = 'j'
-            elif tarfile.lower().endswith('.tar'):
-                compression_option = ''
-            else:
-                raise Exception("unsupported file type: %s" % tarfile)
-            untar_cmd = ['tar', '-C', self.tempDir, '-x{}pf'.format(compression_option), tarfile]
-        log.debug(' '.join(untar_cmd))
-        with open(os.devnull, 'w') as fnull:
-            subprocess.check_call(untar_cmd, stderr=fnull)
         self.path = self.tempDir
+        util.file.extract_tarball(tarfile, self.tempDir)
 
     def close(self):
         if self.tempDir:
@@ -417,8 +469,12 @@ class IlluminaDirectory(object):
             self.samplesheet = SampleSheet(os.path.join(self.path, 'SampleSheet.csv'), only_lane=only_lane)
         return self.samplesheet
 
+    def get_intensities_dir(self):
+        return os.path.join(self.path, 'Data', 'Intensities')
+
     def get_BCLdir(self):
-        return os.path.join(self.path, 'Data', 'Intensities', 'BaseCalls')
+        return os.path.join(self.get_intensities_dir(), 'BaseCalls')
+
 
 # ==================
 # ***  RunInfo   ***
@@ -507,7 +563,7 @@ class SampleSheet(object):
         self._detect_and_load_sheet(infile)
 
     def _detect_and_load_sheet(self, infile):
-        if infile.endswith('.csv'):
+        if infile.endswith(('.csv','.csv.gz')):
             # one of a few possible CSV formats (watch out for line endings from other OSes)
             with util.file.open_or_gzopen(infile, 'rU') as inf:
                 header = None
@@ -515,7 +571,7 @@ class SampleSheet(object):
                 row_num = 0
                 for line in inf:
                     # if this is a blank line, skip parsing and continue to the next line...
-                    if len(line.rstrip('\n').rstrip('\r').strip()) == 0:
+                    if len(line.rstrip('\r\n').strip()) == 0:
                         continue
                     csv.register_dialect('samplesheet', quoting=csv.QUOTE_MINIMAL, escapechar='\\')
                     row = next(csv.reader([line.strip().rstrip('\n')], dialect="samplesheet"))
@@ -600,7 +656,7 @@ class SampleSheet(object):
             for row in self.rows:
                 if 'sample_name' in row:
                     del row['sample_name']
-        elif infile.endswith('.txt'):
+        elif infile.endswith(('.txt','.txt.gz')):
             # our custom tab file format: sample, barcode_1, barcode_2, library_id_per_sample
             self.rows = []
             row_num = 0

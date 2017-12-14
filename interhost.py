@@ -382,11 +382,6 @@ def parser_general_mafft(parser=argparse.ArgumentParser()):
         type=int,
         help="""Maximum number of refinement iterations (default: %(default)s).
                 Note: if "--localpair" or "--globalpair" is specified this defaults to 1000.""")
-    parser.add_argument(
-        '--threads',
-        default=-1,
-        type=int,
-        help='Number of processing threads (default: %(default)s, where -1 indicates use of all available cores).')
     return parser
 
 
@@ -395,17 +390,13 @@ def parser_align_mafft(parser):
 
     parser.add_argument('outFile', help='Output file containing alignment result (default format: FASTA)')
 
-    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, main_align_mafft)
     return parser
 
 
 def main_align_mafft(args):
     ''' Run the mafft alignment on the input FASTA file.'''
-
-    if int(args.threads) == 0 or int(args.threads) < -1:
-        raise argparse.ArgumentTypeError(
-            'Argument "--threads" must be non-zero. Specify "-1" to use all available cores.')
 
     tools.mafft.MafftTool().execute(
         inFastas=args.inFastas,
@@ -450,7 +441,7 @@ def parser_multichr_mafft(parser):
         sample names in the order of their sequence
         positions in the output.""")
 
-    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, multichr_mafft)
     return parser
 
@@ -458,10 +449,6 @@ def parser_multichr_mafft(parser):
 def multichr_mafft(args):
     ''' Run the mafft alignment on a series of chromosomes provided in sample-partitioned FASTA files. Output as FASTA.
         (i.e. file1.fasta would contain chr1, chr2, chr3; file2.fasta would also contain chr1, chr2, chr3)'''
-
-    if int(args.threads) == 0 or int(args.threads) < -1:
-        raise argparse.ArgumentTypeError(
-            'Argument "--threads" must be non-zero. Specify "-1" to use all available cores.')
 
     # get the absolute path to the output directory in case it has been specified as a relative path,
     # since MAFFT relies on its CWD for path resolution

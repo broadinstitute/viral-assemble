@@ -1,9 +1,6 @@
 #!/bin/bash
-#set -e
 
-if [ $TRAVIS_PULL_REQUEST == "false" ]; then
-    export PYTEST_ADDOPTS="-rsxX -n 2 --durations=50 --fixture-durations=20 --junit-xml=pytest.xml --cov-report= --cov broad_utils --cov illumina --cov assembly --cov interhost --cov intrahost --cov metagenomics --cov ncbi --cov read_utils --cov reports --cov taxon_filter --cov tools --cov util"
-    py.test test/unit
-else
-    echo "Skipping unit tests for pull request - see branch tests."
-fi
+pytest --cov-append test/unit
+
+rc=$?; if [[ $rc != 0 ]]; then sleep 10; exit $rc; fi
+# sleep to allow logs to be printed without truncation in the event of error

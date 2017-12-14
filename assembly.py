@@ -11,10 +11,15 @@ __commands__ = []
 import argparse
 import logging
 import random
+import numpy
 import os
 import os.path
 import shutil
 import subprocess
+import functools
+import operator
+import concurrent.futures
+import csv
 
 try:
     from itertools import zip_longest    # pylint: disable=E0611
@@ -32,11 +37,13 @@ import tools.picard
 import tools.samtools
 import tools.gatk
 import tools.novoalign
+import tools.spades
 import tools.trimmomatic
 import tools.trinity
 import tools.mafft
 import tools.mummer
 import tools.muscle
+import tools.gap2seq
 
 # third-party
 import Bio.AlignIO
@@ -46,17 +53,16 @@ import Bio.Data.IUPACData
 log = logging.getLogger(__name__)
 
 
-class DenovoAssemblyError(Exception):
+class DenovoAssemblyError(RuntimeError):
 
-    def __init__(self, n_start, n_trimmed, n_rmdup, n_output, n_subsamp, n_unpaired_subsamp):
-        super(DenovoAssemblyError, self).__init__(
-            'denovo assembly (Trinity) failed. {} reads at start. {} read pairs after Trimmomatic. {} read pairs after Prinseq rmdup. {} reads for trinity ({} pairs + {} unpaired).'.format(
-                n_start, n_trimmed, n_rmdup, n_output, n_subsamp, n_unpaired_subsamp
-            )
-        )
+    '''Indicates a failure of the de novo assembly step.  Can indicate an internal error in the assembler, but also
+    insufficient input data (for assemblers which cannot report that condition separately).'''
+
+    def __init__(self, reason):
+        super(DenovoAssemblyError, self).__init__(reason)
 
 
-def trim_rmdup_subsamp_reads(inBam, clipDb, outBam, n_reads=100000):
+def trim_rmdup_subsamp_reads(inBam, clipDb, outBam, n_reads=100000, trim_opts=None):
     ''' Take reads through Trimmomatic, Prinseq, and subsampling.
         This should probably move over to read_utils.
     '''
@@ -86,7 +92,8 @@ def trim_rmdup_subsamp_reads(inBam, clipDb, outBam, n_reads=100000):
             trimfq[1],
             clipDb,
             unpairedOutFastq1=trimfq_unpaired[0],
-            unpairedOutFastq2=trimfq_unpaired[1]
+            unpairedOutFastq2=trimfq_unpaired[1],
+            **(trim_opts or {})
         )
 
     n_trim = max(map(util.file.count_fastq_reads, trimfq))    # count is pairs
@@ -197,7 +204,7 @@ def trim_rmdup_subsamp_reads(inBam, clipDb, outBam, n_reads=100000):
 
     n_final_individual_reads = samtools.count(outBam)
 
-    log.info("Pre-Trinity read filters: ")
+    log.info("Pre-DeNovoAssembly read filters: ")
     log.info("    {} read pairs at start ".format(n_input))
     log.info(
         "    {} read pairs after Trimmomatic {}".format(
@@ -219,7 +226,7 @@ def trim_rmdup_subsamp_reads(inBam, clipDb, outBam, n_reads=100000):
     else:
         log.info("  Paired read count sufficient to reach threshold ({})".format(n_reads))
     log.info(
-        "    {} individual reads for trinity ({}{})".format(
+        "    {} individual reads for de novo assembly ({}{})".format(
             n_output, "paired subsampled {} -> {}".format(n_rmdup_paired, n_paired_subsamp)
             if not did_include_subsampled_unpaired_reads else "{} read pairs".format(n_rmdup_paired),
             " + unpaired subsampled {} -> {}".format(n_rmdup_unpaired, n_unpaired_subsamp)
@@ -231,7 +238,7 @@ def trim_rmdup_subsamp_reads(inBam, clipDb, outBam, n_reads=100000):
     if did_include_subsampled_unpaired_reads:
         if n_final_individual_reads < n_reads:
             log.warning(
-                "NOTE: Even with unpaired reads included, there are fewer unique trimmed reads than requested for Trinity input."
+                "NOTE: Even with unpaired reads included, there are fewer unique trimmed reads than requested for de novo assembly input."
             )
 
     # clean up temp files
@@ -272,7 +279,7 @@ def assemble_trinity(
     outReads=None,
     always_succeed=False,
     JVMmemory=None,
-    threads=1
+    threads=None
 ):
     ''' This step runs the Trinity assembler.
         First trim reads with trimmomatic, rmdup with prinseq,
@@ -296,9 +303,10 @@ def assemble_trinity(
     except subprocess.CalledProcessError as e:
         if always_succeed:
             log.warn("denovo assembly (Trinity) failed to assemble input, emitting empty output instead.")
-            util.file.touch(outFasta)
+            util.file.make_empty(outFasta)
         else:
-            raise DenovoAssemblyError(*read_stats)
+            raise DenovoAssemblyError('denovo assembly (Trinity) failed. {} reads at start. {} read pairs after Trimmomatic. '
+                                      '{} read pairs after Prinseq rmdup. {} reads for trinity ({} pairs + {} unpaired).'.format(*read_stats))
     os.unlink(subsampfq[0])
     os.unlink(subsampfq[1])
 
@@ -330,16 +338,114 @@ def parser_assemble_trinity(parser=argparse.ArgumentParser()):
         default=tools.trinity.TrinityTool.jvm_mem_default,
         help='JVM virtual memory size (default: %(default)s)'
     )
-    parser.add_argument('--threads', default=1, help='Number of threads (default: %(default)s)')
-    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, assemble_trinity, split_args=True)
     return parser
 
 
 __commands__.append(('assemble_trinity', parser_assemble_trinity))
 
+def assemble_spades(
+    in_bam,
+    clip_db,
+    out_fasta,
+    spades_opts='',
+    contigs_trusted=None, contigs_untrusted=None,
+    filter_contigs=False,
+    kmer_sizes=(55,65),
+    n_reads=10000000,
+    outReads=None,
+    mask_errors=False,
+    max_kmer_sizes=1,
+    mem_limit_gb=8,
+    threads=None,
+):
+    '''De novo RNA-seq assembly with the SPAdes assembler.
+    '''
 
-def order_and_orient(inFasta, inReference, outFasta,
+    if outReads:
+        trim_rmdup_bam = outReads
+    else:
+        trim_rmdup_bam = util.file.mkstempfname('.subsamp.bam')
+
+    trim_rmdup_subsamp_reads(in_bam, clip_db, trim_rmdup_bam, n_reads=n_reads,
+                             trim_opts=dict(maxinfo_target_length=35, maxinfo_strictness=.2))
+
+    with tools.picard.SamToFastqTool().execute_tmp(trim_rmdup_bam, includeUnpaired=True, illuminaClipping=True
+                                                   ) as (reads_fwd, reads_bwd, reads_unpaired):
+        try:
+            tools.spades.SpadesTool().assemble(reads_fwd=reads_fwd, reads_bwd=reads_bwd, reads_unpaired=reads_unpaired,
+                                               contigs_untrusted=contigs_untrusted, contigs_trusted=contigs_trusted,
+                                               contigs_out=out_fasta, filter_contigs=filter_contigs,
+                                               kmer_sizes=kmer_sizes, mask_errors=mask_errors, max_kmer_sizes=max_kmer_sizes,
+                                               spades_opts=spades_opts, mem_limit_gb=mem_limit_gb,
+                                               threads=threads)
+        except subprocess.CalledProcessError as e:
+            raise DenovoAssemblyError('SPAdes assembler failed: ' + str(e))
+
+    if not outReads:
+        os.unlink(trim_rmdup_bam)
+
+
+
+def parser_assemble_spades(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_bam', help='Input unaligned reads, BAM format. May include both paired and unpaired reads.')
+    parser.add_argument('clip_db', help='Trimmomatic clip db')
+    parser.add_argument('out_fasta', help='Output assembled contigs. Note that, since this is RNA-seq assembly, for each assembled genomic region there may be several contigs representing different variants of that region.')
+    parser.add_argument('--contigsTrusted', dest='contigs_trusted', 
+                        help='Optional input contigs of high quality, previously assembled from the same sample')
+    parser.add_argument('--contigsUntrusted', dest='contigs_untrusted', 
+                        help='Optional input contigs of high medium quality, previously assembled from the same sample')
+    parser.add_argument('--nReads', dest='n_reads', type=int, default=10000000, 
+                        help='Before assembly, subsample the reads to at most this many')
+    parser.add_argument('--outReads', default=None, help='Save the trimmomatic/prinseq/subsamp reads to a BAM file')
+    parser.add_argument('--filterContigs', dest='filter_contigs', default=False, action='store_true', 
+                        help='only output contigs SPAdes is sure of (drop lesser-quality contigs from output)')
+    parser.add_argument('--spadesOpts', dest='spades_opts', default='', help='(advanced) Extra flags to pass to the SPAdes assembler')
+    parser.add_argument('--memLimitGb', dest='mem_limit_gb', default=4, type=int, help='Max memory to use, in GB (default: %(default)s)')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, assemble_spades, split_args=True)
+    return parser
+
+
+__commands__.append(('assemble_spades', parser_assemble_spades))
+
+def gapfill_gap2seq(in_scaffold, in_bam, out_scaffold, threads=None, mem_limit_gb=4, time_soft_limit_minutes=60.0,
+                    random_seed=0, gap2seq_opts='', mask_errors=False):
+    ''' This step runs the Gap2Seq tool to close gaps between contigs in a scaffold.
+    '''
+    try:
+        tools.gap2seq.Gap2SeqTool().gapfill(in_scaffold, in_bam, out_scaffold, gap2seq_opts=gap2seq_opts, threads=threads,
+                                            mem_limit_gb=mem_limit_gb, time_soft_limit_minutes=time_soft_limit_minutes, 
+                                            random_seed=random_seed)
+    except Exception as e:
+        if not mask_errors:
+            raise
+        log.warning('Gap-filling failed (%s); ignoring error, emulating successful run where simply no gaps were filled.')
+        shutil.copyfile(in_scaffold, out_scaffold)
+
+def parser_gapfill_gap2seq(parser=argparse.ArgumentParser(description='Close gaps between contigs in a scaffold')):
+    parser.add_argument('in_scaffold', help='FASTA file containing the scaffold.  Each FASTA record corresponds to one '
+                        'segment (for multi-segment genomes).  Contigs within each segment are separated by Ns.')
+    parser.add_argument('in_bam', help='Input unaligned reads, BAM format.')
+    parser.add_argument('out_scaffold', help='Output assembly.')
+    parser.add_argument('--memLimitGb', dest='mem_limit_gb', default=4.0, help='Max memory to use, in gigabytes %(default)s')
+    parser.add_argument('--timeSoftLimitMinutes', dest='time_soft_limit_minutes', default=60.0,
+                        help='Stop trying to close more gaps after this many minutes (default: %(default)s); this is a soft/advisory limit')
+    parser.add_argument('--maskErrors', dest='mask_errors', default=False, action='store_true',
+                        help='In case of any error, just copy in_scaffold to out_scaffold, emulating a successful run that simply could not '
+                        'fill any gaps.')
+    parser.add_argument('--gap2seqOpts', dest='gap2seq_opts', default='', help='(advanced) Extra command-line options to pass to Gap2Seq')
+    parser.add_argument('--randomSeed', dest='random_seed', default=0, help='Random seed; 0 means use current time')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, gapfill_gap2seq, split_args=True)
+    return parser
+
+
+__commands__.append(('gapfill_gap2seq', parser_gapfill_gap2seq))
+
+
+def _order_and_orient_orig(inFasta, inReference, outFasta,
         outAlternateContigs=None,
         breaklen=None, # aligner='nucmer', circular=False, trimmed_contigs=None,
         maxgap=200, minmatch=10, mincluster=None,
@@ -380,12 +486,82 @@ def order_and_orient(inFasta, inReference, outFasta,
     #    os.unlink(trimmed)
     return 0
 
+def _call_order_and_orient_orig(inReference, outFasta, outAlternateContigs, **kwargs):
+    _order_and_orient_orig(inReference=inReference, outFasta=outFasta, outAlternateContigs=outAlternateContigs, **kwargs)
+
+def order_and_orient(inFasta, inReference, outFasta,
+        outAlternateContigs=None, outReference=None,
+        breaklen=None, # aligner='nucmer', circular=False, trimmed_contigs=None,
+        maxgap=200, minmatch=10, mincluster=None,
+        min_pct_id=0.6, min_contig_len=200, min_pct_contig_aligned=0.3, n_genome_segments=0, 
+        outStats=None, threads=None):
+    ''' This step cleans up the de novo assembly with a known reference genome.
+        Uses MUMmer (nucmer or promer) to create a reference-based consensus
+        sequence of aligned contigs (with runs of N's in between the de novo
+        contigs).
+    '''
+
+    chk = util.cmd.check_input
+
+    ref_segments_all = [tuple(Bio.SeqIO.parse(inRef, 'fasta')) for inRef in util.misc.make_seq(inReference)]
+    chk(ref_segments_all, 'No references given')
+    chk(len(set(map(len, ref_segments_all))) == 1, 'All references must have the same number of segments')
+    if n_genome_segments:
+        if len(ref_segments_all) == 1:
+            chk((len(ref_segments_all[0]) % n_genome_segments) == 0,
+                'Number of reference sequences in must be a multiple of the number of genome segments')
+        else:
+            chk(len(ref_segments_all[0]) == n_genome_segments,
+                'Number of reference segments must match the n_genome_segments parameter')
+    else:
+        n_genome_segments = len(ref_segments_all[0])
+    ref_segments_all = functools.reduce(operator.concat, ref_segments_all, ())
+
+    n_refs = len(ref_segments_all) // n_genome_segments
+    log.info('n_genome_segments={} n_refs={}'.format(n_genome_segments, n_refs))
+
+    with util.file.tempfnames(suffixes=[ '.{}.ref.fasta'.format(ref_num) for ref_num in range(n_refs)]) as refs_fasta, \
+         util.file.tempfnames(suffixes=[ '.{}.scaffold.fasta'.format(ref_num) for ref_num in range(n_refs)]) as scaffolds_fasta, \
+         util.file.tempfnames(suffixes=[ '.{}.altcontig.fasta'.format(ref_num) for ref_num in range(n_refs)]) as alt_contigs_fasta:
+
+         for ref_num in range(n_refs):
+             Bio.SeqIO.write(ref_segments_all[ref_num*n_genome_segments : (ref_num+1)*n_genome_segments], refs_fasta[ref_num], 'fasta')
+
+         with concurrent.futures.ProcessPoolExecutor(max_workers=util.misc.sanitize_thread_count(threads)) as executor:
+             executor.map(functools.partial(_call_order_and_orient_orig, inFasta=inFasta,
+                                            breaklen=breaklen, maxgap=maxgap, minmatch=minmatch, mincluster=mincluster, min_pct_id=min_pct_id,
+                                            min_contig_len=min_contig_len, min_pct_contig_aligned=min_pct_contig_aligned),
+                                            refs_fasta, scaffolds_fasta, alt_contigs_fasta)
+
+         refs = [tuple(Bio.SeqIO.parse(scaffolds_fasta[ref_num], 'fasta')) for ref_num in range(n_refs)]
+         assert set(map(len, refs))==set([n_genome_segments]), \
+             'Some computed scaffold does not have the number of segments that the reference genome has ({}): {})'.format(n_genome_segments, map(len,refs))
+         
+         base_counts = [sum([len(rec.seq.ungap('N')) for rec in ref]) for ref in refs]
+         best_ref_num = numpy.argmax(base_counts)
+         log.info('base_counts={} best_ref_num={}'.format(base_counts, best_ref_num))
+         shutil.copyfile(scaffolds_fasta[best_ref_num], outFasta)
+         if outAlternateContigs:
+             shutil.copyfile(alt_contigs_fasta[best_ref_num], outAlternateContigs)
+         if outReference:
+             shutil.copyfile(refs_fasta[best_ref_num], outReference)
+         if outStats:
+             ref_ranks = (-numpy.array(base_counts)).argsort().argsort()
+             with open(outStats, 'w') as stats_f:
+                 stats_w = csv.DictWriter(stats_f, fieldnames='ref_num ref_name base_count rank'.split(), delimiter='\t')
+                 stats_w.writeheader()
+                 for ref_num, (ref, base_count, rank) in enumerate(zip(refs, base_counts, ref_ranks)):
+                     stats_w.writerow({'ref_num': ref_num, 'ref_name': ref[0].id, 'base_count': base_count, 'rank': rank})
+         
 
 def parser_order_and_orient(parser=argparse.ArgumentParser()):
     parser.add_argument('inFasta', help='Input de novo assembly/contigs, FASTA format.')
     parser.add_argument(
-        'inReference',
-        help='Reference genome for ordering, orienting, and merging contigs, FASTA format.'
+        'inReference', nargs='+',
+        help=('Reference genome for ordering, orienting, and merging contigs, FASTA format.  Multiple filenames may be listed, each '
+              'containing one reference genome. Alternatively, multiple references may be given by specifying a single filename, '
+              'and giving the number of reference segments with the nGenomeSegments parameter.  If multiple references are given, '
+              'they must all contain the same number of segments listed in the same order.')
     )
     parser.add_argument(
         'outFasta',
@@ -398,6 +574,13 @@ def parser_order_and_orient(parser=argparse.ArgumentParser()):
                 but were not chosen for the final output.""",
         default=None
     )
+
+    parser.add_argument('--nGenomeSegments', dest='n_genome_segments', type=int, default=0,
+                        help="""Number of genome segments.  If 0 (the default), the `inReference` parameter is treated as one genome.
+                        If positive, the `inReference` parameter is treated as a list of genomes of nGenomeSegments each.""")
+
+    parser.add_argument('--outReference', help='Output the reference chosen for scaffolding to this file')
+    parser.add_argument('--outStats', help='Output stats used in reference selection')
     #parser.add_argument('--aligner',
     #                    help='nucmer (nucleotide) or promer (six-frame translations) [default: %(default)s]',
     #                    choices=['nucmer', 'promer'],
@@ -468,7 +651,7 @@ def parser_order_and_orient(parser=argparse.ArgumentParser()):
     #parser.add_argument("--trimmed_contigs",
     #                    default=None,
     #                    help="optional output file for trimmed contigs")
-    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, order_and_orient, split_args=True)
     return parser
 
@@ -478,10 +661,10 @@ __commands__.append(('order_and_orient', parser_order_and_orient))
 
 class PoorAssemblyError(Exception):
 
-    def __init__(self, chr_idx, seq_len, non_n_count):
+    def __init__(self, chr_idx, seq_len, non_n_count, min_length, segment_length):
         super(PoorAssemblyError, self).__init__(
-            'Error: poor assembly quality, chr {}: contig length {}, unambiguous bases {}'.format(
-                chr_idx, seq_len, non_n_count
+            'Error: poor assembly quality, chr {}: contig length {}, unambiguous bases {}; bases required of reference segment length: {}/{} ({:.0%})'.format(
+                chr_idx, seq_len, non_n_count, min_length, int(segment_length), float(min_length)/float(segment_length)
             )
         )
 
@@ -495,8 +678,7 @@ def impute_from_reference(
     replaceLength,
     newName=None,
     aligner='muscle',
-    index=False,
-    novoalign_license_path=None
+    index=False
 ):
     '''
         This takes a de novo assembly, aligns against a reference genome, and
@@ -529,7 +711,7 @@ def impute_from_reference(
             for idx, (refSeqObj, asmSeqObj) in enumerate(zip_longest(refFasta, asmFasta)):
                 # our zip fails if one file has more seqs than the other
                 if not refSeqObj or not asmSeqObj:
-                    raise KeyError("inFasta and inReference do not have the same number of sequences.")
+                    raise KeyError("inFasta and inReference do not have the same number of sequences. This could be because the de novo assembly process was unable to create contigs for all segments.")
 
                 # error if PoorAssembly
                 minLength = len(refSeqObj) * minLengthFraction
@@ -548,7 +730,7 @@ def impute_from_reference(
                     )
                 )
                 if seq_len < minLength or non_n_count < seq_len * minUnambig:
-                    raise PoorAssemblyError(idx + 1, seq_len, non_n_count)
+                    raise PoorAssemblyError(idx + 1, seq_len, non_n_count, minLength, len(refSeqObj))
 
                 # prepare temp input and output files
                 tmpOutputFile = util.file.mkstempfname(prefix='seq-out-{idx}-'.format(idx=idx), suffix=".fasta")
@@ -605,9 +787,9 @@ def impute_from_reference(
 
     # Index final output FASTA for Picard/GATK, Samtools, and Novoalign
     if index:
-        tools.picard.CreateSequenceDictionaryTool().execute(outFasta, overwrite=True)
         tools.samtools.SamtoolsTool().faidx(outFasta, overwrite=True)
-        tools.novoalign.NovoalignTool(license_path=novoalign_license_path).index_fasta(outFasta)
+        tools.picard.CreateSequenceDictionaryTool().execute(outFasta, overwrite=True)
+        tools.novoalign.NovoalignTool().index_fasta(outFasta)
 
     return 0
 
@@ -653,12 +835,6 @@ def parser_impute_from_reference(parser=argparse.ArgumentParser()):
         action="store_true",
         dest="index"
     )
-    parser.add_argument(
-        '--NOVOALIGN_LICENSE_PATH',
-        default=None,
-        dest="novoalign_license_path",
-        help='A path to the novoalign.lic file. This overrides the NOVOALIGN_LICENSE_PATH environment variable. (default: %(default)s)'
-    )
     util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, impute_from_reference, split_args=True)
     return parser
@@ -680,7 +856,7 @@ def refine_assembly(
     keep_all_reads=False,
     already_realigned_bam=None,
     JVMmemory=None,
-    threads=1,
+    threads=None,
     gatk_path=None,
     novoalign_license_path=None
 ):
@@ -848,8 +1024,7 @@ def parser_refine_assembly(parser=argparse.ArgumentParser()):
         dest="novoalign_license_path",
         help='A path to the novoalign.lic file. This overrides the NOVOALIGN_LICENSE_PATH environment variable. (default: %(default)s)'
     )
-    parser.add_argument('--threads', default=1, help='Number of threads (default: %(default)s)')
-    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, refine_assembly, split_args=True)
     return parser
 

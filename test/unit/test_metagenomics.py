@@ -4,7 +4,6 @@ import six
 import argparse
 from collections import Counter
 import copy
-import io
 import os.path
 from os.path import join
 import tempfile
@@ -19,7 +18,7 @@ import tools.picard
 import metagenomics
 import util.file
 import util.misc
-from test import TestCaseWithTmp
+from test import TestCaseWithTmp, _CPUS
 
 if six.PY2:
     from StringIO import StringIO
@@ -35,49 +34,59 @@ class TestCommandHelp(unittest.TestCase):
             helpstring = parser.format_help()
 
 
-
-
-@patch('metagenomics.blast_lca')
 @patch('metagenomics.kraken_dfs_report')
 class TestDiamondCalls(TestCaseWithTmp):
     def setUp(self):
         super().setUp()
-        patcher = patch('tools.picard.SamToFastqTool', autospec=True)
+        patcher = patch('subprocess.Popen')
         self.addCleanup(patcher.stop)
-        self.mock_samtofastq = patcher.start()
+        self.mock_popen = patcher.start()
+        self.mock_popen.return_value.returncode = 0
+
+        patcher = patch('tools.picard.SamToFastqTool')
+        self.addCleanup(patcher.stop)
+        self.mock_s2f = patcher.start()
+        self.mock_s2f.return_value.execute.return_value.returncode = 0
 
         patcher = patch('tools.diamond.Diamond', autospec=True)
         self.addCleanup(patcher.stop)
         self.mock_diamond = patcher.start()
 
+        # Can't open unwritten named pipes
+        if six.PY2:
+            patcher = patch('__builtin__.open', mock.mock_open(read_data="id1\t1\n"))
+        else:
+            patcher = patch('builtins.open', mock.mock_open(read_data="id1\t1\n"))
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
+        # mock_open doesn't have __next__ for csv.reader
+        patcher = patch('metagenomics.taxa_hits_from_tsv', autospec=True)
+        self.addCleanup(patcher.stop)
+        self.mock_taxa_hits = patcher.start()
+        self.mock_taxa_hits.return_value = Counter({1: 100, 2: 40})
+
         self.inBam = util.file.mkstempfname('.bam')
         self.db = tempfile.mkdtemp('db')
         self.tax_db = join(util.file.get_test_input_path(), 'TestMetagenomicsSimple', 'db', 'taxonomy')
 
-    def test_output_lca(self, mock_blast_lca, mock_dfs):
+    def test_output_reads(self, mock_dfs):
         out_report = util.file.mkstempfname('report.txt')
-        metagenomics.diamond(self.inBam, self.db, self.tax_db, out_report)
-        self.mock_samtofastq().execute.assert_called_once_with(
-            self.inBam, mock.ANY, mock.ANY, picardOptions=mock.ANY,
-            JVMmemory=mock.ANY)
-        picard_opts = self.mock_samtofastq().execute.call_args[1]['picardOptions']
-        six.assertCountEqual(
-            self, picard_opts,
-            ['CLIPPING_ACTION=X', 'CLIPPING_ATTRIBUTE=%s'
-             % tools.picard.SamToFastqTool.illumina_clipping_attribute])
-        self.mock_diamond().install.assert_called_once_with()
-        self.mock_diamond().blastx.assert_called_once_with(
-            self.db, mock.ANY, mock.ANY, options={'--threads': 1})
-        assert self.mock_diamond().view.called
-        assert isinstance(metagenomics.blast_lca.call_args[0][0], metagenomics.TaxonomyDb)
+        out_reads = util.file.mkstempfname('lca.gz')
+
+        metagenomics.diamond(self.inBam, self.db, self.tax_db, out_report, outReads=out_reads)
+
+        cmd = self.mock_popen.call_args[0][0]
+        self.assertIn(out_reads, cmd)
         assert isinstance(metagenomics.kraken_dfs_report.call_args[0][0], metagenomics.TaxonomyDb)
 
-    def test_num_threads(self, mock_blast_lca, mock_dfs):
+    def test_num_threads(self, mock_dfs):
         out_report = util.file.mkstempfname('report.txt')
-        metagenomics.diamond(self.inBam, self.db, self.tax_db, out_report, numThreads=11)
-        self.mock_diamond().blastx.assert_called_once_with(
-            self.db, mock.ANY, mock.ANY, options={'--threads': 11})
-        self.assertEqual(self.mock_diamond().view.call_args[1]['options']['--threads'], 11)
+        metagenomics.diamond(self.inBam, self.db, self.tax_db, out_report, threads=11)
+        expected_threads = min(11, _CPUS)
+        expected_threads = '--threads {}'.format(expected_threads)
+        cmd = self.mock_popen.call_args[0][0]
+        self.assertIn(expected_threads, cmd)
 
 
 class TestKronaCalls(TestCaseWithTmp):
@@ -246,7 +255,7 @@ def test_blast_lca(taxa_db_simple, simple_m8):
 
 def test_paired_query_id():
     tup = ['query', 'gi|10|else', 90., 80, 60, 2, 30, 80,
-           1100, 1150, 1e-7, 64.5]
+           1100, 1150, 1e-7, 64.5, []]
 
     blast1 = metagenomics.BlastRecord(*tup)
     assert metagenomics.paired_query_id(blast1) == blast1
@@ -269,7 +278,7 @@ def test_paired_query_id():
 
 def test_translate_gi_to_tax_id(taxa_db_simple):
     tup = ['query', 'gi|4|else', 90., 80, 60, 2, 30, 80,
-           1100, 1150, 1e-7, 64.5]
+           1100, 1150, 1e-7, 64.5, []]
     blast1 = metagenomics.BlastRecord(*tup)
 
     tup[1] = 5

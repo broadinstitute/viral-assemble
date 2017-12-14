@@ -33,20 +33,12 @@ class TestDepleteHuman(TestCaseWithTmp):
         myInputDir = util.file.get_test_input_path(self)
         ref_fasta = os.path.join(myInputDir, '5kb_human_from_chr6.fasta')
         self.database_prefix_path = os.path.join(self.tempDir, "5kb_human_from_chr6")
-        polio_fasta = os.path.join(
-            util.file.get_test_input_path(),
-            'TestMetagenomicsViralMix', 'db', 'library', 'Viruses', 'Poliovirus_uid15288', 'NC_002058.ffn'
-        )
 
         # create blast db
         self.blastdb_path = tools.blast.MakeblastdbTool().build_database(ref_fasta, self.database_prefix_path)
 
         # create bmtagger db
-        self.bmtooldb_path = tools.bmtagger.BmtoolTool().build_database(ref_fasta, self.database_prefix_path + ".bitmask")
-        self.srprismdb_path = tools.bmtagger.SrprismTool().build_database(ref_fasta, self.database_prefix_path + ".srprism")
-
-        # create last db
-        self.lastdb_path = tools.last.Lastdb().build_database(polio_fasta, os.path.join(self.tempDir, 'polio'))
+        taxon_filter.bmtagger_build_db(ref_fasta, self.tempDir, "5kb_human_from_chr6", word_size=8)
 
     def test_deplete_human(self):
         myInputDir = util.file.get_test_input_path(self)
@@ -59,12 +51,11 @@ class TestDepleteHuman(TestCaseWithTmp):
                 os.path.join(self.tempDir, 'test-reads.bmtagger.bam'),
                 os.path.join(self.tempDir, 'test-reads.rmdup.bam'),
                 os.path.join(self.tempDir, 'test-reads.blastn.bam'),
-                "--taxfiltBam", os.path.join(self.tempDir, 'test-reads.taxfilt.imperfect.bam'),
                 # DBs
                 "--blastDbs", self.blastdb_path,
                 "--bmtaggerDbs", self.database_prefix_path,
-                "--lastDb", self.lastdb_path,
-                "--threads", "4"
+                "--chunkSize", "0",
+                "--srprismMemory", '1500',
             ]
         )
         args.func_main(args)
@@ -72,8 +63,8 @@ class TestDepleteHuman(TestCaseWithTmp):
         # Compare to expected
         for fname in [
             'test-reads.bmtagger.bam',
-            'test-reads.rmdup.bam', 'test-reads.blastn.bam',
-            'test-reads.taxfilt.imperfect.bam'
+            'test-reads.rmdup.bam',
+            'test-reads.blastn.bam',
         ]:
             assert_equal_bam_reads(self, os.path.join(self.tempDir, fname), os.path.join(myInputDir, 'expected', fname))
 
@@ -89,12 +80,10 @@ class TestDepleteHuman(TestCaseWithTmp):
                 os.path.join(self.tempDir, 'test-reads.bmtagger.bam'),
                 os.path.join(self.tempDir, 'test-reads.rmdup.bam'),
                 os.path.join(self.tempDir, 'test-reads.blastn.bam'),
-                "--taxfiltBam", os.path.join(self.tempDir, 'test-reads.taxfilt.imperfect.bam'),
                 # DBs
                 "--blastDbs", self.blastdb_path,
                 "--bmtaggerDbs", self.database_prefix_path,
-                "--lastDb", self.lastdb_path,
-                "--threads", "4"
+                "--srprismMemory", '1500',
             ]
         )
         args.func_main(args)
@@ -103,7 +92,6 @@ class TestDepleteHuman(TestCaseWithTmp):
         for fname in [
             'test-reads.revert.bam', 'test-reads.bmtagger.bam',
             'test-reads.rmdup.bam', 'test-reads.blastn.bam',
-            'test-reads.taxfilt.imperfect.bam'
         ]:
             assert_equal_bam_reads(self, os.path.join(self.tempDir, fname), os.path.join(myInputDir, 'aligned-expected', fname))
 
@@ -118,12 +106,10 @@ class TestDepleteHuman(TestCaseWithTmp):
                 os.path.join(self.tempDir, 'deplete-empty.bmtagger.bam'),
                 os.path.join(self.tempDir, 'deplete-empty.rmdup.bam'),
                 os.path.join(self.tempDir, 'deplete-empty.blastn.bam'),
-                "--taxfiltBam", os.path.join(self.tempDir, 'deplete-empty.taxfilt.bam'),
                 # DBs
                 "--blastDbs", self.blastdb_path,
                 "--bmtaggerDbs", self.database_prefix_path,
-                "--lastDb", self.lastdb_path,
-                "--threads", "4"
+                "--srprismMemory", '1500',
             ]
         )
         args.func_main(args)
@@ -132,6 +118,5 @@ class TestDepleteHuman(TestCaseWithTmp):
         for fname in [
             'deplete-empty.bmtagger.bam',
             'deplete-empty.rmdup.bam', 'deplete-empty.blastn.bam',
-            'deplete-empty.taxfilt.bam'
         ]:
             assert_equal_bam_reads(self, os.path.join(self.tempDir, fname), empty_bam)
