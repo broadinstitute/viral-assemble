@@ -164,8 +164,8 @@ else:
         input:
             bam = os.path.join(config["data_dir"], config["subdirs"]["per_sample"], "{sample}.{adjective}.bam")
         output:
-            report = os.path.join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.kraken.report"),
-            reads  = os.path.join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.kraken.reads.gz")
+            report = os.path.join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned|rmdup|sub-200k.rmdup}.kraken.report"),
+            reads  = os.path.join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned|rmdup|sub-200k.rmdup}.kraken.reads.gz")
         resources:
             threads = int(config.get("number_of_threads", 1)),
             mem     = 120
@@ -174,10 +174,7 @@ else:
             kraken_db = config['kraken_db'],
             lock_memory = ' --lockMemory' if config.get('kraken_lock_memory') else ''
         shell:
-            """
-            {config[bin_dir]}/metagenomics.py kraken {params.kraken_db} {input.bam} --outReads {output.reads} --outReports {output.report} \
-            {params.lock_memory} --threads {resources.threads}")
-            """
+            "{config[bin_dir]}/metagenomics.py kraken {params.kraken_db} {input.bam} --outReads {output.reads} --outReports {output.report} {params.lock_memory} --threads {resources.threads}"
 
 
 rule all_kraken:
@@ -195,13 +192,29 @@ rule all_kraken_host_depleted:
                             "{sample}.cleaned.kraken.krona.html"), sample=samples)
 
 
+rule all_kraken_rmdup:
+    input:
+        expand(os.path.join(config["data_dir"], config["subdirs"]["metagenomics"],
+                            "{sample}.rmdup.kraken.report"), sample=samples),
+        expand(os.path.join(config["data_dir"], config["subdirs"]["metagenomics"],
+                            "{sample}.rmdup.kraken.krona.html"), sample=samples)
+
+
+rule all_kraken_subsamp_rmdup:
+    input:
+        expand(os.path.join(config["data_dir"], config["subdirs"]["metagenomics"],
+                            "{sample}.sub-200k.rmdup.kraken.report"), sample=samples),
+        expand(os.path.join(config["data_dir"], config["subdirs"]["metagenomics"],
+                            "{sample}.sub-200k.rmdup.kraken.krona.html"), sample=samples)
+
+
 rule krona_import_taxonomy:
     input:
         tsv = lambda wildcards: os.path.join(config["data_dir"], config["subdirs"]["metagenomics"], \
            ".".join([wildcards.sample, wildcards.adjective, method_props[wildcards.method]['reads_ext']])),
         krona_db = objectify_remote(expand("{path_prefix}/{kronafile}", path_prefix=config["krona_db"], kronafile=taxfiles_krona))#["taxonomy.tab", "gi_taxid.dat"]))
     output:
-        os.path.join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned}.{method,kraken|diamond|rna_bwa|rna_bwa_nodupes}.krona.html")
+        os.path.join(config["data_dir"], config["subdirs"]["metagenomics"], "{sample}.{adjective,raw|cleaned|rmdup}.{method,kraken|diamond|rna_bwa|rna_bwa_nodupes}.krona.html")
     resources:
         mem=32
     run:
