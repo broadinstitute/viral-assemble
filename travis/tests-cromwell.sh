@@ -3,7 +3,8 @@ set -x -e  # intentionally allow for pipe failures below
 
 ln -s $GATK_PATH/GenomeAnalysisTK.jar .
 mkdir -p workflows
-cp cromwell.jar pipes/WDL/workflows/*.wdl pipes/WDL/workflows/tasks/*.wdl workflows
+cp GenomeAnalysisTK.jar cromwell.jar pipes/WDL/workflows/*.wdl pipes/WDL/workflows/tasks/*.wdl workflows
+ln -s test workflows/
 cd workflows
 
 for workflow in ../pipes/WDL/workflows/*.wdl; do
