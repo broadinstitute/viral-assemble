@@ -9,6 +9,8 @@ import argparse
 import logging
 import glob
 import itertools
+import csv
+import datetime
 import os.path
 
 # intra-module
@@ -18,21 +20,27 @@ import util.misc
 import tools.blast
 
 # third-party
+import Bio.SeqIO
 import numpy
 
 _log = logging.getLogger(__name__)
 
-def gather_infector_stats(chainfiles, n_burnin, pair_reporting_threshold):
+def gather_infector_stats(seqs_fasta, seqs_dates, chainfiles, outfile, n_burnin, pair_reporting_threshold):
     """For each pair of samples (i,j), gather the probability that i infected j.
 
     Args:
+        seqs_fasta: fasta file with the sequences (we only care about their names and count)
+        seqs_dates: file with collection dates (just for joining to output)
         chainfiles: list of outbreaker chain files
+        outfile: tsv file for output
         n_burnin: number of initial lines from each chain file to ignore
         pair_reporting_threshold: report only sample pairs that appear in this fraction of mcmc samples as infecting 
            one another
     """
 
-    # ok this is incorrect, we need to be making a matrix.
+    seqs = tuple(Bio.SeqIO.parse(seqs_fasta, 'fasta'))
+    seqs_dates = util.file.slurp_file(seqs_dates).strip().split()
+    assert len(seqs) == len(seqs_dates)
 
     n_samples = None
     n_mcmc_samples = 0
@@ -42,6 +50,7 @@ def gather_infector_stats(chainfiles, n_burnin, pair_reporting_threshold):
             alpha_cols = [i for i, h in enumerate(headers) if h.startswith('alpha_')]
             if n_samples is None:
                 n_samples = len(alpha_cols)
+                assert n_samples == len(seqs)
                 infector_counts = numpy.zeros((n_samples, n_samples), dtype=int)
             else:
                 assert len(alpha_cols) == n_samples
@@ -59,8 +68,8 @@ def gather_infector_stats(chainfiles, n_burnin, pair_reporting_threshold):
 
     # end: for chainfile in chainfiles
 
-    numpy.savetxt('/tmp/f.txt', infector_counts, fmt='%d',
-                  header='\t'.join('s{}'.format(s+1) for s in range(n_samples)), delimiter='\t')
+    #numpy.savetxt('/tmp/f.txt', infector_counts, fmt='%d',
+    #              header='\t'.join('s{}'.format(s+1) for s in range(n_samples)), delimiter='\t')
 
     n_mcmc_threshold = int(n_mcmc_samples * pair_reporting_threshold)
     print('n_mcmc_samples=', n_mcmc_samples, 'n_mcmc_threshold=', n_mcmc_threshold)
@@ -74,6 +83,20 @@ def gather_infector_stats(chainfiles, n_burnin, pair_reporting_threshold):
             cnt_ij = infector_counts[i,j] + infector_counts[j,i]
             if cnt_ij > n_mcmc_threshold:
                 pairs.append((float(cnt_ij) / n_mcmc_samples, (i,j)))
+
+
+    def months_between(d1, d2):
+        strptime = datetime.datetime.strptime
+        d1 = strptime(d1, "%Y-%m-%d")
+        d2 = strptime(d2, "%Y-%m-%d")
+        return abs((d2 - d1).days)
+
+    with open(outfile, 'w') as out:
+        w = csv.DictWriter(out, fieldnames=['prob', 'id1', 'id2', 'days_apart'], delimiter='\t')
+        w.writeheader()
+        for prob, (id1, id2) in sorted(pairs, reverse=True):
+            w.writerow({'prob': '{:.4f}'.format(prob), 'id1': seqs[id1].name, 'id2': seqs[id2].name,
+                        'days_apart': months_between(seqs_dates[id1], seqs_dates[id2])})
 
     print '\n'.join('{:.4f} {}'.format(cnt, pair) for cnt, pair in sorted(pairs))
 
@@ -93,7 +116,8 @@ def find_common_contigs(sample_contig_fastas):
 if __name__ == '__main__':
     chains_dir = '/idi/sabeti-scratch/swohl/mumps/outbreaker/v3-final-SH'
     chains_files = glob.glob(os.path.join(chains_dir, 'run?-II-outbreak.SH.rep?.1e6.chains.txt'))
+    seqs_fasta = os.path.join(chains_dir, 'II-outbreak-v3.SH.aligned.pruned.fasta')
+    seqs_dates = os.path.join(chains_dir, 'II-outbreak-v3.dates.txt')
     print(chains_files)
-    gather_infector_stats(chains_files, n_burnin=51, pair_reporting_threshold=.2)
-    
-            
+    gather_infector_stats(seqs_fasta, seqs_dates, chains_files, 'infection_pairs.tsv', 
+                          n_burnin=51, pair_reporting_threshold=.2)
