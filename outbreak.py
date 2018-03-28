@@ -85,7 +85,7 @@ def gather_infector_stats(seqs_fasta, seqs_dates, chainfiles, outfile, n_burnin,
                 pairs.append((float(cnt_ij) / n_mcmc_samples, (i,j)))
 
 
-    def months_between(d1, d2):
+    def days_between(d1, d2):
         strptime = datetime.datetime.strptime
         d1 = strptime(d1, "%Y-%m-%d")
         d2 = strptime(d2, "%Y-%m-%d")
@@ -96,7 +96,7 @@ def gather_infector_stats(seqs_fasta, seqs_dates, chainfiles, outfile, n_burnin,
         w.writeheader()
         for prob, (id1, id2) in sorted(pairs, reverse=True):
             w.writerow({'prob': '{:.4f}'.format(prob), 'id1': seqs[id1].name, 'id2': seqs[id2].name,
-                        'days_apart': months_between(seqs_dates[id1], seqs_dates[id2])})
+                        'days_apart': days_between(seqs_dates[id1], seqs_dates[id2])})
 
     print '\n'.join('{:.4f} {}'.format(cnt, pair) for cnt, pair in sorted(pairs))
 
