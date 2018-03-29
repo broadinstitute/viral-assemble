@@ -98,9 +98,9 @@ def gather_infector_stats(seqs_fasta, seqs_dates, chainfiles, outfile, n_burnin,
             w.writerow({'prob': '{:.4f}'.format(prob), 'id1': seqs[id1].name, 'id2': seqs[id2].name,
                         'days_apart': days_between(seqs_dates[id1], seqs_dates[id2])})
 
-    print '\n'.join('{:.4f} {}'.format(cnt, pair) for cnt, pair in sorted(pairs))
+    #print '\n'.join('{:.4f} {}'.format(cnt, pair) for cnt, pair in sorted(pairs))
 
-def find_common_contigs(sample_contig_fastas):
+def find_common_contigs(sample_contigs_fastas, min_contig_len=500):
     """Given de novo assemblies of contigs from a set of samples, find contig parts that appear in 
     multiple samples.
 
@@ -108,16 +108,42 @@ def find_common_contigs(sample_contig_fastas):
 
     Make a blast database from all contigs, then blast each contig against it.
     """
+
+    # for each fasta, prepend a sample ID to the sequences in it.
+
+    with util.file.tmp_dir(suffix='common_contigs_dir') as tdir:
+        tdir = '/tmp'
+        seqs = []
+        for sample_contigs_fasta in sample_contigs_fastas:
+            contigs = tuple(Bio.SeqIO.parse(sample_contigs_fasta, 'fasta'))
+            for seq_rec in contigs:
+                bname = os.path.basename(sample_contigs_fasta)
+                sample_id = bname[:bname.index('.')]
+                seq_rec.id = sample_id + '.' + seq_rec.id
+                seq_rec.name = sample_id + '.' + seq_rec.name
+                seq_rec.description = sample_id + '.' + seq_rec.description
+                
+            seqs.extend(contigs)
+        seqs = filter(lambda s: len(s.seq) > min_contig_len, seqs)
+        seqs_fasta = os.path.join(tdir, 'seqs.fasta')
+        Bio.SeqIO.write(seqs, seqs_fasta, 'fasta')
+
+        tools.blast.MakeblastdbTool().build_database([seqs_fasta], os.path.join(tdir, 'seqs_blastdb'))
     
 #    with util.file.tmp_dir(suffix='contigs_blast_db') as blastdb_dir:
 #        tools.blast.MakeblastdbTool().build_database(
 
 
 if __name__ == '__main__':
-    chains_dir = '/idi/sabeti-scratch/swohl/mumps/outbreaker/v3-final-SH'
-    chains_files = glob.glob(os.path.join(chains_dir, 'run?-II-outbreak.SH.rep?.1e6.chains.txt'))
-    seqs_fasta = os.path.join(chains_dir, 'II-outbreak-v3.SH.aligned.pruned.fasta')
-    seqs_dates = os.path.join(chains_dir, 'II-outbreak-v3.dates.txt')
-    print(chains_files)
-    gather_infector_stats(seqs_fasta, seqs_dates, chains_files, 'infection_pairs.tsv', 
-                          n_burnin=51, pair_reporting_threshold=.2)
+    if False:
+        chains_dir = '/idi/sabeti-scratch/swohl/mumps/outbreaker/v3-final-SH'
+        chains_files = glob.glob(os.path.join(chains_dir, 'run?-II-outbreak.SH.rep?.1e6.chains.txt'))
+        seqs_fasta = os.path.join(chains_dir, 'II-outbreak-v3.SH.aligned.pruned.fasta')
+        seqs_dates = os.path.join(chains_dir, 'II-outbreak-v3.dates.txt')
+        print(chains_files)
+        gather_infector_stats(seqs_fasta, seqs_dates, chains_files, 'infection_pairs.tsv', 
+                              n_burnin=51, pair_reporting_threshold=.2)
+
+    contigs_dir = '/idi/sabeti-scratch/ilya/sw/zvir/viral-ngs-etc/projects/mumps/tmp/assemblies'
+    contigs_fastas = sorted(glob.glob(os.path.join(contigs_dir, 'MuV-*.raw.cleaned.assembly1-spades.fasta')))
+    find_common_contigs(contigs_fastas)
