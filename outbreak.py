@@ -182,7 +182,21 @@ if __name__ == '__main__':
         gather_infector_stats(seqs_fasta, seqs_dates, chains_files, 'infection_pairs.tsv', 
                               n_burnin=51, pair_reporting_threshold=.2)
 
-    contigs_dir = '/idi/sabeti-scratch/ilya/sw/zvir/viral-ngs-etc/projects/mumps/tmp/assemblies'
-    contigs_fastas = sorted(glob.glob(os.path.join(contigs_dir, 'MuV-*.raw.cleaned.assembly1-spades.fasta')))
-    find_common_contigs(contigs_fastas[:3])
 
+    samples = []
+    with open('infection_pairs.tsv') as top_pairs_f:
+        reader = csv.DictReader(top_pairs_f, delimiter='\t')
+        for row in reader:
+            if int(row['days_apart']) < 35:
+                samples.append(row['id1'][:7])
+                samples.append(row['id2'][:7])
+    samples = sorted(list(set(samples)))
+
+    contigs_dir = '/idi/sabeti-scratch/ilya/sw/zvir/viral-ngs-etc/projects/mumps/tmp/assemblies'
+    #contigs_fastas = sorted(glob.glob(os.path.join(contigs_dir, 'MuV-*.raw.cleaned.assembly1-spades.fasta')))
+    contigs_fastas = sorted([os.path.join(contigs_dir, 
+                                          '{}.raw.cleaned.assembly1-spades.fasta'.format(s)) for s in samples])
+    contigs_fastas = list(filter(os.path.isfile, contigs_fastas))
+
+    print('\n'.join(contigs_fastas))
+    find_common_contigs(contigs_fastas)
