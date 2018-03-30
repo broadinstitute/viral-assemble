@@ -9,6 +9,8 @@ import argparse
 import logging
 import glob
 import itertools
+import functools
+import operator
 import csv
 import datetime
 import os.path
@@ -20,8 +22,10 @@ import util.misc
 import tools.blast
 
 # third-party
-import Bio.SeqIO
 import numpy
+import Bio.SeqIO
+import Bio.Blast
+import Bio.Blast.Applications
 
 _log = logging.getLogger(__name__)
 
@@ -100,7 +104,7 @@ def gather_infector_stats(seqs_fasta, seqs_dates, chainfiles, outfile, n_burnin,
 
     #print '\n'.join('{:.4f} {}'.format(cnt, pair) for cnt, pair in sorted(pairs))
 
-def find_common_contigs(sample_contigs_fastas, min_contig_len=500):
+def find_common_contigs(sample_contigs_fastas, min_contig_len=1000):
     """Given de novo assemblies of contigs from a set of samples, find contig parts that appear in 
     multiple samples.
 
@@ -112,23 +116,57 @@ def find_common_contigs(sample_contigs_fastas, min_contig_len=500):
     # for each fasta, prepend a sample ID to the sequences in it.
 
     with util.file.tmp_dir(suffix='common_contigs_dir') as tdir:
-        tdir = '/tmp'
+        tdir = '/broad/hptmp/ilya'
         seqs = []
+
+        sample_names = []
+        sample_seqids = []
+        sampnamed_fastas = []
+
         for sample_contigs_fasta in sample_contigs_fastas:
             contigs = tuple(Bio.SeqIO.parse(sample_contigs_fasta, 'fasta'))
+
+            contigs = [s for s in contigs if len(s.seq) > min_contig_len]
+        
+            contig_seqids = []
+
+            bname = os.path.basename(sample_contigs_fasta)
+            sample_name = bname[:bname.index('.')]
+            sample_names.append(sample_name)
+
             for seq_rec in contigs:
-                bname = os.path.basename(sample_contigs_fasta)
-                sample_id = bname[:bname.index('.')]
-                seq_rec.id = sample_id + '.' + seq_rec.id
-                seq_rec.name = sample_id + '.' + seq_rec.name
-                seq_rec.description = sample_id + '.' + seq_rec.description
+                seq_rec.id = sample_name + '.' + seq_rec.id
+                seq_rec.name = sample_name + '.' + seq_rec.name
+                seq_rec.description = sample_name + '.' + seq_rec.description
+                contig_seqids.append(seq_rec.id)
+            sample_seqids.append(contig_seqids)
                 
+            sampnamed_fastas.append(os.path.splitext(sample_contigs_fasta)[0] + '.sampnamed.fasta')
+            print(sampnamed_fastas)
+            Bio.SeqIO.write(contigs, sampnamed_fastas[-1], 'fasta')
             seqs.extend(contigs)
-        seqs = filter(lambda s: len(s.seq) > min_contig_len, seqs)
+        seqs = [s for s in seqs if len(s.seq) > min_contig_len]
         seqs_fasta = os.path.join(tdir, 'seqs.fasta')
         Bio.SeqIO.write(seqs, seqs_fasta, 'fasta')
+        
+        db = os.path.join(tdir, 'seqs_blastdb')
+        tools.blast.MakeblastdbTool().build_database([seqs_fasta], db, parse_seqids=True)
 
-        tools.blast.MakeblastdbTool().build_database([seqs_fasta], os.path.join(tdir, 'seqs_blastdb'))
+        blast = tools.blast.BlastnTool()
+        for i, sample_contigs_fasta in enumerate(sample_contigs_fastas[:-1]):
+            seqid_list_fname = os.path.join(tdir, 'seqidlist_{}.txt'.format(i))
+            util.file.dump_file(seqid_list_fname, '\n'.join(functools.reduce(operator.concat,
+                                                                             sample_seqids[i+1:], [])))
+            blastn_cline = Bio.Blast.Applications.NcbiblastnCommandline(query=sampnamed_fastas[i], 
+                                                                        db=db, evalue=0.000001,
+                                                                        seqidlist=seqid_list_fname,
+                                                                        ungapped=True,
+                                                                        qcov_hsp_perc=20,
+                                                                        outfmt=5,
+                                                                        out=os.path.join(tdir, '{:03d}.{}.blast.xml'.format(i, sample_names[i])))
+            print(blastn_cline)
+            blastn_cline()
+            
     
 #    with util.file.tmp_dir(suffix='contigs_blast_db') as blastdb_dir:
 #        tools.blast.MakeblastdbTool().build_database(
@@ -146,4 +184,5 @@ if __name__ == '__main__':
 
     contigs_dir = '/idi/sabeti-scratch/ilya/sw/zvir/viral-ngs-etc/projects/mumps/tmp/assemblies'
     contigs_fastas = sorted(glob.glob(os.path.join(contigs_dir, 'MuV-*.raw.cleaned.assembly1-spades.fasta')))
-    find_common_contigs(contigs_fastas)
+    find_common_contigs(contigs_fastas[:3])
+

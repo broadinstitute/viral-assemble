@@ -84,7 +84,7 @@ class MakeblastdbTool(BlastTools):
     """ Tool wrapper for makeblastdb """
     subtool_name = 'makeblastdb'
 
-    def build_database(self, fasta_files, database_prefix_path):
+    def build_database(self, fasta_files, database_prefix_path, parse_seqids=False):
         """ builds a srprism database """
 
         input_fasta = ""
@@ -111,6 +111,7 @@ class MakeblastdbTool(BlastTools):
             raise IOError("No fasta file provided")
 
         args = ['-dbtype', 'nucl', '-in', input_fasta, '-out', database_prefix_path]
+        if parse_seqids: args.append('-parse_seqids')
         self.execute(*args)
 
         return database_prefix_path
