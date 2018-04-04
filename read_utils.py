@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Utilities for working with sequence reads, such as converting formats and
-fixing mate pairs.
+fixing mate pairs.  Also some utilities for working with contigs.
 """
 from __future__ import division
 
@@ -1203,6 +1203,57 @@ def main_extract_tarball(*args, **kwargs):
     '''
     print(util.file.extract_tarball(*args, **kwargs))
 __commands__.append(('extract_tarball', parser_extract_tarball))
+
+# =========================
+
+def prepend_to_fasta_headers(in_fasta, prepend_str, out_fasta):
+    """Prepend the string `prepend_str` to the headers of all sequences in `in_fasta`, outputting to `out_fasta`.
+    Can be used, for example, to encode in the FASTA header the sample information, before merging
+    fastas from muiple samples."""
+
+    seq_recs = tuple(SeqIO.parse(in_fasta, 'fasta'))
+    for seq_rec in seq_recs:
+        for attr in ('id', 'name', 'description'):
+            setattr(seq_rec, attr, prepend_str + getattr(seq_rec, attr))
+    SeqIO.write(seq_recs, out_fasta, 'fasta')
+
+def parser_prepend_to_fasta_headers(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_fasta', help='Input fasta')
+    parser.add_argument('prepend_str', help='String to prepend to each sequence header')
+    parser.add_argument('out_fasta', help='Output fasta')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, prepend_to_fasta_headers, split_args=True)
+    return parser
+
+__commands__.append(('prepend_to_fasta_headers', parser_prepend_to_fasta_headers))
+
+
+# =========================
+
+def filter_fasta_seqs(in_fasta, out_fasta, min_len=0, min_cov=0):
+    """Filter out sequences based on given criteria."""
+
+    def check_cov(s):
+        if min_cov==0 or '_cov_' not in s: return True
+        cov_idx = s.index('_cov_')
+        cov_str = s[cov_idx+len('_cov_'):]
+        cov_str = cov_str[:cov_str.index('_g')]
+        return float(cov_str) >= min_cov
+
+    seq_recs = tuple(SeqIO.parse(in_fasta, 'fasta'))
+    seq_recs = [seq_rec for seq_rec in seq_recs if len(seq_rec.seq) >= min_len and check_cov(seq_rec.id)]
+    SeqIO.write(seq_recs, out_fasta, 'fasta')
+
+def parser_filter_fasta_seqs(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_fasta', help='Input fasta')
+    parser.add_argument('out_fasta', help='Output fasta')
+    parser.add_argument('--minLen', dest='min_len', type=int, default=0, help='Remove sequences below this length')
+    parser.add_argument('--minCov', dest='min_cov', type=float, default=0, help='Remove sequences below this coverage')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, filter_fasta_seqs, split_args=True)
+    return parser
+
+__commands__.append(('filter_fasta_seqs', parser_filter_fasta_seqs))
 
 
 # =========================
