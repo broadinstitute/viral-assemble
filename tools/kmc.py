@@ -15,7 +15,7 @@ import util.file
 import util.misc
 
 TOOL_NAME = 'kmc'
-TOOL_VERSION = '3.0.1'
+TOOL_VERSION = '3.0.0'
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class KmcTool(tools.Tool):
     def build_kmer_db(self, args):    # pylint: disable=W0221
         """Build a database of kmers."""
         with util.file.tmp_dir(suffix='kmcdb') as t_dir:
-            tool_cmd = [self.install_and_get_path()] + list(map(str, args) + [t_dir])
+            tool_cmd = [self.install_and_get_path()] + list(map(str, args)) + [t_dir]
             log.info(' '.join(tool_cmd))
             print('tool_cmd=', tool_cmd)
             subprocess.check_call(tool_cmd)

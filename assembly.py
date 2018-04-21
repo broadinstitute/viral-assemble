@@ -948,6 +948,7 @@ def refine_assembly(
         ] + name_opts)
     )
     if outVcf:
+        print('RRRRRRRRRRRR outVcf=', outVcf)
         shutil.copyfile(tmpVcf, outVcf)
         if outVcf.endswith('.gz'):
             shutil.copyfile(tmpVcf + '.tbi', outVcf + '.tbi')

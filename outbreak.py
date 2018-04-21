@@ -19,6 +19,7 @@ import csv
 import datetime
 import os.path
 import subprocess
+import collections
 
 # intra-module
 import util.cmd
@@ -26,6 +27,7 @@ import util.file
 import util.misc
 import tools.blast
 import tools.kmc
+import tools.cdhit
 import read_utils
 
 # third-party
@@ -63,25 +65,83 @@ def gather_kmc_dbs():
     util.file.mkdir_p('tmp/kmc/sample_contig_kmers')
     kmcTool = tools.kmc.KmcTool()
     for sample in samples:
-        kmcTool.build_db(['-k25', '-fm', '-cs1', 'tmp/sampnamed/{}.assembly1-spades.fasta'.format(sample),
-                          'tmp/kmc/sample_contig_kmers/{}'.format(sample)])
+        kmcTool.build_kmer_db(['-k45', '-fm', '-cs1', 
+                               'tmp/sampnamed/{}.assembly1-spades.fasta'.format(sample),
+                               'tmp/kmc/sample_contig_kmers/k45.{}'.format(sample)])
 
 def compute_kmc_union():
     """Compute the union, giving for each kmer in how many samples it is"""
     samples = util.file.slurp_file('/idi/sabeti-scratch/ilya/sw/zvir/viral-ngs-etc/projects/mumps/tmp/seqnames.txt').strip().split()
     kmcTool = tools.kmc.KmcTool()
     
-    with open('tmp/kmc/unionfile.txt', 'w') as out:
+    with open('tmp/kmc/unionfile.k45.txt', 'w') as out:
         out.write('INPUT:\n')
         for sample in samples:
             sample_alpha = sample.replace('-', '_')
-            out.write('{} = tmp/kmc/sample_contig_kmers/{} -ci1\n'.format(sample_alpha, sample))
+            out.write('{} = tmp/kmc/sample_contig_kmers/k45.{} -ci1\n'.format(sample_alpha, sample))
         out.write('OUTPUT:\n')
-        out.write('tmp/kmc/uniondb = {}\n'.format(' + '.join([sample.replace('-', '_') for sample in samples])))
+        out.write('tmp/kmc/uniondb.k45 = {}\n'.format(' + '.join([sample.replace('-', '_') for sample in samples])))
         out.write('OUTPUT_PARAMS:\n')
         out.write('-ci1')
         out.write('\n')
 
+def gather_kmc_dbs():
+    """Compute a kmc db for each sample"""
+
+    samples = util.file.slurp_file('/idi/sabeti-scratch/ilya/sw/zvir/viral-ngs-etc/projects/mumps/tmp/seqnames.txt').strip().split()
+    util.file.mkdir_p('tmp/kmc/sample_contig_kmers')
+    kmcTool = tools.kmc.KmcTool()
+    for sample in samples:
+        kmcTool.build_kmer_db(['-k45', '-fm', '-cs1', 
+                               'tmp/sampnamed/{}.assembly1-spades.fasta'.format(sample),
+                               'tmp/kmc/sample_contig_kmers/k45.{}'.format(sample)])
+
+
+def find_linking_kmers_in_kmc_dbs():
+    """For each sample, find kmers that link it with one or two others."""
+
+    samples = util.file.slurp_file('/idi/sabeti-scratch/ilya/sw/zvir/viral-ngs-etc/projects/mumps/tmp/seqnames.txt').strip().split()
+    util.file.mkdir_p('tmp/kmc/sample_contig_kmers')
+    kmcTool = tools.kmc.KmcTool()
+    for sample in samples:
+        kmcTool.execute(['-v', 'simple',
+                         'tmp/kmc/sample_contig_kmers/k45.{}'.format(sample), '-ci1',
+                         'tmp/kmc/uniondb.k45', '-ci2', '-cx2', 'intersect',
+                         'tmp/kmc/sample_contig_kmers/k45.in2samp.{}'.format(sample), '-ci1' ])
+        kmcTool.execute(['-v', 'transform',
+                         'tmp/kmc/sample_contig_kmers/k45.in2samp.{}'.format(sample), '-ci1',
+                         'dump', 'tmp/kmc/sample_contig_kmers/k45.in2samp.{}.txt'.format(sample)])
+
+def gather_linkingkmer_stats():
+    """Gather stats about linking kmers"""
+    samples = util.file.slurp_file('/idi/sabeti-scratch/ilya/sw/zvir/viral-ngs-etc/projects/mumps/tmp/seqnames.txt').strip().split()
+    util.file.mkdir_p('tmp/kmc/sample_contig_kmers')
+    kmcTool = tools.kmc.KmcTool()
+    kmer2samps = collections.defaultdict(list)
+    for sample in samples:
+        lines = util.file.slurp_file('tmp/kmc/sample_contig_kmers/k45.in2samp.{}.txt'.format(sample)).strip().split('\n')
+        kmers = [line.strip().split()[0] for line in lines]
+        for kmer in kmers:
+            assert len(kmer) == 45, 'kmer is {}'.format(kmer)
+            kmer2samps[kmer].append(sample)
+        print(sample, len(kmer2samps))
+    print('got info for {} kmers'.format(len(kmer2samps)))
+    pair2count = collections.Counter()
+    for kmer, samps in kmer2samps.items():
+        assert len(samps) == 2, 'kmer={} samps={}'.format(kmer, samps)
+        pair2count[tuple(sorted(samps))] += 1
+    spairs = sorted(pair2count.items(), key=operator.itemgetter(1), reverse=True)
+    pair_counts_hist = collections.Counter()
+    print('histogram=', numpy.histogram(list(map(operator.itemgetter(1), spairs))))
+    with open('spairs.tsv', 'w') as out:
+        out.write('id1\tid2\tnkmers\n')
+        for pair, cnt in spairs:
+            out.write('{}\t{}\t{}\n'.format(pair[0], pair[1], cnt))
+
+
+        
+################################################################################################
+        
 def gather_assemblies():
     """Gather assemblies into one place"""
     samples = util.file.slurp_file('/idi/sabeti-scratch/ilya/sw/zvir/viral-ngs-etc/projects/mumps/tmp/seqnames.txt').strip().split()
@@ -92,11 +152,11 @@ def gather_assemblies():
 
         print('looking at {}'.format(sample))
 
-        if os.path.isfile('tmp/over300/{}.assembly1-spades.fasta'.format(sample)): continue
+#        if os.path.isfile('tmp/over300/{}.assembly1-spades.fasta'.format(sample)): continue
         if not os.path.isfile('tmp/assemblies/{}.raw.cleaned.assembly1-spades.fasta'.format(sample)):
             subprocess.check_call('dx download -a assemblies-de_novo/{}.raw.cleaned.assembly1-spades.fasta -o tmp/assemblies'.format(sample), shell=True)
         read_utils.prepend_to_fasta_headers('tmp/assemblies/{}.raw.cleaned.assembly1-spades.fasta'.format(sample),
-                                            'lcl|'+sample+'|', 'tmp/sampnamed/{}.assembly1-spades.fasta'.format(sample))
+                                            sample+'.', 'tmp/sampnamed/{}.assembly1-spades.fasta'.format(sample))
         read_utils.filter_fasta_seqs('tmp/sampnamed/{}.assembly1-spades.fasta'.format(sample),
                                      'tmp/over300/{}.assembly1-spades.fasta'.format(sample),
                                      min_len=300)
@@ -106,10 +166,10 @@ def gather_assemblies():
     
 
 def gather_infector_stats(seqs_fasta, seqs_dates, chainfiles, outfile, n_burnin, pair_reporting_threshold):
-    """For each pair of samples (i,j), gather the probability that i infected j.
+    """For each pair of samples (i,j), gather the probability that i infected j, from the output of R package 'outbreaker'.
 
     Args:
-        seqs_fasta: fasta file with the sequences (we only care about their names and count)
+        seqs_fasta: fasta file with the sequences (we only care about their names and the total number of seqs)
         seqs_dates: file with collection dates (just for joining to output)
         chainfiles: list of outbreaker chain files
         outfile: tsv file for output
@@ -273,11 +333,101 @@ def get_top_hits(pair2info):
                         print(id1, id2, hsps, pair2info.get((id1[:7], id2[:7]), None))
 
 
-                      
-            
+def make_samples_blastdbs():
+    """Make a blast db for each sample"""
+    samples = util.file.slurp_file('tmp/seqnames.txt').strip().split()
+    util.file.mkdir_p('tmp/sampblast')
+    for sample in samples:
+        print(sample)
+        tools.blast.MakeblastdbTool().build_database(['tmp/over300/{}.assembly1-spades.fasta'.format(sample)], 'tmp/sampblast/{}.blastdb'.format(sample), parse_seqids=True)
+
+def match_contigs_from_two_samples(sample1, sample2):
+    """Find close matches between contigs from two different samples.
+    """
+    samples = util.file.slurp_file('tmp/seqnames.txt').strip().split()
+    sample1_fasta = 'tmp/sampnamed/{}.assembly1-spades.fasta'.format(sample1)
+    sample2_fasta = 'tmp/sampnamed/{}.assembly1-spades.fasta'.format(sample2)
+
+    util.file.mkdir_p('tmp/sampblast')
+
+    cdhit = tools.cdhit.CdHit()
+    tools.blast.MakeblastdbTool().build_database([contigs2+'_blastdb'], db, parse_seqids=True)
+    blastn_cline = Bio.Blast.Applications.NcbiblastnCommandline(query=sampnamed_fastas[i], 
+                                                                db=db, evalue=0.000001,
+                                                                seqidlist=seqid_list_fname,
+                                                                ungapped=True,
+                                                                qcov_hsp_perc=20,
+                                                                outfmt=5,
+                                                                out=os.path.join(tdir, '{:03d}.{}.blast.xml'.format(i, sample_names[i])))    
+    
+
+def cmp_links():
+    """Compare samples with links"""
+    with open('/idi/sabeti-scratch/ilya/mlinks.csv') as mlinks:
+        reader = csv.DictReader(mlinks)
+        for row in reader:
+            pass
+
+def remove_mumps_contigs():
+    """Remove mumps contigs (since we're asking whether other things get transferred along with mumps)."""
+
+
+    with open('tmp/mumpscontigs.tsv') as mumpscontigs, open('tmp/mumpscontigs.filt.tsv', 'w') as mumpscontigsfilt:
+        fieldnames='qseqid sseqid evalue bitscore length pident nident'.split()
+        reader = csv.DictReader(mumpscontigs, delimiter='\t', fieldnames=fieldnames)
+        writer = csv.DictWriter(mumpscontigsfilt, delimiter='\t', fieldnames=fieldnames)
+        writer.writeheader()
+        mumps_contigs = set()
+        for row in reader:
+            if row['qseqid'] in mumps_contigs: continue
+            qseqid = row['qseqid'].split('_')
+            contig_len = float(int(qseqid[3]))
+            align_len = float(int(row['length']))
+            qfrac = align_len / contig_len
+            #assert qfrac <= 1
+            if int(row['nident']) > 1000 and qfrac > .2:
+                writer.writerow(row)
+                mumps_contigs.add(row['qseqid'])
+
+    samples = util.file.slurp_file('tmp/seqnames.txt').strip().split()
+    util.file.mkdir_p('tmp/nomumps')
+
+    for sample in samples:
+        seq_recs = tuple(Bio.SeqIO.parse('tmp/over300/{}.assembly1-spades.fasta'.format(sample), 'fasta'))
+        seq_recs_nomumps = [r for r in seq_recs if r.id not in mumps_contigs]
+        if (len(seq_recs)-len(seq_recs_nomumps)) == 0:
+            print('sample', sample, 'drop', len(seq_recs)-len(seq_recs_nomumps))
     
 #    with util.file.tmp_dir(suffix='contigs_blast_db') as blastdb_dir:
 #        tools.blast.MakeblastdbTool().build_database(
+
+def plot_contact_tracing_info():
+    """Plot the contact tracing info of connections between samples"""
+    
+    samples = util.file.slurp_file('/idi/sabeti-scratch/ilya/sw/zvir/viral-ngs-etc/projects/mumps/tmp/seqnames.txt').strip().split()
+
+    with open('tmp/mlinks.csv') as mlinks, open('tmp/mlinks.dot', 'w') as dot:
+        reader = csv.DictReader(mlinks, delimiter=',')
+        dot.write('graph G {\n')
+        def to_node(s): return s.replace('-', '_')
+        for row in reader:
+            if not (row['sample1'] in samples and row['sample2'] in samples): continue
+            dot.write('{} -- {} [style={}];\n'.format(to_node(row['sample1']), to_node(row['sample2']),
+                                                      'solid' if row['type']=='contact' else 'dashed'))
+        dot.write('}\n')
+
+    subprocess.check_call('dot -Tsvg -otmp/mlinks.svg tmp/mlinks.dot', shell=True)
+
+def compute_num_diffs():
+    """Compute diff counts"""
+    seq_recs = tuple(Bio.SeqIO.parse('/idi/sabeti-scratch/swohl/mumps/outbreaker/v3-final/II-outbreak-v3.aligned.pruned.fasta', 'fasta'))
+    muv_010 = [r for r in seq_recs if r.id.startswith('MuV-103')]
+    muv_031 = [r for r in seq_recs if r.id.startswith('MuV-113')]
+    assert len(muv_010) == len(muv_031) == 1
+    assert len(muv_010[0].seq) == len(muv_031[0].seq)
+    for i in range(len(muv_010[0].seq)):
+        if muv_010[0].seq[i] != muv_031[0].seq[i]:
+            print(i)
 
 
 if __name__ == '__main__':
@@ -287,8 +437,17 @@ if __name__ == '__main__':
         seqs_fasta = os.path.join(chains_dir, 'II-outbreak-v3.SH.aligned.pruned.fasta')
         seqs_dates = os.path.join(chains_dir, 'II-outbreak-v3.dates.txt')
         print(chains_files)
+        pair2info = gather_infector_stats(seqs_fasta, seqs_dates, chains_files, 'infection_pairs.SH.tsv', 
+                                          n_burnin=101, pair_reporting_threshold=.7)
+
+    if  False:
+        chains_dir = '/idi/sabeti-scratch/swohl/mumps/outbreaker/v3-final'
+        chains_files = glob.glob(os.path.join(chains_dir, 'run?-II-outbreak.rep?.1e6.chains.txt'))
+        seqs_fasta = os.path.join(chains_dir, 'II-outbreak-v3.aligned.pruned.fasta')
+        seqs_dates = os.path.join(chains_dir, 'II-outbreak-v3.dates.txt')
+        print(chains_files)
         pair2info = gather_infector_stats(seqs_fasta, seqs_dates, chains_files, 'infection_pairs.tsv', 
-                                          n_burnin=51, pair_reporting_threshold=.01)
+                                          n_burnin=101, pair_reporting_threshold=.1)
 
 
     if False:
@@ -315,9 +474,11 @@ if __name__ == '__main__':
     #                 out_seqnames='tmp/seqnames.txt')
     #gather_assemblies()
     #gather_kmc_dbs()
-    compute_kmc_union()
-
-
-
-
+    #compute_kmc_union()
+    #find_linking_kmers_in_kmc_dbs()
+    #gather_linkingkmer_stats()
+    #make_samples_blastdbs()
+    #remove_mumps_contigs()
+    #plot_contact_tracing_info()
+    compute_num_diffs()
 
