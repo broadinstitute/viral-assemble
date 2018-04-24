@@ -1,0 +1,86 @@
+"""
+Analyses of an outbreak: determining who infected whom with which strains.
+"""
+
+__author__ = 'Ilya Shlyakhter <ilya@broadinstitute.org>'
+
+
+from snakemake.utils import makedirs
+import os, os.path, time, shutil, tempfile
+
+rule compute_cleaned_reads_fasta:
+    '''Compute the cleaned fasta reads
+    '''
+    input:  
+        cleaned_reads_bam=config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.cleaned.bam',
+    output:
+        fasta_1 = config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.cleaned.1.fasta.gz',
+        fasta_2 = config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.cleaned.2.fasta.gz'
+    resources:
+        mem     = 7,
+        threads = int(config.get("number_of_threads", 1))
+    params: 
+        logid       = "{sample}",
+    run:
+        shell("samtools fasta -N -1 {output.fasta_1} -2 {output.fasta_2} {input.cleaned_reads_bam}")
+
+
+rule compute_cleaned_reads_kmers:
+    '''Compute the kmers in cleaned fasta reads
+    '''
+    input:  
+        fasta_1 = config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.cleaned.1.fasta.gz',
+        fasta_2 = config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.cleaned.2.fasta.gz'
+    output:
+        config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.cleaned.k{K}.ci{CI}.cx{CX}.cs{CS}.kmc_pre',
+        config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.cleaned.k{K}.ci{CI}.cx{CX}.cs{CS}.kmc_suf'
+    resources:
+        mem     = 7,
+    params: 
+        logid       = "{sample}",
+    run:
+        with tempfile.TemporaryDirectory() as tempdir:
+            kmc_db_noext = os.path.splitext(output[0])[0]
+            shell("kmc -k{wildcards.K} -ci{wildcards.CI} -cx{wildcards.CX} -cs{wildcards.CX} -m{resources.mem} -sm -t{threads} -fm @<(echo {input[0]} && echo {input[1]}) {kmc_db_noext} {tempdir}")
+
+
+rule compute_asm_kmers:
+    '''Compute the kmers in assemblies
+    '''
+    input:  
+        fasta = config["data_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.fasta'
+    output:
+        config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.k{K}.ci{CI}.cx{CX}.cs{CS}.kmc_pre',
+        config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.k{K}.ci{CI}.cx{CX}.cs{CS}.kmc_suf'
+    resources:
+        mem     = 7,
+    params: 
+        logid       = "{sample}",
+    run:
+        with tempfile.TemporaryDirectory() as tempdir:
+            kmc_db_noext = os.path.splitext(output[0])[0]
+            shell("kmc -k{wildcards.K} -ci{wildcards.CI} -cx{wildcards.CX} -cs{wildcards.CX} -m{resources.mem} -sm -t{threads} -fm {input} {kmc_db_noext} {tempdir}")
+
+
+rule all_cleaned_reads_kmers:
+    input:
+        # create final assemblies for all samples
+        expand("{tmp_dir}/{subdir}/{sample}.cleaned.k55.ci2.cx9999.cs9999.kmc_pre",
+            tmp_dir=config["tmp_dir"], subdir=config["subdirs"]["outbreak"],
+            sample=read_samples_file(config["samples_assembly"]))
+    run:
+        print('input=', input)
+        print(config["samples_assembly"])
+        print(list(read_samples_file(config["samples_assembly"])))
+        
+rule all_asm_kmers:
+    '''Gather k-mers in each sample assembly'''
+    input:
+        # create final assemblies for all samples
+        expand("{tmp_dir}/{subdir}/{sample}.k55.ci1.cx9999.cs9999.kmc_pre",
+            tmp_dir=config["tmp_dir"], subdir=config["subdirs"]["outbreak"],
+            sample=read_samples_file(config["samples_assembly"]))
+    run:
+        print('input=', input)
+        print(config["samples_assembly"])
+        print(list(read_samples_file(config["samples_assembly"])))
