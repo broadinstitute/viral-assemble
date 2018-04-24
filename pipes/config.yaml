@@ -259,6 +259,7 @@ subdirs:
   interhost:      "03_interhost"
   intrahost:      "04_intrahost"
   annot:          "05_genbank"
+  outbreak:       "06_outbreak"
 
 # The location to use for temp file storage. Should be large and fast and
 # shared between jobs.
