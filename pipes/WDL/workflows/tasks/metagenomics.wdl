@@ -8,11 +8,11 @@ task kraken {
   File        kraken_db_tar_lz4
   File        krona_taxonomy_db_tgz
 
-  parameter_meta {
-    kraken_db_tar_lz4:  "stream" # for DNAnexus, until WDL implements the File| type
-    krona_taxonomy_db_tgz : "stream" # for DNAnexus, until WDL implements the File| type
-    #reads_unmapped_bam: "stream" # for DNAnexus, until WDL implements the File| type
-  }
+  #parameter_meta {
+  #  kraken_db_tar_lz4:  "stream" # for DNAnexus, until WDL implements the File| type
+  #  krona_taxonomy_db_tgz : "stream" # for DNAnexus, until WDL implements the File| type
+  #  #reads_unmapped_bam: "stream" # for DNAnexus, until WDL implements the File| type
+  #}
 
   command {
     set -ex -o pipefail
