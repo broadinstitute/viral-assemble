@@ -33,6 +33,12 @@ class KmcTool(tools.Tool):
     def version(self):
         return TOOL_VERSION
 
+    def kmc_db_name(self, kmc_db):
+        """Return the kmer database path, given either the db path of the file name of the .kmc_pre or .kmc_suf file"""
+        base, ext = os.path.splitext(kmc_db)
+        return base if ext in ('.kmc_pre', '.kmc_suf') else kmc_db
+        
+
     def build_kmer_db(self, seq_files, kmer_size, min_occs, max_occs, counter_cap, kmc_db, mem_limit_gb=8, threads=None, kmc_opts=''):
         """Build a database of kmers occurring in the given sequence files.
 
@@ -52,7 +58,7 @@ class KmcTool(tools.Tool):
           
         """
         seq_files = util.misc.make_seq(seq_files)
-        if kmc_db.endswith('.kmc_pre') or kmc_db.endswith('.kmc_suf'): kmc_db = os.path.splitext(kmc_db)[0]
+        kmc_db = self.kmc_db_name(kmc_db)
         threads = util.misc.sanitize_thread_count(threads)
         with util.file.tmp_dir(suffix='kmcdb') as t_dir, util.file.tempfname(suffix='kmcfiles') as seq_file_list:
             util.file.dump_file(seq_file_list, '\n'.join(seq_files))
@@ -85,6 +91,12 @@ class KmcTool(tools.Tool):
         tool_cmd = [self.install_and_get_path()+'_tools'] + list(map(str, args))
         log.info('Running kmc_tools command: ' + ' '.join(tool_cmd))
         subprocess.check_call(tool_cmd)
+
+    def dump_kmers(self, kmc_db, out_kmers, min_occs=1, max_occs=999999, threads=None):
+        """Dump the kmers from the database to a text file"""
+        threads = util.misc.sanitize_thread_count(threads)
+        self.execute('-t{} transform {} -ci{} -cx{} dump -s {}'.format(threads, self.kmc_db_name(kmc_db), min_occs, max_occs, out_kmers).split())
+        assert os.path.isfile(out_kmers)
 
 # end: class KmcTool(tools.Tool)
 

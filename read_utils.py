@@ -1229,6 +1229,25 @@ __commands__.append(('build_kmc_db', parser_build_kmc_db))
 
 # =========================
 
+def kmc_dump_kmers(kmc_db, out_kmers, min_occs=1, max_occs=999999, threads=None):
+    """Dump kmers from kmc database to a text file"""
+    tools.kmc.KmcTool().dump_kmers(kmc_db=kmc_db, out_kmers=out_kmers, min_occs=min_occs, max_occs=max_occs, threads=threads)
+
+def parser_kmc_dump_kmers(parser=argparse.ArgumentParser()):
+    """Dump kmers from the kmer database to a text file"""
+    parser.add_argument('kmc_db', help='kmc database (with or without .kmc_pre/.kmc_suf suffix)')
+    parser.add_argument('out_kmers', help='text file to which to write the kmers')
+    parser.add_argument('--minOccs', '-ci', dest='min_occs', type=int, default=1, help='drop kmers with fewer than this many occurrences')
+    parser.add_argument('--maxOccs', '-cx', dest='max_occs', type=int, default=9999, help='drop kmers with more than this many occurrences')
+
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, kmc_dump_kmers, split_args=True)
+    return parser
+
+__commands__.append(('kmc_dump_kmers', parser_kmc_dump_kmers))
+
+# =========================
+
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
 
