@@ -31,6 +31,7 @@ import tools.mvicuna
 import tools.prinseq
 import tools.novoalign
 import tools.gatk
+import tools.kmc
 
 log = logging.getLogger(__name__)
 
@@ -1204,6 +1205,27 @@ def main_extract_tarball(*args, **kwargs):
     print(util.file.extract_tarball(*args, **kwargs))
 __commands__.append(('extract_tarball', parser_extract_tarball))
 
+
+# =========================
+
+def build_kmc_db(seq_files, kmer_size, min_occs, max_occs, counter_cap, kmc_db, mem_limit_gb=8, threads=None):
+    """Build KMC kmer database"""
+    tools.kmc.KmcTool().build_kmer_db(seq_files=seq_files, kmer_size=kmer_size, min_occs=min_occs, max_occs=max_occs, counter_cap=counter_cap,
+                                      kmc_db=kmc_db, mem_limit_gb=mem_limit_gb, threads=threads)
+
+def parser_build_kmc_db(parser=argparse.ArgumentParser()):
+    parser.add_argument('seq_files', nargs='+', help='Files from which to extract kmers (fasta/fastq/bam, fasta/fastq may be .gz or .bz2)')
+    parser.add_argument('kmc_db', help='kmc database (with or without .kmc_pre/.kmc_suf suffix)')
+    parser.add_argument('--kmerSize', '-k', dest='kmer_size', type=int, default=25, help='kmer size')
+    parser.add_argument('--minOccs', '-ci', dest='min_occs', type=int, default=1, help='drop kmers with fewer than this many occurrences')
+    parser.add_argument('--maxOccs', '-cx', dest='max_occs', type=int, default=9999, help='drop kmers with more than this many occurrences')
+    parser.add_argument('--counterCap', '-cs', dest='counter_cap', type=int, default=255, help='cap kmer counts at this value')
+    parser.add_argument('--memLimitGb', dest='mem_limit_gb', default=8, type=int, help='Max memory to use, in GB')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, build_kmc_db, split_args=True)
+    return parser
+
+__commands__.append(('build_kmc_db', parser_build_kmc_db))
 
 # =========================
 
