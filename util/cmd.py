@@ -174,7 +174,7 @@ def make_parser(commands, description):
             # so sphinx-argparse doesnt't render "Undocumented"
             if (not help_str) and os.environ.get('READTHEDOCS') or 'sphinx' in sys.modules:
                 help_str = "   "
-            p = subparsers.add_parser(cmd_name, help=help_str)
+            p = subparsers.add_parser(cmd_name, help=help_str, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
             cmd_parser(p)
     return parser
 
@@ -212,8 +212,7 @@ def main_argparse(commands, description):
             ret = args.func_main(args)
         finally:
             if (hasattr(args, 'tmp_dirKeep') and args.tmp_dirKeep) or util.file.keep_tmp():
-                log.exception(
-                    "Exception occurred while running %s, saving tmp_dir at %s", args.command, tempfile.tempdir)
+                log.debug("After running %s, saving tmp_dir at %s", args.command, tempfile.tempdir)
             else:
                 shutil.rmtree(tempfile.tempdir)
     else:
