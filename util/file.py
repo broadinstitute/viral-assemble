@@ -127,17 +127,22 @@ def mkstempfname(suffix='', prefix='tmp', directory=None, text=False):
 
 @contextlib.contextmanager
 def tempfname(*args, **kwargs):
-    '''Create a tempfile name on context entry, delete the file (if it exists) on context exit.'''
+    '''Create a tempfile name on context entry, delete the file (if it exists) on context exit.
+    The file is kept for debugging purposes if the environment variable VIRAL_NGS_TMP_DIRKEEP is set.
+    '''
     fn = mkstempfname(*args, **kwargs)
     try:
         yield fn
     finally:
-        if os.path.isfile(fn): os.unlink(fn)
+        if os.path.isfile(fn) and not keep_tmp():
+            os.unlink(fn)
 
 
 @contextlib.contextmanager
 def tempfnames(suffixes, *args, **kwargs):
-    '''Create a set of tempfile names on context entry, delete the files (if they exist) on context exit.'''
+    '''Create a set of tempfile names on context entry, delete the files (if they exist) on context exit.
+    The files are kept for debugging purposes if the environment variable VIRAL_NGS_TMP_DIRKEEP is set.
+    '''
     fns = [mkstempfname(sfx, *args, **kwargs) for sfx in suffixes]
     try:
         yield fns
