@@ -11,6 +11,8 @@ import sys
 import shutil
 import logging
 import argparse
+import importlib
+import inspect
 import util.version
 import util.file
 
@@ -256,4 +258,18 @@ def check_input(condition, error_msg):
     if not condition:
         raise BadInputError(error_msg)
 
+def run_cmd(module, cmd, args):
+    """Run command after parsing its arguments with the command's parser.
     
+    Args:
+        module: the module object for the script containing the command
+        cmd: the command name
+        args: list of args to the command
+    """
+    if isinstance(module, str): 
+        module = importlib.import_module(module)
+    assert inspect.ismodule(module)
+    parser_fn = dict(getattr(module, '__commands__'))[cmd]
+    args_parsed = parser_fn(argparse.ArgumentParser()).parse_args(map(str, args))
+    print('CALLING CMD ', cmd, 'with args', args)
+    args_parsed.func_main(args_parsed)
