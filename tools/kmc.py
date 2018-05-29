@@ -27,7 +27,7 @@ class KmcTool(tools.Tool):
     def __init__(self, install_methods=None):
         if install_methods is None:
             install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, executable='kmc',
-                                                  verifycmd='kmc')]
+                                                  verifycmd='kmc -h > /dev/null')]
         tools.Tool.__init__(self, install_methods=install_methods)
 
     def version(self):
@@ -85,7 +85,7 @@ class KmcTool(tools.Tool):
             tool_cmd = [self.install_and_get_path()] + args
             log.info('Building KMC database with command: ' + ' '.join(tool_cmd))
             subprocess.check_call(tool_cmd)
-            assert os.path.isfile(kmc_db+'.kmc_pre') and os.path.isfile(kmc_db+'.kmc_suf')
+            assert os.path.isfile(kmc_db+'.kmc_pre') and os.path.isfile(kmc_db+'.kmc_suf'), 'KMC database files not created: {}'.format(kmc_db)
 
     def execute(self, args):
         tool_cmd = [self.install_and_get_path()+'_tools'] + list(map(str, args))
