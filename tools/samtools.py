@@ -90,7 +90,7 @@ class SamtoolsTool(tools.Tool):
 
     def bam2fa(self, inBam, outFa1, outFa2=None, outFa0=None, add_mate_num=False):
         if outFa2 is None:
-            args = ['-N'] if add_made_num else ['-n']
+            args = ['-N'] if add_mate_num else ['-n']
         else:
             args = ['-1', outFa1, '-2', outFa2]
         if outFa0:
