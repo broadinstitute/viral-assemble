@@ -270,6 +270,6 @@ def run_cmd(module, cmd, args):
         module = importlib.import_module(module)
     assert inspect.ismodule(module)
     parser_fn = dict(getattr(module, '__commands__'))[cmd]
-    args_parsed = parser_fn(argparse.ArgumentParser()).parse_args(map(str, args))
+    args_parsed = parser_fn(argparse.ArgumentParser()).parse_args(list(map(str, args)))
     print('CALLING CMD ', cmd, 'with args', args)
     args_parsed.func_main(args_parsed)

@@ -70,6 +70,18 @@ def test_check_paths(tmpdir):
     util.file.make_empty(join(writable_dir, 'myempty.dat'))
     check_paths(read_and_write=join(writable_dir, 'myempty.dat'))
 
-        
+def test_uncompressed_file_type():
+    '''Test util.file.uncompressed_file_type()'''
+
+    uncompressed_file_type = util.file.uncompressed_file_type
+    for f in ('a', '/myfile', '/tmp/somefile'):
+        assert uncompressed_file_type(f+'.fa') == '.fa'
+        assert uncompressed_file_type(f+'.fa.gz') == '.fa'
+        assert uncompressed_file_type(f+'.fa.bz2') == '.fa'
+        assert uncompressed_file_type(f+'.gz') == ''
+        assert uncompressed_file_type(f+'.bz2') == ''
+
+
+    
 
 

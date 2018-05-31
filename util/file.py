@@ -1,5 +1,6 @@
 '''This gives a number of useful quick methods for dealing with
-tab-text files and gzipped files.
+tab-text files and gzipped files, as well as fasta files, plus
+general file-handling routines.
 '''
 
 __author__ = "dpark@broadinstitute.org"
@@ -790,3 +791,11 @@ def join_paired_fastq(input_fastqs, output_format='fastq', num_n=None):
             }
         rec = SeqRecord(jseq, id=rid, description='', letter_annotations=labbrevs)
         yield rec
+
+def uncompressed_file_type(fname):
+    """Return the original file extension of either a compressed or an uncompressed file."""
+    base, ext = os.path.splitext(fname)
+    if ext in ('.gz', '.bz2'):
+        base, ext = os.path.splitext(base)
+    return ext
+

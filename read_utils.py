@@ -1208,24 +1208,24 @@ __commands__.append(('extract_tarball', parser_extract_tarball))
 
 # =========================
 
-def build_kmc_db(seq_files, kmer_size, min_occs, max_occs, counter_cap, kmc_db, mem_limit_gb=8, threads=None):
+def build_kmer_db(seq_files, kmer_size, min_occs, max_occs, counter_cap, kmc_db, mem_limit_gb=8, threads=None):
     """Build KMC kmer database"""
     tools.kmc.KmcTool().build_kmer_db(seq_files=seq_files, kmer_size=kmer_size, min_occs=min_occs, max_occs=max_occs, counter_cap=counter_cap,
                                       kmc_db=kmc_db, mem_limit_gb=mem_limit_gb, threads=threads)
 
-def parser_build_kmc_db(parser=argparse.ArgumentParser()):
+def parser_build_kmer_db(parser=argparse.ArgumentParser()):
     parser.add_argument('seq_files', nargs='+', help='Files from which to extract kmers (fasta/fastq/bam, fasta/fastq may be .gz or .bz2)')
     parser.add_argument('kmc_db', help='kmc database (with or without .kmc_pre/.kmc_suf suffix)')
     parser.add_argument('--kmerSize', '-k', dest='kmer_size', type=int, default=25, help='kmer size')
     parser.add_argument('--minOccs', '-ci', dest='min_occs', type=int, default=1, help='drop kmers with fewer than this many occurrences')
-    parser.add_argument('--maxOccs', '-cx', dest='max_occs', type=int, default=9999, help='drop kmers with more than this many occurrences')
+    parser.add_argument('--maxOccs', '-cx', dest='max_occs', type=int, default=tools.kmc.MAX_COUNT, help='drop kmers with more than this many occurrences')
     parser.add_argument('--counterCap', '-cs', dest='counter_cap', type=int, default=255, help='cap kmer counts at this value')
     parser.add_argument('--memLimitGb', dest='mem_limit_gb', default=8, type=int, help='Max memory to use, in GB')
     util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
-    util.cmd.attach_main(parser, build_kmc_db, split_args=True)
+    util.cmd.attach_main(parser, build_kmer_db, split_args=True)
     return parser
 
-__commands__.append(('build_kmc_db', parser_build_kmc_db))
+__commands__.append(('build_kmer_db', parser_build_kmer_db))
 
 # =========================
 
@@ -1234,11 +1234,10 @@ def kmc_dump_kmers(kmc_db, out_kmers, min_occs=1, max_occs=999999, threads=None)
     tools.kmc.KmcTool().dump_kmers(kmc_db=kmc_db, out_kmers=out_kmers, min_occs=min_occs, max_occs=max_occs, threads=threads)
 
 def parser_kmc_dump_kmers(parser=argparse.ArgumentParser()):
-    """Dump kmers from the kmer database to a text file"""
     parser.add_argument('kmc_db', help='kmc database (with or without .kmc_pre/.kmc_suf suffix)')
     parser.add_argument('out_kmers', help='text file to which to write the kmers')
     parser.add_argument('--minOccs', '-ci', dest='min_occs', type=int, default=1, help='drop kmers with fewer than this many occurrences')
-    parser.add_argument('--maxOccs', '-cx', dest='max_occs', type=int, default=9999, help='drop kmers with more than this many occurrences')
+    parser.add_argument('--maxOccs', '-cx', dest='max_occs', type=int, default=tools.kmc.MAX_COUNT, help='drop kmers with more than this many occurrences')
 
     util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, kmc_dump_kmers, split_args=True)
@@ -1247,6 +1246,29 @@ def parser_kmc_dump_kmers(parser=argparse.ArgumentParser()):
 __commands__.append(('kmc_dump_kmers', parser_kmc_dump_kmers))
 
 # =========================
+
+def filter_by_kmers(kmc_db, in_reads, out_reads, db_min_occs, db_max_occs, reads_min_occs, reads_max_occs, threads):
+    """Filter sequences based on their kmer contents."""
+    tools.kmc.KmcTool().filter_reads(kmc_db=kmc_db, in_reads=in_reads, out_reads=out_reads, db_min_occs=db_min_occs, db_max_occs=db_max_occs,
+                                     reads_min_occs=reads_min_occs, reads_max_occs=reads_max_occs,
+                                     threads=threads)
+
+def parser_filter_by_kmers(parser=argparse.ArgumentParser()):
+    parser.add_argument('kmc_db', help='kmc database (with or without .kmc_pre/.kmc_suf suffix)')
+    parser.add_argument('in_reads', help='input reads, as fasta/fastq/bam')
+    parser.add_argument('out_reads', help='output reads')
+    parser.add_argument('--dbMinOccs', dest='db_min_occs', type=int, default=1, help='ignore datatbase kmers with count below this')
+    parser.add_argument('--dbMaxOccs', dest='db_max_occs', type=int, default=tools.kmc.MAX_COUNT, help='ignore datatbase kmers with count above this')
+    parser.add_argument('--readsMinOccs', dest='reads_min_occs', help='filter out reads with fewer than this many db kmers; if a float, interpreted as fraction of read length')
+    parser.add_argument('--readsMaxOccs', dest='reads_max_occs', help='filter out reads with more than this many db kmers; if a float, interpreted as fraction of read length')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, filter_by_kmers, split_args=True)
+    return parser
+
+__commands__.append(('filter_by_kmers', parser_filter_by_kmers))
+
+# =========================
+
 
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
