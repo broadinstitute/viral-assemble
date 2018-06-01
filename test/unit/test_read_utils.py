@@ -273,7 +273,7 @@ class TestKmc(TestCaseWithTmp):
             util.cmd.run_cmd('read_utils', 'build_kmer_db', [simple_fasta, kmc_db, '-k', 4])
             kmers_fasta = os.path.join(t_dir, 'kmers.txt')
             kmers_fasta_exp = os.path.join(util.file.get_test_input_path(self), 'simple.fasta.kmers.k4.txt')
-            util.cmd.run_cmd('read_utils', 'kmc_dump_kmers', [kmc_db, kmers_fasta])
+            util.cmd.run_cmd('read_utils', 'dump_kmers', [kmc_db, kmers_fasta])
             assert_equal_contents(self, kmers_fasta, kmers_fasta_exp)
 
     def test_read_filtering(self):

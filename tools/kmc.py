@@ -136,7 +136,7 @@ class KmcTool(tools.Tool):
         _in_reads = in_reads
         _out_reads = out_reads
         with util.file.tmp_dir(suffix='kmcfilt') as t_dir:
-            if in_reads.endswith('.fa') or in_reads.endswith('.fasta') or in_reads.endswith('.fa.gz') or in_ in ('.fa', '.fasta', '.fa.gz', '.fasta.gz'):
+            if in_reads_type in ('.fa', '.fasta'):
                 # kmc_tools filter currently requires fasta files to be in fasta-2line format
                 # https://github.com/refresh-bio/KMC/issues/57
                 _in_reads = os.path.join(t_dir, 'in_reads.fasta')
@@ -157,13 +157,19 @@ class KmcTool(tools.Tool):
             if in_reads_type == '.bam':
                 assert out_reads.endswith('.bam')
                 passed_read_names = os.path.join(t_dir, 'passed_read_names.txt')
-                with open(out_reads) as out_reads_f, open(passed_read_names, 'wt') as read_names:
-                    for line in out_reads_f:
-                        if line.startswith('>'):
-                            assert line.endswith('/1\n') or line.endswith('/2\n')
-                            read_names.write(line[1:-3]+'\n')
-
+                self._get_fasta_read_names(_out_reads, passed_read_names)
                 tools.picard.FilterSamReadsTool().execute(inBam=in_reads, exclude=False, readList=passed_read_names, outBam=out_reads)
+        # end: with util.file.tmp_dir(suffix='kmcfilt') as t_dir
+    # end: def filter_reads(self, kmc_db, in_reads, out_reads, db_min_occs=1, db_max_occs=MAX_COUNT, reads_min_occs=None, reads_max_occs=None, threads=None)
+
+    @staticmethod
+    def _get_fasta_read_names(in_fasta, out_read_names):
+        """Save the read names of reads in a .fasta file to a text file"""
+        with open(in_fasta) as in_fasta_f, open(out_read_names, 'wt') as out_read_names_f:
+            for line in in_fasta_f:
+                if line.startswith('>'):
+                    assert line.endswith('/1\n') or line.endswith('/2\n')
+                    out_read_names_f.write(line[1:-3]+'\n')
 
 # end: class KmcTool(tools.Tool)
 
