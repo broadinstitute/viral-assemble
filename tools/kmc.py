@@ -158,6 +158,7 @@ class KmcTool(tools.Tool):
                 assert out_reads.endswith('.bam')
                 passed_read_names = os.path.join(t_dir, 'passed_read_names.txt')
                 self._get_fasta_read_names(_out_reads, passed_read_names)
+                shutil.copyfile(passed_read_names, '/tmp/passed.txt')
                 tools.picard.FilterSamReadsTool().execute(inBam=in_reads, exclude=False, readList=passed_read_names, outBam=out_reads)
         # end: with util.file.tmp_dir(suffix='kmcfilt') as t_dir
     # end: def filter_reads(self, kmc_db, in_reads, out_reads, db_min_occs=1, db_max_occs=MAX_COUNT, reads_min_occs=None, reads_max_occs=None, threads=None)
@@ -166,10 +167,14 @@ class KmcTool(tools.Tool):
     def _get_fasta_read_names(in_fasta, out_read_names):
         """Save the read names of reads in a .fasta file to a text file"""
         with open(in_fasta) as in_fasta_f, open(out_read_names, 'wt') as out_read_names_f:
+            last_read_name = None
             for line in in_fasta_f:
                 if line.startswith('>'):
                     assert line.endswith('/1\n') or line.endswith('/2\n')
-                    out_read_names_f.write(line[1:-3]+'\n')
+                    read_name = line[1:-3]
+                    if read_name != last_read_name:
+                        out_read_names_f.write(read_name+'\n')
+                    last_read_name = read_name
 
 # end: class KmcTool(tools.Tool)
 
