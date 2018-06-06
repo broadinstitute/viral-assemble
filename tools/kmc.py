@@ -161,6 +161,12 @@ class KmcTool(tools.Tool):
         # end: with util.file.tmp_dir(suffix='kmcfilt') as t_dir
     # end: def filter_reads(self, kmc_db, in_reads, out_reads, db_min_occs=1, db_max_occs=MAX_COUNT, reads_min_occs=None, reads_max_occs=None, threads=None)
 
+    def kmers_binary_op(self, op, kmc_db1, kmc_db2, kmc_db_out):
+        """Perform a simple binary operation on two kmer sets"""
+        kmc_db1, kmc_db2, kmc_db_out = map(self._kmc_db_name, (kmc_db1, kmc_db2, kmc_db_out))
+        # db1_min_occs, db1_max_occs, db2_min_occs, db2_max_occs, db_out_min_occs, db_out_max_occs,
+        self.execute(['simple', kmc_db1, kmc_db2, op, kmc_db_out])
+
     @staticmethod
     def _get_fasta_read_names(in_fasta, out_read_names):
         """Save the read names of reads in a .fasta file to a text file"""

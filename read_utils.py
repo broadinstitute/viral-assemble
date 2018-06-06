@@ -1269,6 +1269,23 @@ __commands__.append(('filter_by_kmers', parser_filter_by_kmers))
 
 # =========================
 
+def kmers_binary_op(op, kmc_db1, kmc_db2, kmc_db_out):
+    """Perform a simple binary operation on kmer sets."""
+
+    tools.kmc.KmcTool().kmers_binary_op(op, kmc_db1, kmc_db2, kmc_db_out)
+
+def parser_kmers_binary_op(parser=argparse.ArgumentParser()):
+    parser.add_argument('op', choices=('intersect', 'union', 'kmers_subtract', 'counters_subtract'), help='binary operation to perform')
+    parser.add_argument('kmc_db1', help='first kmer set')
+    parser.add_argument('kmc_db2', help='second kmer set')
+    parser.add_argument('kmc_db_out', help='output kmer db')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, kmers_binary_op, split_args=True)
+    return parser
+
+__commands__.append(('kmers_binary_op', parser_kmers_binary_op))
+    
+# =========================
 
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
