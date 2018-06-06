@@ -129,8 +129,6 @@ class KmcTool(tools.Tool):
         if reads_min_occs is None: reads_min_occs = 0
         if reads_max_occs is None: reads_max_occs = MAX_COUNT
 
-        print('IN FILER_READS')
-
         threads = util.misc.sanitize_thread_count(threads)
         in_reads_type = util.file.uncompressed_file_type(in_reads)
         _in_reads = in_reads
