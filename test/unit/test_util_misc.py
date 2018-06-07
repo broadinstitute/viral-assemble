@@ -7,6 +7,7 @@ import unittest
 import subprocess
 import util.misc
 import util.file
+import pytest
 
 
 class TestRunAndPrint(unittest.TestCase):
@@ -208,4 +209,18 @@ class TestConfigIncludes(unittest.TestCase):
         self.assertEqual(cfg2["std_param_A_new"], 111)  # specified as std_param_A_old in cfg1.yaml
 
         self.assertEqual(util.misc.load_config(test_fn('empty.yaml')), {})
+
+
+def test_as_type():
+    as_type = util.misc.as_type
+    assert as_type('1', int) == 1
+    assert as_type('1', (int,)) == 1
+    assert as_type('1', (int, float)) == 1
+    assert as_type('1', (float, int)) == 1.0
+    assert as_type('1.2', (int, float)) == 1.2
+    assert as_type('1.2', (float, int)) == 1.2
+    with pytest.raises(TypeError):
+        as_type('1.2', int)
+    with pytest.raises(TypeError):
+        as_type('1.2', (int,))
 

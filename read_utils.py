@@ -12,6 +12,7 @@ import argparse
 import logging
 import math
 import os
+import os.path
 import tempfile
 import shutil
 import sys
@@ -31,7 +32,6 @@ import tools.mvicuna
 import tools.prinseq
 import tools.novoalign
 import tools.gatk
-import tools.kmc
 
 log = logging.getLogger(__name__)
 
@@ -1205,86 +1205,40 @@ def main_extract_tarball(*args, **kwargs):
     print(util.file.extract_tarball(*args, **kwargs))
 __commands__.append(('extract_tarball', parser_extract_tarball))
 
-
-# =========================
-
-def build_kmer_db(seq_files, kmer_size, min_occs, max_occs, counter_cap, kmc_db, mem_limit_gb=8, threads=None):
-    """Build KMC kmer database"""
-    tools.kmc.KmcTool().build_kmer_db(seq_files=seq_files, kmer_size=kmer_size, min_occs=min_occs, max_occs=max_occs, counter_cap=counter_cap,
-                                      kmc_db=kmc_db, mem_limit_gb=mem_limit_gb, threads=threads)
-
-def parser_build_kmer_db(parser=argparse.ArgumentParser()):
-    parser.add_argument('seq_files', nargs='+', help='Files from which to extract kmers (fasta/fastq/bam, fasta/fastq may be .gz or .bz2)')
-    parser.add_argument('kmc_db', help='kmc database (with or without .kmc_pre/.kmc_suf suffix)')
-    parser.add_argument('--kmerSize', '-k', dest='kmer_size', type=int, default=25, help='kmer size')
-    parser.add_argument('--minOccs', '-ci', dest='min_occs', type=int, default=1, help='drop kmers with fewer than this many occurrences')
-    parser.add_argument('--maxOccs', '-cx', dest='max_occs', type=int, default=tools.kmc.MAX_COUNT, help='drop kmers with more than this many occurrences')
-    parser.add_argument('--counterCap', '-cs', dest='counter_cap', type=int, default=255, help='cap kmer counts at this value')
-    parser.add_argument('--memLimitGb', dest='mem_limit_gb', default=8, type=int, help='Max memory to use, in GB')
-    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
-    util.cmd.attach_main(parser, build_kmer_db, split_args=True)
-    return parser
-
-__commands__.append(('build_kmer_db', parser_build_kmer_db))
-
-# =========================
-
-def dump_kmers(kmc_db, out_kmers, min_occs=1, max_occs=999999, threads=None):
-    """Dump kmers from kmc database to a text file"""
-    tools.kmc.KmcTool().dump_kmers(kmc_db=kmc_db, out_kmers=out_kmers, min_occs=min_occs, max_occs=max_occs, threads=threads)
-
-def parser_dump_kmers(parser=argparse.ArgumentParser()):
-    parser.add_argument('kmc_db', help='kmc database (with or without .kmc_pre/.kmc_suf suffix)')
-    parser.add_argument('out_kmers', help='text file to which to write the kmers')
-    parser.add_argument('--minOccs', '-ci', dest='min_occs', type=int, default=1, help='drop kmers with fewer than this many occurrences')
-    parser.add_argument('--maxOccs', '-cx', dest='max_occs', type=int, default=tools.kmc.MAX_COUNT, help='drop kmers with more than this many occurrences')
-
-    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
-    util.cmd.attach_main(parser, dump_kmers, split_args=True)
-    return parser
-
-__commands__.append(('dump_kmers', parser_dump_kmers))
-
-# =========================
-
-def filter_by_kmers(kmc_db, in_reads, out_reads, db_min_occs, db_max_occs, reads_min_occs, reads_max_occs, threads):
-    """Filter sequences based on their kmer contents."""
-    tools.kmc.KmcTool().filter_reads(kmc_db=kmc_db, in_reads=in_reads, out_reads=out_reads, db_min_occs=db_min_occs, db_max_occs=db_max_occs,
-                                     reads_min_occs=reads_min_occs, reads_max_occs=reads_max_occs,
-                                     threads=threads)
-
-def parser_filter_by_kmers(parser=argparse.ArgumentParser()):
-    parser.add_argument('kmc_db', help='kmc database (with or without .kmc_pre/.kmc_suf suffix)')
-    parser.add_argument('in_reads', help='input reads, as fasta/fastq/bam')
-    parser.add_argument('out_reads', help='output reads')
-    parser.add_argument('--dbMinOccs', dest='db_min_occs', type=int, default=1, help='ignore datatbase kmers with count below this')
-    parser.add_argument('--dbMaxOccs', dest='db_max_occs', type=int, default=tools.kmc.MAX_COUNT, help='ignore datatbase kmers with count above this')
-    parser.add_argument('--readsMinOccs', dest='reads_min_occs', help='filter out reads with fewer than this many db kmers; if a float, interpreted as fraction of read length')
-    parser.add_argument('--readsMaxOccs', dest='reads_max_occs', help='filter out reads with more than this many db kmers; if a float, interpreted as fraction of read length')
-    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
-    util.cmd.attach_main(parser, filter_by_kmers, split_args=True)
-    return parser
-
-__commands__.append(('filter_by_kmers', parser_filter_by_kmers))
-
-# =========================
-
-def kmers_binary_op(op, kmc_db1, kmc_db2, kmc_db_out):
-    """Perform a simple binary operation on kmer sets."""
-
-    tools.kmc.KmcTool().kmers_binary_op(op, kmc_db1, kmc_db2, kmc_db_out)
-
-def parser_kmers_binary_op(parser=argparse.ArgumentParser()):
-    parser.add_argument('op', choices=('intersect', 'union', 'kmers_subtract', 'counters_subtract'), help='binary operation to perform')
-    parser.add_argument('kmc_db1', help='first kmer set')
-    parser.add_argument('kmc_db2', help='second kmer set')
-    parser.add_argument('kmc_db_out', help='output kmer db')
-    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
-    util.cmd.attach_main(parser, kmers_binary_op, split_args=True)
-    return parser
-
-__commands__.append(('kmers_binary_op', parser_kmers_binary_op))
     
+# =========================
+
+def fasta_read_names(in_fasta, out_read_names):
+    """Save the read names of reads in a .fasta file to a text file"""
+    with util.file.open_or_gzopen(in_fasta) as in_fasta_f, open(out_read_names, 'wt') as out_read_names_f:
+        last_read_name = None
+        for line in in_fasta_f:
+            if line.startswith('>'):
+                if line.endswith('/1\n') or line.endswith('/2\n'):
+                    read_name = line[1:-3]
+                if read_name != last_read_name:
+                    out_read_names_f.write(read_name+'\n')
+                last_read_name = read_name
+
+
+def read_names(in_reads, out_read_names):
+    """Extract read names from a sequence file"""
+    _in_reads = in_reads
+    with util.file.tmp_dir(suffix='readnames') as t_dir:
+        if in_seq.endswith('.bam'):
+            _in_reads = os.path.join(t_dir, 'reads.fasta')
+            tools.samtools.SamtoolsTool.bam2fa(in_reads, _in_reads)
+        fasta_read_names(_in_reads, out_read_names)
+
+def parser_read_names(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_reads', help='the input reads ([compressed] fasta or bam)')
+    parser.add_argument('out_read_names', help='the read names')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, read_names, split_args=True)
+    return parser
+
+__commands__.append(('read_names', parser_read_names))
+
 # =========================
 
 def full_parser():

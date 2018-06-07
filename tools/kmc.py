@@ -10,6 +10,7 @@ import subprocess
 import shutil
 import shlex
 
+import read_utils
 import tools
 import tools.samtools
 import tools.picard
@@ -23,7 +24,9 @@ TOOL_VERSION = '3.1.0'
 
 log = logging.getLogger(__name__)
 
-MAX_COUNT=999999  # an int larger than any realistic kmer count or read length
+
+DEFAULT_KMER_SIZE=27
+DEFAULT_COUNTER_CAP=255         # default for "cap counter values at" params
 
 class KmcTool(tools.Tool):
     '''Tool wrapper for KMC kmer counter'''
@@ -52,12 +55,16 @@ class KmcTool(tools.Tool):
         elif file_type == '.bam': return 'bam'
         else: raise RuntimeError('Unknown seq file format: {}'.format(file_type))
 
-    def build_kmer_db(self, seq_files, kmer_size, min_occs, max_occs, counter_cap, kmc_db, mem_limit_gb=8, threads=None, kmc_opts=''):
+    def build_kmer_db(self, seq_files, kmc_db, kmer_size=DEFAULT_KMER_SIZE, min_occs=None, max_occs=None, 
+                      counter_cap=DEFAULT_COUNTER_CAP, mem_limit_gb=8, threads=None, kmc_opts=''):
         """Build a database of kmers occurring in the given sequence files.
 
         Inputs:
           seq_files: filename(s) of files from which to gather kmers.  Files can be fasta, fastq or bam; fasta and fastq
              may be compressed with gzip or bzip2.
+
+        Outputs:
+          kmc_db: kmc database path, with or without the .kmc_pre/.kmc_suf extension.
 
         Params:
           kmer_size: kmer size
@@ -66,10 +73,10 @@ class KmcTool(tools.Tool):
           counter_cap: when writing kmer counts to the database, cap the values at this number
           kmc_opts: any additional kmc flags
 
-        Outputs:
-          kmc_db: kmc database path, with or without the .kmc_pre/.kmc_suf extension.
           
         """
+        if min_occs is None: min_occs = 1
+        if max_occs is None: max_occs = util.misc.MAX_LONG
         seq_files = util.misc.make_seq(seq_files)
         kmc_db = self._kmc_db_name(kmc_db)
         threads = util.misc.sanitize_thread_count(threads)
@@ -99,13 +106,16 @@ class KmcTool(tools.Tool):
         subprocess.check_call(tool_cmd)
 
 
-    def dump_kmers(self, kmc_db, out_kmers, min_occs=1, max_occs=MAX_COUNT, threads=None):
+    def dump_kmers(self, kmc_db, out_kmers, min_occs=None, max_occs=None, threads=None):
         """Dump the kmers from the database to a text file"""
+        if min_occs is None: min_occs = 1
+        if max_occs is None: max_occs = util.misc.MAX_LONG
         self.execute('transform {} -ci{} -cx{} dump -s {}'.format(self._kmc_db_name(kmc_db), min_occs, max_occs, out_kmers).split(), threads=threads)
         assert os.path.isfile(out_kmers)
 
 
-    def filter_reads(self, kmc_db, in_reads, out_reads, db_min_occs=1, db_max_occs=MAX_COUNT, reads_min_occs=None, reads_max_occs=None, threads=None):
+    def filter_reads(self, kmc_db, in_reads, out_reads, db_min_occs=None, db_max_occs=None, 
+                     read_min_occs=None, read_max_occs=None, threads=None):
         """Filter reads based on their kmer contents.
 
         Note that "occurrence of a kmer" means "occurrence of the kmer or its reverse complement".
@@ -121,15 +131,27 @@ class KmcTool(tools.Tool):
         Params:
           db_min_occs: only consider database kmers with at least this count
           db_max_occs: only consider database kmers with at most this count
-          reads_min_occs: only keep reads with at least this many occurrences of kmers from database.  If `as_perc` is True, interpreted as percent
+          read_min_occs: only keep reads with at least this many occurrences of kmers from database.  If `as_perc` is True, interpreted as percent
              of read length
-          reads_max_occs: only keep reads with no more than this many occurrence of kmers from the database
+          read_max_occs: only keep reads with no more than this many occurrence of kmers from the database
         """
 
-        if reads_min_occs is None: reads_min_occs = 0
-        if reads_max_occs is None: reads_max_occs = MAX_COUNT
+        if db_min_occs is None: db_min_occs=1
+        if db_max_occs is None: db_max_occs=util.misc.MAX_LONG
+
+        if read_min_occs is None and read_max_occs is None:
+            read_min_occs, read_max_occs = 1, util.misc.MAX_LONG
+        elif read_min_occs is None and read_max_occs is not None:
+            read_min_occs = 0.0 if isinstance(read_max_occs, float) else 1
+        elif read_max_occs is None and read_min_occs is not None:
+            read_max_occs = 1.0 if isinstance(read_min_occs, float) else util.misc.MAX_LONG
+
+        assert type(read_min_occs) == type(read_max_occs), 'read_min_occs and read_max_occs must be specified the same way (as kmer count or fraction of read length)'
+        assert read_min_occs <= read_max_occs, 'vals are {} {}'.format(read_min_occs, read_max_occs)
+        assert not isinstance(read_min_occs, float) or 0.0 <= read_min_occs <= read_max_occs <= 1.0
 
         threads = util.misc.sanitize_thread_count(threads)
+
         in_reads_type = util.file.uncompressed_file_type(in_reads)
         _in_reads = in_reads
         _out_reads = out_reads
@@ -150,35 +172,22 @@ class KmcTool(tools.Tool):
             in_reads_fmt = 'q' if in_reads_type in ('.fq', '.fastq') else 'a'
 
             self.execute('filter {} -ci{} -cx{} {} -f{} -ci{} -cx{} {}'.format(self._kmc_db_name(kmc_db), db_min_occs, db_max_occs, _in_reads, in_reads_fmt, 
-                                                                               reads_min_occs, reads_max_occs, _out_reads).split(), threads=threads)
+                                                                               read_min_occs, read_max_occs, _out_reads).split(), threads=threads)
 
             if in_reads_type == '.bam':
                 assert out_reads.endswith('.bam')
                 passed_read_names = os.path.join(t_dir, 'passed_read_names.txt')
-                self._get_fasta_read_names(_out_reads, passed_read_names)
+                read_utils.fasta_read_names(_out_reads, passed_read_names)
                 shutil.copyfile(passed_read_names, '/tmp/passed.txt')
                 tools.picard.FilterSamReadsTool().execute(inBam=in_reads, exclude=False, readList=passed_read_names, outBam=out_reads)
         # end: with util.file.tmp_dir(suffix='kmcfilt') as t_dir
-    # end: def filter_reads(self, kmc_db, in_reads, out_reads, db_min_occs=1, db_max_occs=MAX_COUNT, reads_min_occs=None, reads_max_occs=None, threads=None)
+    # end: def filter_reads(self, kmc_db, in_reads, out_reads, db_min_occs=1, db_max_occs=util.misc.MAX_LONG, read_min_occs=None, read_max_occs=None, threads=None)
 
     def kmers_binary_op(self, op, kmc_db1, kmc_db2, kmc_db_out):
         """Perform a simple binary operation on two kmer sets"""
         kmc_db1, kmc_db2, kmc_db_out = map(self._kmc_db_name, (kmc_db1, kmc_db2, kmc_db_out))
         # db1_min_occs, db1_max_occs, db2_min_occs, db2_max_occs, db_out_min_occs, db_out_max_occs,
         self.execute(['simple', kmc_db1, kmc_db2, op, kmc_db_out])
-
-    @staticmethod
-    def _get_fasta_read_names(in_fasta, out_read_names):
-        """Save the read names of reads in a .fasta file to a text file"""
-        with open(in_fasta) as in_fasta_f, open(out_read_names, 'wt') as out_read_names_f:
-            last_read_name = None
-            for line in in_fasta_f:
-                if line.startswith('>'):
-                    assert line.endswith('/1\n') or line.endswith('/2\n')
-                    read_name = line[1:-3]
-                    if read_name != last_read_name:
-                        out_read_names_f.write(read_name+'\n')
-                    last_read_name = read_name
 
 # end: class KmcTool(tools.Tool)
 

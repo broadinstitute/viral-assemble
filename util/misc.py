@@ -19,6 +19,8 @@ log = logging.getLogger(__name__)
 
 __author__ = "dpark@broadinstitute.org"
 
+MAX_LONG=(2 ** 63)-1
+
 import time
 @contextlib.contextmanager
 def timer(prefix):
@@ -594,3 +596,16 @@ def load_config(cfg, include_directive='include', std_includes=(), param_renamin
             log.warning('Config param {} has been renamed to {}; old name accepted for now'.format(old_param, new_param))
 
     return result
+
+def as_type(val, types):
+    """Try converting `val`to each of `types` in turn, returning the first one that succeeds."""
+    errs = []
+    for type in make_seq(types):
+        try:
+            return type(val)
+        except Exception as e:
+            errs.append(e)
+            pass
+    raise TypeError('Could not convert {} to any of {}: {}'.format(val, types, errs))
+
+

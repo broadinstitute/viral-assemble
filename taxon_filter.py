@@ -18,6 +18,7 @@ import tempfile
 import shutil
 import concurrent.futures
 import contextlib
+import functools
 
 from Bio import SeqIO
 import pysam
@@ -32,6 +33,7 @@ import tools.prinseq
 import tools.bmtagger
 import tools.picard
 import tools.samtools
+import tools.kmc
 from util.file import mkstempfname
 import read_utils
 
@@ -826,6 +828,144 @@ __commands__.append(('bmtagger_build_db', parser_bmtagger_build_db))
 
 # ========================
 
+def build_kmer_db(seq_files, kmc_db, kmer_size=tools.kmc.DEFAULT_KMER_SIZE, min_occs=None, max_occs=None,
+                  counter_cap=tools.kmc.DEFAULT_COUNTER_CAP, mem_limit_gb=8, threads=None):
+    """Build KMC kmer database"""
+    tools.kmc.KmcTool().build_kmer_db(seq_files=seq_files, kmer_size=kmer_size, min_occs=min_occs, max_occs=max_occs, counter_cap=counter_cap,
+                                      kmc_db=kmc_db, mem_limit_gb=mem_limit_gb, threads=threads)
+
+def parser_build_kmer_db(parser=argparse.ArgumentParser()):
+    parser.add_argument('seq_files', nargs='+', help='Files from which to extract kmers (fasta/fastq/bam, fasta/fastq may be .gz or .bz2)')
+    parser.add_argument('kmc_db', help='kmc database (with or without .kmc_pre/.kmc_suf suffix)')
+    parser.add_argument('--kmerSize', '-k', dest='kmer_size', type=int, help='kmer size')
+    parser.add_argument('--minOccs', '-ci', dest='min_occs', type=int, help='drop kmers with fewer than this many occurrences')
+    parser.add_argument('--maxOccs', '-cx', dest='max_occs', type=int, help='drop kmers with more than this many occurrences')
+    parser.add_argument('--counterCap', '-cs', dest='counter_cap', type=int, default=tools.kmc.DEFAULT_COUNTER_CAP, help='cap kmer counts at this value')
+    parser.add_argument('--memLimitGb', dest='mem_limit_gb', default=8, type=int, help='Max memory to use, in GB')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, build_kmer_db, split_args=True)
+    return parser
+
+__commands__.append(('build_kmer_db', parser_build_kmer_db))
+
+# =========================
+
+def dump_kmers(kmc_db, out_kmers, min_occs=None, max_occs=None, threads=None):
+    """Dump kmers from kmc database to a text file"""
+    tools.kmc.KmcTool().dump_kmers(kmc_db=kmc_db, out_kmers=out_kmers, min_occs=min_occs, max_occs=max_occs, threads=threads)
+
+def parser_dump_kmers(parser=argparse.ArgumentParser()):
+    parser.add_argument('kmc_db', help='kmc database (with or without .kmc_pre/.kmc_suf suffix)')
+    parser.add_argument('out_kmers', help='text file to which to write the kmers')
+    parser.add_argument('--minOccs', '-ci', dest='min_occs', type=int, help='drop kmers with fewer than this many occurrences')
+    parser.add_argument('--maxOccs', '-cx', dest='max_occs', type=int, help='drop kmers with more than this many occurrences')
+
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, dump_kmers, split_args=True)
+    return parser
+
+__commands__.append(('dump_kmers', parser_dump_kmers))
+
+# =========================
+
+def filter_by_kmers(kmc_db, in_reads, out_reads, db_min_occs=None, db_max_occs=None, 
+                    read_min_occs=None, read_max_occs=None, threads=None):
+    """Filter sequences based on their kmer contents."""
+    tools.kmc.KmcTool().filter_reads(kmc_db=kmc_db, in_reads=in_reads, out_reads=out_reads, db_min_occs=db_min_occs, db_max_occs=db_max_occs,
+                                     read_min_occs=read_min_occs, read_max_occs=read_max_occs,
+                                     threads=threads)
+
+def parser_filter_by_kmers(parser=argparse.ArgumentParser()):
+    parser.add_argument('kmc_db', help='kmc database (with or without .kmc_pre/.kmc_suf suffix)')
+    parser.add_argument('in_reads', help='input reads, as fasta/fastq/bam')
+    parser.add_argument('out_reads', help='output reads')
+    parser.add_argument('--dbMinOccs', dest='db_min_occs', type=int, help='ignore datatbase kmers with count below this')
+    parser.add_argument('--dbMaxOccs', dest='db_max_occs', type=int, help='ignore datatbase kmers with count above this')
+    int_or_float = functools.partial(util.misc.as_type, **dict(types=(int, float)))
+    parser.add_argument('--readMinOccs', dest='read_min_occs', type=int_or_float,
+                        help='filter out reads with fewer than this many db kmers; if a float, interpreted as fraction of read length')
+    parser.add_argument('--readMaxOccs', dest='read_max_occs', type=int_or_float,
+                        help='filter out reads with more than this many db kmers; if a float, interpreted as fraction of read length')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, filter_by_kmers, split_args=True)
+    return parser
+
+__commands__.append(('filter_by_kmers', parser_filter_by_kmers))
+
+# =========================
+
+def kmers_binary_op(op, kmc_db1, kmc_db2, kmc_db_out):
+    """Perform a simple binary operation on kmer sets."""
+
+    tools.kmc.KmcTool().kmers_binary_op(op, kmc_db1, kmc_db2, kmc_db_out)
+
+def parser_kmers_binary_op(parser=argparse.ArgumentParser()):
+    parser.add_argument('op', choices=('intersect', 'union', 'kmers_subtract', 'counters_subtract'), help='binary operation to perform')
+    parser.add_argument('kmc_db1', help='first kmer set')
+    parser.add_argument('kmc_db2', help='second kmer set')
+    parser.add_argument('kmc_db_out', help='output kmer db')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, kmers_binary_op, split_args=True)
+    return parser
+
+__commands__.append(('kmers_binary_op', parser_kmers_binary_op))
+
+
+# ========================
+
+def undeplete_reads_in_gaps(taxon_fasta, raw_bam, cleaned_bam, undepleted_bam, kmer_size=tools.kmc.DEFAULT_KMER_SIZE, cleaned_min_occs=5, raw_min_occs=.3):
+    """Try to improve coverage of genome regions not well-covered by cleaned reads, by looking for depleted reads that might align to these regions.
+    In other words, we try to find possibly relevant reads that were incorrectly identified as human or contaminant and depleted -- but only
+    in genome regions which the default depletion process has left with low coverage which might cause gaps in assembly.
+    """
+
+    # rather than kmers, could use alignment, e.g. align cleaned reads tothe taxon seqs
+    # can also start with kmers then try aligning reads that have some relevant kmers.   could use lastal for that?
+    # can find less-conserved bases in taxon seqs then generate expected mutations and add kmers from them.
+
+
+    # rename undeplete to better name (since undepleted can mean never depleted)
+    # check how counter_cap interacts with -cx
+    # check whether read limits should be put on output params in read filtering
+
+    with util.file.tmp_dir(suffix='undeplete') as t_dir:
+
+        
+        
+        # Gather kmers in the taxon
+        taxon_kmers_db = os.path.join(t_dir, 'taxon_kmers')
+        read_utils.build_kmer_db(seq_files=taxon_fasta, kmc_db=taxon_kmers_db, kmer_size=kmer_size)
+        
+        # Gather kmers well-covered by cleaned reads
+        cleaned_kmers_db = os.path.join(t_dir, 'cleaned_kmers')
+        read_utils.build_kmer_db(seq_files=cleaned_bam, kmc_db=cleaned_kmers_db, kmer_size=kmer_size, min_occs=cleaned_min_occs)
+
+        # maybe need to dedup cleaned reads first?
+
+        # Compute kmers in the taxon that are not well-covered by cleaned reads
+        taxon_minus_cleaned_db = os.path.join(t_dir, 'taxon_minus_cleaned')
+        read_utils.kmers_binary_op(op='kmers_subtract', kmc_db1=taxon_kmers_db, kmc_db2=cleaned_kmers_db, kmc_db_out=taxon_minus_cleaned_db)
+
+        # Find raw reads that contain taxon kmers not well-covered by cleaned reads
+        read_utils.filter_by_kmers(kmc_db=taxon_minus_cleaned_db, in_reads=raw_bam, out_reads=undepleted_bam, read_min_occs=raw_min_occs)
+
+def parser_undeplete_reads_in_gaps(parser=argparse.ArgumentParser()):
+    parser.add_argument('taxon_fasta', help='A fasta file of sequences from the taxon.')
+    parser.add_argument('raw_bam', help='The raw reads')
+    parser.add_argument('cleaned_bam', help='The cleaned reads')
+    parser.add_argument('undepleted_bam', help='The undepleted reads')
+    parser.add_argument('--kmerSize', '-k', dest='kmer_size', type=int, default=tools.kmc.DEFAULT_KMER_SIZE, help='kmer size to use for finding taxon kmers')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, undeplete_reads_in_gaps, split_args=True)
+    return parser
+
+__commands__.append(('undeplete_reads_in_gaps', parser_undeplete_reads_in_gaps))
+
+    
+    
+    
+
+# ========================
 
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
