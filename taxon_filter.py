@@ -913,7 +913,7 @@ __commands__.append(('kmers_binary_op', parser_kmers_binary_op))
 
 # ========================
 
-def undeplete_reads_in_gaps(taxon_fasta, raw_bam, cleaned_bam, undepleted_bam, kmer_size=tools.kmc.DEFAULT_KMER_SIZE, cleaned_min_occs=5, raw_min_occs=.3):
+def undeplete_reads_in_gaps(taxon_fasta, raw_bam, cleaned_bam, undepleted_bam, kmer_size=tools.kmc.DEFAULT_KMER_SIZE, cleaned_min_occs=5, raw_min_occs=.1):
     """Try to improve coverage of genome regions not well-covered by cleaned reads, by looking for depleted reads that might align to these regions.
     In other words, we try to find possibly relevant reads that were incorrectly identified as human or contaminant and depleted -- but only
     in genome regions which the default depletion process has left with low coverage which might cause gaps in assembly.
@@ -934,20 +934,26 @@ def undeplete_reads_in_gaps(taxon_fasta, raw_bam, cleaned_bam, undepleted_bam, k
         
         # Gather kmers in the taxon
         taxon_kmers_db = os.path.join(t_dir, 'taxon_kmers')
-        read_utils.build_kmer_db(seq_files=taxon_fasta, kmc_db=taxon_kmers_db, kmer_size=kmer_size)
+        build_kmer_db(seq_files=taxon_fasta, kmc_db=taxon_kmers_db, kmer_size=kmer_size)
         
         # Gather kmers well-covered by cleaned reads
-        cleaned_kmers_db = os.path.join(t_dir, 'cleaned_kmers')
-        read_utils.build_kmer_db(seq_files=cleaned_bam, kmc_db=cleaned_kmers_db, kmer_size=kmer_size, min_occs=cleaned_min_occs)
+        cleaned_kmers_db = os.path.join(t_dir, 'cleaned_kmers')   # try trim and rmdup first?
+        build_kmer_db(seq_files=cleaned_bam, kmc_db=cleaned_kmers_db, kmer_size=kmer_size, min_occs=cleaned_min_occs)
 
         # maybe need to dedup cleaned reads first?
 
         # Compute kmers in the taxon that are not well-covered by cleaned reads
         taxon_minus_cleaned_db = os.path.join(t_dir, 'taxon_minus_cleaned')
-        read_utils.kmers_binary_op(op='kmers_subtract', kmc_db1=taxon_kmers_db, kmc_db2=cleaned_kmers_db, kmc_db_out=taxon_minus_cleaned_db)
+        kmers_binary_op(op='kmers_subtract', kmc_db1=taxon_kmers_db, kmc_db2=cleaned_kmers_db, kmc_db_out=taxon_minus_cleaned_db)
 
         # Find raw reads that contain taxon kmers not well-covered by cleaned reads
-        read_utils.filter_by_kmers(kmc_db=taxon_minus_cleaned_db, in_reads=raw_bam, out_reads=undepleted_bam, read_min_occs=raw_min_occs)
+        undepleted_withdups_bam = os.path.join(t_dir, 'undepleted_withdups.bam')
+        filter_by_kmers(kmc_db=taxon_minus_cleaned_db, in_reads=raw_bam, out_reads=undepleted_withdups_bam, read_min_occs=raw_min_occs)
+
+        # Remove reads that are in cleaned reads
+        cleaned_reads_names = os.path.join(t_dir, 'cleaned_reads.read_names.txt')
+        read_utils.read_names(cleaned_bam, cleaned_reads_names)
+        util.cmd.run_cmd(read_utils, 'filter_bam', ['--exclude', undepleted_withdups_bam, cleaned_reads_names, undepleted_bam])
 
 def parser_undeplete_reads_in_gaps(parser=argparse.ArgumentParser()):
     parser.add_argument('taxon_fasta', help='A fasta file of sequences from the taxon.')
