@@ -76,7 +76,7 @@ class KmcTool(tools.Tool):
           
         """
         if min_occs is None: min_occs = 1
-        if max_occs is None: max_occs = util.misc.MAX_LONG
+        if max_occs is None: max_occs = util.misc.MAX_INT32
         seq_files = util.misc.make_seq(seq_files)
         kmc_db = self._kmc_db_name(kmc_db)
         threads = util.misc.sanitize_thread_count(threads)
@@ -109,7 +109,7 @@ class KmcTool(tools.Tool):
     def dump_kmers(self, kmc_db, out_kmers, min_occs=None, max_occs=None, threads=None):
         """Dump the kmers from the database to a text file"""
         if min_occs is None: min_occs = 1
-        if max_occs is None: max_occs = util.misc.MAX_LONG
+        if max_occs is None: max_occs = util.misc.MAX_INT32
         self.execute('transform {} -ci{} -cx{} dump -s {}'.format(self._kmc_db_name(kmc_db), min_occs, max_occs, out_kmers).split(), threads=threads)
         assert os.path.isfile(out_kmers)
 
@@ -137,14 +137,18 @@ class KmcTool(tools.Tool):
         """
 
         if db_min_occs is None: db_min_occs=1
-        if db_max_occs is None: db_max_occs=util.misc.MAX_LONG
+        if db_max_occs is None: db_max_occs=util.misc.MAX_INT32
+
+        print('BEF', type(read_min_occs), type(read_max_occs), read_min_occs, read_max_occs)
 
         if read_min_occs is None and read_max_occs is None:
-            read_min_occs, read_max_occs = 1, util.misc.MAX_LONG
+            read_min_occs, read_max_occs = 1, util.misc.MAX_INT32
         elif read_min_occs is None and read_max_occs is not None:
             read_min_occs = 0.0 if isinstance(read_max_occs, float) else 1
         elif read_max_occs is None and read_min_occs is not None:
-            read_max_occs = 1.0 if isinstance(read_min_occs, float) else util.misc.MAX_LONG
+            read_max_occs = 1.0 if isinstance(read_min_occs, float) else util.misc.MAX_INT32
+
+        print('AFT', type(read_min_occs), type(read_max_occs), read_min_occs, read_max_occs)
 
         assert type(read_min_occs) == type(read_max_occs), 'read_min_occs and read_max_occs must be specified the same way (as kmer count or fraction of read length)'
         assert read_min_occs <= read_max_occs, 'vals are {} {}'.format(read_min_occs, read_max_occs)
@@ -181,7 +185,7 @@ class KmcTool(tools.Tool):
                 shutil.copyfile(passed_read_names, '/tmp/passed.txt')
                 tools.picard.FilterSamReadsTool().execute(inBam=in_reads, exclude=False, readList=passed_read_names, outBam=out_reads)
         # end: with util.file.tmp_dir(suffix='kmcfilt') as t_dir
-    # end: def filter_reads(self, kmc_db, in_reads, out_reads, db_min_occs=1, db_max_occs=util.misc.MAX_LONG, read_min_occs=None, read_max_occs=None, threads=None)
+    # end: def filter_reads(self, kmc_db, in_reads, out_reads, db_min_occs=1, db_max_occs=util.misc.MAX_INT32, read_min_occs=None, read_max_occs=None, threads=None)
 
     def kmers_binary_op(self, op, kmc_db1, kmc_db2, kmc_db_out):
         """Perform a simple binary operation on two kmer sets"""

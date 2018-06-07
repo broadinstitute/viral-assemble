@@ -474,29 +474,3 @@ class TestDepleteBlastnBam(TestCaseWithTmp):
         )
         self.assertEqual(0, tools.samtools.SamtoolsTool().count(out_bam))
 
-
-class TestKmc(TestCaseWithTmp):
-
-    def setUp(self):
-        super(TestKmc, self).setUp()
-
-    def test_simple_kmer_extraction(self):
-        with util.file.tmp_dir(suffix='kmctest') as t_dir:
-            simple_fasta = os.path.join(util.file.get_test_input_path(self), 'simple.fasta')
-            kmc_db = os.path.join(t_dir, 'kmcdb')
-            util.cmd.run_cmd('taxon_filter', 'build_kmer_db', [simple_fasta, kmc_db, '-k', 4])
-            kmers_fasta = os.path.join(t_dir, 'kmers.txt')
-            kmers_fasta_exp = os.path.join(util.file.get_test_input_path(self), 'simple.fasta.kmers.k4.txt')
-            util.cmd.run_cmd('taxon_filter', 'dump_kmers', [kmc_db, kmers_fasta])
-            assert_equal_contents(self, kmers_fasta, kmers_fasta_exp)
-
-    def test_read_filtering(self):
-        with util.file.tmp_dir(suffix='kmctest') as t_dir:
-            simple_fasta = os.path.join(util.file.get_test_input_path(self), 'simple.fasta')
-            kmc_db = os.path.join(t_dir, 'kmcdb')
-            util.cmd.run_cmd('taxon_filter', 'build_kmer_db', [simple_fasta, kmc_db, '-k', 4])
-
-
-            filt_fasta = os.path.join(util.file.get_test_input_path(self), 'filt.fasta')
-            filt_fasta_out = os.path.join(t_dir, 'filtered.fasta')
-            util.cmd.run_cmd('taxon_filter', 'filter_by_kmers', [kmc_db, filt_fasta, filt_fasta_out, '--readMinOccs', 1])

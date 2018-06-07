@@ -12,6 +12,7 @@ import multiprocessing
 import sys
 import copy
 import yaml, json
+import time
 
 import util.file
 
@@ -19,9 +20,8 @@ log = logging.getLogger(__name__)
 
 __author__ = "dpark@broadinstitute.org"
 
-MAX_LONG=(2 ** 63)-1
+MAX_INT32 = (2 ** 31)-1
 
-import time
 @contextlib.contextmanager
 def timer(prefix):
     start = time.time()
