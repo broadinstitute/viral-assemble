@@ -236,6 +236,10 @@ kraken_execution: single
 # Random seed, for non-deterministic steps.  0 means use current time.
 random_seed: 0
 
+# Outbreak-related analyses
+outbreak:
+  kmer_size: 51
+
 #    |----------------------- Data storage locations ---------------------------
 
 # The parent directory containing data sub-directories.
@@ -259,6 +263,7 @@ subdirs:
   interhost:      "03_interhost"
   intrahost:      "04_intrahost"
   annot:          "05_genbank"
+  outbreak:       "06_outbreak"
 
 # The location to use for temp file storage. Should be large and fast and
 # shared between jobs.

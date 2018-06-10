@@ -25,6 +25,8 @@ include: os.path.join(pipesDir, 'interhost.rules')
 include: os.path.join(pipesDir, 'ncbi.rules')
 include: os.path.join(pipesDir, 'intrahost.rules')
 include: os.path.join(pipesDir, 'reports.rules')
+include: os.path.join(pipesDir, 'outbreak.rules')
+
 
 samples_assembly = list(read_samples_file(config["samples_assembly"]))
 samples_metagenomics = list(read_samples_file(config["samples_metagenomics"]))
