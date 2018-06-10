@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 
 def build_kmer_db(seq_files, kmc_db, kmer_size=tools.kmc.DEFAULT_KMER_SIZE, min_occs=None, max_occs=None,
                   counter_cap=tools.kmc.DEFAULT_COUNTER_CAP, mem_limit_gb=8, threads=None):
-    """Build KMC kmer database"""
+    """Build a database of kmers occurring in given sequences."""
     tools.kmc.KmcTool().build_kmer_db(seq_files=seq_files, kmer_size=kmer_size, min_occs=min_occs, max_occs=max_occs, counter_cap=counter_cap,
                                       kmc_db=kmc_db, mem_limit_gb=mem_limit_gb, threads=threads)
 
