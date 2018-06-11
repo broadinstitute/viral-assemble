@@ -36,13 +36,6 @@ def get_all_lanes(runfile):
         '.'.join((lane['flowcell'], lane['lane']))
         for lane in iterate_lanes(runfile))))
 
-def get_run_id(well):
-    # this is actually used by hs_deplete.rules also!
-    run_id = well['sample']
-    if well.get('library_id_per_sample'):
-        run_id += '.l' + well['library_id_per_sample']
-    return run_id
-
 def get_bam_path(lane, well):
     return os.path.join(config['tmp_dir'], config['subdirs']['demux'],
         'bams_per_lane', lane['flowcell'] + '.' + lane['lane'],

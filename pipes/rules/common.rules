@@ -141,3 +141,10 @@ def objectify_remote(file_address, *args, **kwargs):
             file_list[index] = remote_provider.remote(uri, *args, **kwargs)
 
     return file_list
+
+def get_run_id(well):
+    # used by demix.rules and hs_deplete.rules
+    run_id = well['sample']
+    if well.get('library_id_per_sample'):
+        run_id += '.l' + well['library_id_per_sample']
+    return run_id
