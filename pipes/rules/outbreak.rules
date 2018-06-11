@@ -48,3 +48,16 @@ rule all_asm_kmers:
         print('input=', input)
         print(config["samples_assembly"])
         print(list(read_samples_file(config["samples_assembly"])))
+
+rule all_raw_bams:
+    '''Get the raw reads bam for each sample'''
+    input:
+        # create final assemblies for all samples
+        expand("{data_dir}/{subdir}/{sample}.raw.bam",
+            data_dir=config["data_dir"], subdir=config["subdirs"]["per_sample"],
+               sample=read_samples_file(config["samples_assembly"]))
+    run:
+        print('input=', input)
+        print(config["samples_assembly"])
+        print(list(read_samples_file(config["samples_assembly"])))
+        
