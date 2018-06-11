@@ -99,10 +99,16 @@ def merge_one_per_sample_inputs(wildcards):
             return config["data_dir"] + '/' + config["subdirs"]["source"] + '/' + wildcards.sample + '.bam'
         else:
             return config["data_dir"]+'/'+config["subdirs"]["depletion"] +'/'+ wildcards.sample + '.' + wildcards.adjective + '.bam'
+
+    libs_to_exclude = set()
+    if config["libs_to_exclude"]:
+        with open(config["libs_to_exclude"]) as f:
+            libs_to_exclude = set(f.read().strip().split())
+
     runs = set()
     for lane in read_tab_file(config['seqruns_demux']):
         for well in read_tab_file(lane['barcode_file']):
-            if well['sample'] == wildcards.sample:
+            if well['sample'] == wildcards.sample and well.get('library_id_per_sample') not in libs_to_exclude:
               if wildcards.adjective=='raw':
                  runs.add(os.path.join(config["data_dir"], config["subdirs"]["source"],
                     get_run_id(well) +'.'+ lane['flowcell'] +'.'+ lane['lane'] + '.bam'))

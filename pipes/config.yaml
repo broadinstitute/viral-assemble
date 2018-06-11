@@ -107,6 +107,9 @@ env_vars:
 #H32G3ADXY       1       /path/to/barcodes.txt    /path/to/illumina/run/directory/run_BH32G3ADXY 1
 seqruns_demux: "flowcells.txt"
 
+# Text file listing library IDs to exclude
+libs_to_exclude: ""
+
 # The location of a text file containing names of samples
 # to be run through the depletion stages of the pipeline
 samples_depletion: "samples-depletion.txt"
