@@ -37,6 +37,23 @@ rule compute_asm_kmers:
         shell("{config[bin_dir]}/kmers.py build_kmer_db {input.final_asm} {output[0]} -k {wildcards.K} --counterCap 1 --memLimitGb {resources.mem} --threads {threads}")
 
 
+rule compute_raw_kmers:
+    '''For each sample, compute the kmers in the raw reads.
+    '''
+    input:  
+        raw_bam = config["data_dir"] +'/'+config["subdirs"]["per_sample"]+'/{sample}.raw.bam'
+    output:
+        config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.raw.k{K}.ci{CI}.cs{CS}.kmc_pre',
+        config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.raw.k{K}.ci{CI}.cs{CS}.kmc_suf',
+    resources:
+        mem     = 15,
+    threads: 64,
+    params: 
+        logid       = "{sample}",
+    run:
+        shell("{config[bin_dir]}/kmers.py build_kmer_db {input.raw_bam} {output[0]} -k {wildcards.K} --minOccs {wildcards.CI} --counterCap {wildcards.CS} --memLimitGb {resources.mem} --threads {threads}")
+
+
 rule all_asm_kmers:
     '''Gather k-mers in each sample assembly'''
     input:
@@ -61,3 +78,14 @@ rule all_raw_bams:
         print(config["samples_assembly"])
         print(list(read_samples_file(config["samples_assembly"])))
         
+rule all_raw_kmers:
+    '''Gather k-mers in each sample assembly'''
+    input:
+        # create final assemblies for all samples
+        expand("{tmp_dir}/{subdir}/{sample}.raw.k{K}.ci{CI}.cs{CS}.kmc_pre",
+            tmp_dir=config["tmp_dir"], subdir=config["subdirs"]["outbreak"],
+               sample=read_samples_file(config["samples_assembly"]), K=config["outbreak"]["kmer_size"], CI=2, CS=255)
+    run:
+        print('input=', input)
+        print(config["samples_assembly"])
+        print(list(read_samples_file(config["samples_assembly"])))
