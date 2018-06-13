@@ -73,5 +73,7 @@ tools/conda-tools/
 
 *.snakemake/
 
+*~
+
 # place for temporary/draft code
 tmp/
