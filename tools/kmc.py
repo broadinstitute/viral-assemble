@@ -194,5 +194,11 @@ class KmcTool(tools.Tool):
         # db1_min_occs, db1_max_occs, db2_min_occs, db2_max_occs, db_out_min_occs, db_out_max_occs,
         self.execute(['simple', kmer_db1, kmer_db2, op, kmer_db_out])
 
+    def set_kmer_counts(self, kmer_db_in, value, kmer_db_out):
+        """Create a copy of the kmer database with all counts set to specified value"""
+        kmer_db_in, kmer_db_out = map(self._kmer_db_name, (kmer_db_in, kmer_db_out))
+        # db1_min_occs, db1_max_occs, db2_min_occs, db2_max_occs, db_out_min_occs, db_out_max_occs,
+        self.execute(['transform', kmer_db_in, 'set_counts', value, kmer_db_out])
+
 # end: class KmcTool(tools.Tool)
 

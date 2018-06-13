@@ -114,6 +114,23 @@ def parser_kmers_binary_op(parser=argparse.ArgumentParser()):
 
 __commands__.append(('kmers_binary_op', parser_kmers_binary_op))
 
+# =========================
+
+def kmers_set_counts(kmer_db_in, value, kmer_db_out, threads=None):
+    """Copy the kmer database, setting all kmer counts in the output to the given value."""
+
+    tools.kmc.KmcTool().set_kmer_counts(kmer_db_in, value, kmer_db_out)
+
+def parser_kmers_set_counts(parser=argparse.ArgumentParser()):
+    parser.add_argument('kmer_db_in', help='input kmer db')
+    parser.add_argument('value', type=int, help='all kmer counts in the output will be set to this value')
+    parser.add_argument('kmer_db_out', help='output kmer db')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, kmers_set_counts, split_args=True)
+    return parser
+
+__commands__.append(('kmers_set_counts', parser_kmers_set_counts))
+
 # ========================
 
 def full_parser():
