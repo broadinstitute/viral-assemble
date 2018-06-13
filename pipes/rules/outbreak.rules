@@ -1,5 +1,11 @@
 """
 Analyses of an outbreak: determining who infected whom with which strains.
+
+Abbreviations/terms:
+   asm: assembly
+   asm kmers: kmers present in the final assembly of a sample
+   raw/cleaned/taxfilt kmers: kmers present in raw/cleaned/taxfilt reads
+   sample day: number of days since outbreak start to collection date for a sample
 """
 
 __author__ = 'Ilya Shlyakhter <ilya@broadinstitute.org>'
@@ -20,16 +26,21 @@ wildcard_constraints:
     CX="\d+",
     CS="\d+",
 
+def kmc(kmc_db_prefix):
+    """Return the KMC kmer database filesnames given the database prefix"""
+    return [kmc_db_prefix+ext for ext in ('.kmc_pre', '.kmc_suf')]
+
+tmp_outbreak_dir = config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]
+
 rule compute_asm_kmers:
     '''For each sample, compute the kmers in its final assembly.
     '''
     input:  
         final_asm = config["data_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.fasta'
     output:
-        config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.asm.k{K}.kmc_pre',
-        config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.asm.k{K}.kmc_suf',
+        kmc(tmp_outbreak_dir+'/{sample}.asm.k{K}')
     resources:
-        mem     = 7,
+        mem     = 2,
     threads: 1,
     params: 
         logid       = "{sample}",
@@ -43,8 +54,7 @@ rule compute_raw_kmers:
     input:  
         raw_bam = config["data_dir"] +'/'+config["subdirs"]["per_sample"]+'/{sample}.raw.bam'
     output:
-        config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.raw.k{K}.ci{CI}.cs{CS}.kmc_pre',
-        config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]+'/{sample}.raw.k{K}.ci{CI}.cs{CS}.kmc_suf',
+        kmc(tmp_outbreak_dir+'/{sample}.raw.k{K}.ci{CI}.cs{CS}')
     resources:
         mem     = 15,
     threads: 64,
@@ -58,8 +68,7 @@ rule all_asm_kmers:
     '''Gather k-mers in each sample assembly'''
     input:
         # create final assemblies for all samples
-        expand("{tmp_dir}/{subdir}/{sample}.asm.k{K}.kmc_pre",
-            tmp_dir=config["tmp_dir"], subdir=config["subdirs"]["outbreak"],
+        expand(tmp_outbreak_dir+"/{sample}.asm.k{K}.kmc_pre",
                sample=read_samples_file(config["samples_assembly"]), K=config["outbreak"]["kmer_size"])
     run:
         print('input=', input)
@@ -82,10 +91,22 @@ rule all_raw_kmers:
     '''Gather k-mers in each sample assembly'''
     input:
         # create final assemblies for all samples
-        expand("{tmp_dir}/{subdir}/{sample}.raw.k{K}.ci{CI}.cs{CS}.kmc_pre",
-            tmp_dir=config["tmp_dir"], subdir=config["subdirs"]["outbreak"],
+        expand(tmp_outbreak_dir+"/{sample}.raw.k{K}.ci{CI}.cs{CS}.kmc_pre",
                sample=read_samples_file(config["samples_assembly"]), K=config["outbreak"]["kmer_size"], CI=2, CS=255)
     run:
         print('input=', input)
         print(config["samples_assembly"])
         print(list(read_samples_file(config["samples_assembly"])))
+
+rule set_asm_kmer_counts_to_sample_day:
+    '''For each sample, create a kmer database of its asm kmers with kmer count set to the sample day.'''
+    input: 
+        kmc(tmp_outbreak_dir+'/{sample}.asm.k{K}'),
+        day = tmp_outbreak_dir+'/{sample}.days_since_outbreak_start.txt'
+    output:
+        kmc(tmp_outbreak_dir+'/{sample}.asm.day.k{K}')
+    params:
+        logid = "{sample}",
+    run:
+        shell("{config[bin_dir]}/kmers.py kmers_set_counts {input[0]} `cat {input.day}` {output[0]}")
+
