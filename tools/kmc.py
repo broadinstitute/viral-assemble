@@ -41,10 +41,10 @@ class KmcTool(tools.Tool):
         return TOOL_VERSION
 
     @staticmethod
-    def _kmc_db_name(kmc_db):
+    def _kmer_db_name(kmer_db):
         """Return the kmer database path, given either the db path of the file name of the .kmc_pre or .kmc_suf file"""
-        base, ext = os.path.splitext(kmc_db)
-        return base if ext in ('.kmc_pre', '.kmc_suf') else kmc_db
+        base, ext = os.path.splitext(kmer_db)
+        return base if ext in ('.kmc_pre', '.kmc_suf') else kmer_db
 
     @staticmethod
     def _get_file_format_opt(fname):
@@ -55,7 +55,7 @@ class KmcTool(tools.Tool):
         elif file_type == '.bam': return 'bam'
         else: raise RuntimeError('Unknown seq file format: {}'.format(file_type))
 
-    def build_kmer_db(self, seq_files, kmc_db, kmer_size=DEFAULT_KMER_SIZE, min_occs=None, max_occs=None, 
+    def build_kmer_db(self, seq_files, kmer_db, kmer_size=DEFAULT_KMER_SIZE, min_occs=None, max_occs=None, 
                       counter_cap=DEFAULT_COUNTER_CAP, mem_limit_gb=8, threads=None, kmc_opts=''):
         """Build a database of kmers occurring in the given sequence files.
 
@@ -64,7 +64,7 @@ class KmcTool(tools.Tool):
              may be compressed with gzip or bzip2.
 
         Outputs:
-          kmc_db: kmc database path, with or without the .kmc_pre/.kmc_suf extension.
+          kmer_db: kmer database path, with or without the .kmc_pre/.kmc_suf extension.
 
         Params:
           kmer_size: kmer size
@@ -78,7 +78,7 @@ class KmcTool(tools.Tool):
         if min_occs is None: min_occs = 1
         if max_occs is None: max_occs = util.misc.MAX_INT32
         seq_files = util.misc.make_seq(seq_files)
-        kmc_db = self._kmc_db_name(kmc_db)
+        kmer_db = self._kmer_db_name(kmer_db)
         threads = util.misc.sanitize_thread_count(threads)
         with util.file.tmp_dir(suffix='kmcdb') as t_dir, util.file.tempfname(suffix='kmcfiles') as seq_file_list:
             util.file.dump_file(seq_file_list, '\n'.join(seq_files))
@@ -89,13 +89,14 @@ class KmcTool(tools.Tool):
             input_fmt_opt = list(input_fmt_opts)[0]
 
             args += '-f{} -k{} -ci{} -cx{} -cs{} -m{} -sm -t{} @{} {}'.format(input_fmt_opt, kmer_size, min_occs, max_occs, counter_cap, mem_limit_gb, threads,
-                                                                              seq_file_list, kmc_db).split()
+                                                                              seq_file_list, kmer_db).split()
             if kmc_opts: args += shlex.split(kmc_opts)
             args += [t_dir]
             tool_cmd = [self.install_and_get_path()] + args
-            log.info('Building KMC database with command: ' + ' '.join(tool_cmd))
+            log.info('Building kmer database with command: ' + ' '.join(tool_cmd))
             subprocess.check_call(tool_cmd)
-            assert os.path.isfile(kmc_db+'.kmc_pre') and os.path.isfile(kmc_db+'.kmc_suf'), 'KMC database files not created: {}'.format(kmc_db)
+            assert os.path.isfile(kmer_db+'.kmc_pre') and os.path.isfile(kmer_db+'.kmc_suf'), \
+                'kmer database files not created: {}'.format(kmer_db)
 
     def execute(self, args, threads=None):
         """Run kmc_tools with the given args"""
@@ -106,22 +107,22 @@ class KmcTool(tools.Tool):
         subprocess.check_call(tool_cmd)
 
 
-    def dump_kmers(self, kmc_db, out_kmers, min_occs=None, max_occs=None, threads=None):
+    def dump_kmers(self, kmer_db, out_kmers, min_occs=None, max_occs=None, threads=None):
         """Dump the kmers from the database to a text file"""
         if min_occs is None: min_occs = 1
         if max_occs is None: max_occs = util.misc.MAX_INT32
-        self.execute('transform {} -ci{} -cx{} dump -s {}'.format(self._kmc_db_name(kmc_db), min_occs, max_occs, out_kmers).split(), threads=threads)
+        self.execute('transform {} -ci{} -cx{} dump -s {}'.format(self._kmer_db_name(kmer_db), min_occs, max_occs, out_kmers).split(), threads=threads)
         assert os.path.isfile(out_kmers)
 
 
-    def filter_reads(self, kmc_db, in_reads, out_reads, db_min_occs=None, db_max_occs=None, 
+    def filter_reads(self, kmer_db, in_reads, out_reads, db_min_occs=None, db_max_occs=None, 
                      read_min_occs=None, read_max_occs=None, threads=None):
         """Filter reads based on their kmer contents.
 
         Note that "occurrence of a kmer" means "occurrence of the kmer or its reverse complement".
 
         Inputs:
-          kmc_db: the kmc kmer database
+          kmer_db: the kmc kmer database
           in_reads: the reads to filter.  can be a .fasta or .fastq or .bam; fasta or fastq can be compressed with gzip or bzip2.
              If a .bam, a read pair is kept if either mate passes the filter.
 
@@ -175,7 +176,7 @@ class KmcTool(tools.Tool):
 
             in_reads_fmt = 'q' if in_reads_type in ('.fq', '.fastq') else 'a'
 
-            self.execute('filter {} -ci{} -cx{} {} -f{} -ci{} -cx{} {}'.format(self._kmc_db_name(kmc_db), db_min_occs, db_max_occs, _in_reads, in_reads_fmt, 
+            self.execute('filter {} -ci{} -cx{} {} -f{} -ci{} -cx{} {}'.format(self._kmer_db_name(kmer_db), db_min_occs, db_max_occs, _in_reads, in_reads_fmt, 
                                                                                read_min_occs, read_max_occs, _out_reads).split(), threads=threads)
 
             if in_reads_type == '.bam':
@@ -185,13 +186,13 @@ class KmcTool(tools.Tool):
                 shutil.copyfile(passed_read_names, '/tmp/passed.txt')
                 tools.picard.FilterSamReadsTool().execute(inBam=in_reads, exclude=False, readList=passed_read_names, outBam=out_reads)
         # end: with util.file.tmp_dir(suffix='kmcfilt') as t_dir
-    # end: def filter_reads(self, kmc_db, in_reads, out_reads, db_min_occs=1, db_max_occs=util.misc.MAX_INT32, read_min_occs=None, read_max_occs=None, threads=None)
+    # end: def filter_reads(self, kmer_db, in_reads, out_reads, db_min_occs=1, db_max_occs=util.misc.MAX_INT32, read_min_occs=None, read_max_occs=None, threads=None)
 
-    def kmers_binary_op(self, op, kmc_db1, kmc_db2, kmc_db_out):
+    def kmers_binary_op(self, op, kmer_db1, kmer_db2, kmer_db_out):
         """Perform a simple binary operation on two kmer sets"""
-        kmc_db1, kmc_db2, kmc_db_out = map(self._kmc_db_name, (kmc_db1, kmc_db2, kmc_db_out))
+        kmer_db1, kmer_db2, kmer_db_out = map(self._kmer_db_name, (kmer_db1, kmer_db2, kmer_db_out))
         # db1_min_occs, db1_max_occs, db2_min_occs, db2_max_occs, db_out_min_occs, db_out_max_occs,
-        self.execute(['simple', kmc_db1, kmc_db2, op, kmc_db_out])
+        self.execute(['simple', kmer_db1, kmer_db2, op, kmer_db_out])
 
 # end: class KmcTool(tools.Tool)
 
