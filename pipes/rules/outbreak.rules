@@ -25,6 +25,7 @@ wildcard_constraints:
     CI="\d+",
     CX="\d+",
     CS="\d+",
+    ADJ="raw|cleaned|taxfilt|asm"
 
 def kmc(kmc_db_prefix):
     """Return the KMC kmer database filesnames given the database prefix"""
@@ -32,81 +33,71 @@ def kmc(kmc_db_prefix):
 
 tmp_outbreak_dir = config["tmp_dir"] +'/'+config["subdirs"]["outbreak"]
 
-rule compute_asm_kmers:
-    '''For each sample, compute the kmers in its final assembly.
-    '''
-    input:  
-        final_asm = config["data_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.fasta'
+rule compute_kmers:
+    '''Compute kmers for a sample'''
+    input:
+        lambda wildcards: config["data_dir"] +'/'+config["subdirs"]["assembly"]+'/'+wildcards.sample+'.fasta' \
+            if wildcards.ADJ=='asm' else \
+            config["data_dir"] +'/'+config["subdirs"]["per_sample"]+'/'+wildcards.sample+'.'+wildcards.ADJ+'.bam'
     output:
-        kmc(tmp_outbreak_dir+'/{sample}.asm.k{K}')
-    resources:
-        mem     = 2,
-    threads: 1,
-    params: 
-        logid       = "{sample}",
+        kmc(tmp_outbreak_dir+'/{sample}.{ADJ}.k{K}.ci{CI}.cx{CX}.cs{CS}')
+    threads: lambda wildcards: 1 if wildcards.ADJ=='asm' else 64
+    resources: mem=12
     run:
-        shell("{config[bin_dir]}/kmers.py build_kmer_db {input.final_asm} {output[0]} -k {wildcards.K} --counterCap 1 --memLimitGb {resources.mem} --threads {threads}")
+        shell("{config[bin_dir]}/kmers.py build_kmer_db {input} {output[0]} -k {wildcards.K} --minOccs {wildcards.CI} --maxOccs {wildcards.CX} --counterCap {wildcards.CS} --memLimitGb {resources.mem} --threads {threads}")
 
-
-rule compute_raw_kmers:
-    '''For each sample, compute the kmers in the raw reads.
-    '''
-    input:  
-        raw_bam = config["data_dir"] +'/'+config["subdirs"]["per_sample"]+'/{sample}.raw.bam'
-    output:
-        kmc(tmp_outbreak_dir+'/{sample}.raw.k{K}.ci{CI}.cs{CS}')
-    resources:
-        mem     = 15,
-    threads: 64,
-    params: 
-        logid       = "{sample}",
-    run:
-        shell("{config[bin_dir]}/kmers.py build_kmer_db {input.raw_bam} {output[0]} -k {wildcards.K} --minOccs {wildcards.CI} --counterCap {wildcards.CS} --memLimitGb {resources.mem} --threads {threads}")
-
-
-rule all_asm_kmers:
-    '''Gather k-mers in each sample assembly'''
-    input:
-        # create final assemblies for all samples
-        expand(tmp_outbreak_dir+"/{sample}.asm.k{K}.kmc_pre",
-               sample=read_samples_file(config["samples_assembly"]), K=config["outbreak"]["kmer_size"])
-    run:
-        print('input=', input)
-        print(config["samples_assembly"])
-        print(list(read_samples_file(config["samples_assembly"])))
-
-rule all_raw_bams:
-    '''Get the raw reads bam for each sample'''
-    input:
-        # create final assemblies for all samples
-        expand("{data_dir}/{subdir}/{sample}.raw.bam",
-            data_dir=config["data_dir"], subdir=config["subdirs"]["per_sample"],
-               sample=read_samples_file(config["samples_assembly"]))
-    run:
-        print('input=', input)
-        print(config["samples_assembly"])
-        print(list(read_samples_file(config["samples_assembly"])))
-        
-rule all_raw_kmers:
-    '''Gather k-mers in each sample assembly'''
-    input:
-        # create final assemblies for all samples
-        expand(tmp_outbreak_dir+"/{sample}.raw.k{K}.ci{CI}.cs{CS}.kmc_pre",
-               sample=read_samples_file(config["samples_assembly"]), K=config["outbreak"]["kmer_size"], CI=2, CS=255)
-    run:
-        print('input=', input)
-        print(config["samples_assembly"])
-        print(list(read_samples_file(config["samples_assembly"])))
-
-rule set_asm_kmer_counts_to_sample_day:
+rule set_kmer_counts_to_sample_day:
     '''For each sample, create a kmer database of its asm kmers with kmer count set to the sample day.'''
     input: 
-        kmc(tmp_outbreak_dir+'/{sample}.asm.k{K}'),
-        day = tmp_outbreak_dir+'/{sample}.days_since_outbreak_start.txt'
+        kmc(tmp_outbreak_dir+'/{sample}.{ADJ}.k{K}.ci{CI}.cx{CX}.cs{CS}'),
+        day = tmp_outbreak_dir+'/{sample}.day.txt'
     output:
-        kmc(tmp_outbreak_dir+'/{sample}.asm.day.k{K}')
+        kmc(tmp_outbreak_dir+'/{sample}.{ADJ}.k{K}.ci{CI}.cx{CX}.cs{CS}.day'),
     params:
         logid = "{sample}",
     run:
-        shell("{config[bin_dir]}/kmers.py kmers_set_counts {input[0]} `cat {input.day}` {output[0]}")
+        shell("{config[bin_dir]}/kmers.py kmers_set_counts {input[0]} `cat {input.day}` {output[0]} --threads {threads}")
 
+
+rule kmers_earliest_day:
+    '''For each k-mer get the earliest it appeared'''
+    input: 
+        lambda wildcards: \
+            expand(tmp_outbreak_dir+"/{sample}.{ADJ}.k{K}.ci{CI}.cx{CX}.cs{CS}.day.kmc_{presuf}",
+                   sample=read_samples_file(config["samples_outbreak"]), presuf=('pre', 'suf'), K=wildcards.K,
+                   CI=wildcards.CI, CX=wildcards.CX, CS=wildcards.CS, ADJ=wildcards.ADJ)
+            
+    output:
+         kmc(tmp_outbreak_dir+"/all_samples.{ADJ}.k{K}.ci{CI}.cx{CX}.cs{CS}.min_day"),
+         opfile = tmp_outbreak_dir+"/all_samples.{ADJ}.k{K}.ci{CI}.cx{CX}.cs{CS}.min_day.op"
+    run:
+        with open(output.opfile, 'w') as out:
+            out.write('INPUT:\n')
+            sample_ids = []
+            for in_f in input:
+                if in_f.endswith('.kmc_pre'):
+                    sample = os.path.basename(in_f).split('.')[0]
+                    sample_id = sample.replace('-', '_')
+                    sample_ids.append(sample_id)
+                    out.write('{} = {} -ci1 -cx999999\n'.format(sample_id, os.path.splitext(in_f)[0]))
+            out.write('OUTPUT:\n')
+            out.write('{} = {}\n'.format(os.path.splitext(output[1])[0], ' + min '.join(sample_ids)))
+            out.write('OUTPUT_PARAMS:\n')
+            out.write('-ci1 -cx999999 -cs999999\n')
+        shell("kmc_tools -v -t{threads} complex {output.opfile}")
+
+rule all_asm_kmer_days:
+    '''Gather k-mers in each sample assembly'''
+    input:
+        expand(kmc(tmp_outbreak_dir+'/{sample}.{ADJ}.k{K}.ci{CI}.cx{CX}.cs{CS}.day'),
+               sample=read_samples_file(config["samples_outbreak"]), K=config["outbreak"]["kmer_size"], ADJ='asm',
+               CI=1, CX=999999, CS=255)
+        
+rule all_raw_kmer_days:
+    '''Gather k-mers in each sample assembly'''
+    input:
+        # create final assemblies for all samples
+        expand(kmc(tmp_outbreak_dir+'/{sample}.{ADJ}.k{K}.ci{CI}.cx{CX}.cs{CS}.day'),
+               sample=read_samples_file(config["samples_outbreak"]), K=config["outbreak"]["kmer_size"], ADJ='raw',
+               CI=2, CX=999999, CS=255)
+        

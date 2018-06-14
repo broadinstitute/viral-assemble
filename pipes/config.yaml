@@ -138,6 +138,10 @@ samples_metagenomics: "samples-metagenomics.txt"
 # during the ref_guided_diversity step.
 samples_per_run: "samples-runs.txt"
 
+# The location of a text file containing the names of samples to be
+# used for outbreak analysis
+samples_outbreak: "samples-outbreak.txt"
+
 #    |------------------- Knobs to turn to change tool execution ---------------
 
 # The lastal tool filters input reads to be more representative of the genus of

@@ -98,10 +98,10 @@ __commands__.append(('filter_by_kmers', parser_filter_by_kmers))
 
 # =========================
 
-def kmers_binary_op(op, kmer_db1, kmer_db2, kmer_db_out):
+def kmers_binary_op(op, kmer_db1, kmer_db2, kmer_db_out, threads=None):
     """Perform a simple binary operation on kmer sets."""
 
-    tools.kmc.KmcTool().kmers_binary_op(op, kmer_db1, kmer_db2, kmer_db_out)
+    tools.kmc.KmcTool().kmers_binary_op(op, kmer_db1, kmer_db2, kmer_db_out, threads=threads)
 
 def parser_kmers_binary_op(parser=argparse.ArgumentParser()):
     parser.add_argument('op', choices=('intersect', 'union', 'kmers_subtract', 'counters_subtract'), help='binary operation to perform')
@@ -119,7 +119,7 @@ __commands__.append(('kmers_binary_op', parser_kmers_binary_op))
 def kmers_set_counts(kmer_db_in, value, kmer_db_out, threads=None):
     """Copy the kmer database, setting all kmer counts in the output to the given value."""
 
-    tools.kmc.KmcTool().set_kmer_counts(kmer_db_in, value, kmer_db_out)
+    tools.kmc.KmcTool().set_kmer_counts(kmer_db_in, value, kmer_db_out, threads=threads)
 
 def parser_kmers_set_counts(parser=argparse.ArgumentParser()):
     parser.add_argument('kmer_db_in', help='input kmer db')

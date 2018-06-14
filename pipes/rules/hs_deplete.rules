@@ -71,24 +71,6 @@ rule filter_to_taxon:
     run: 
         shell("{config[bin_dir]}/taxon_filter.py filter_lastal_bam {input.input_bam} {input.lastalDb} {output}")
 
-
-wildcard_constraints:
-    K="\d\d",
-    CI="\d+",
-    CX="\d+",
-    CS="\d+",
-
-
-rule gather_kmers:
-    '''Build a database of kmers in a file'''
-    input:
-        fname = "{fname}"
-    output:
-        kmc_pre = "{fname}.k{K}.ci{CI}.cx{CX}.cs{CS}.kmc_pre",
-        kmc_suf = "{fname}.k{K}.ci{CI}.cx{CX}.cs{CS}.kmc_suf"
-    run:
-        shell("{config[bin_dir]}/read_utils.py build_kmc_db -k {wildcards.K} -ci {wildcards.CI} -cx {wildcards.CX} -cs {wildcards.CS} {input.fname} {output.kmc_pre}")
-        
 class MergeInputException(Exception):
     '''Cannot find merging multiplexed sample inputs'''
 

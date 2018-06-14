@@ -140,8 +140,6 @@ class KmcTool(tools.Tool):
         if db_min_occs is None: db_min_occs=1
         if db_max_occs is None: db_max_occs=util.misc.MAX_INT32
 
-        print('BEF', type(read_min_occs), type(read_max_occs), read_min_occs, read_max_occs)
-
         if read_min_occs is None and read_max_occs is None:
             read_min_occs, read_max_occs = 1, util.misc.MAX_INT32
         elif read_min_occs is None and read_max_occs is not None:
@@ -149,13 +147,9 @@ class KmcTool(tools.Tool):
         elif read_max_occs is None and read_min_occs is not None:
             read_max_occs = 1.0 if isinstance(read_min_occs, float) else util.misc.MAX_INT32
 
-        print('AFT', type(read_min_occs), type(read_max_occs), read_min_occs, read_max_occs)
-
         assert type(read_min_occs) == type(read_max_occs), 'read_min_occs and read_max_occs must be specified the same way (as kmer count or fraction of read length)'
         assert read_min_occs <= read_max_occs, 'vals are {} {}'.format(read_min_occs, read_max_occs)
         assert not isinstance(read_min_occs, float) or 0.0 <= read_min_occs <= read_max_occs <= 1.0
-
-        threads = util.misc.sanitize_thread_count(threads)
 
         in_reads_type = util.file.uncompressed_file_type(in_reads)
         _in_reads = in_reads
@@ -188,17 +182,18 @@ class KmcTool(tools.Tool):
         # end: with util.file.tmp_dir(suffix='kmcfilt') as t_dir
     # end: def filter_reads(self, kmer_db, in_reads, out_reads, db_min_occs=1, db_max_occs=util.misc.MAX_INT32, read_min_occs=None, read_max_occs=None, threads=None)
 
-    def kmers_binary_op(self, op, kmer_db1, kmer_db2, kmer_db_out):
+    def kmers_binary_op(self, op, kmer_db1, kmer_db2, kmer_db_out, threads=None):
         """Perform a simple binary operation on two kmer sets"""
         kmer_db1, kmer_db2, kmer_db_out = map(self._kmer_db_name, (kmer_db1, kmer_db2, kmer_db_out))
         # db1_min_occs, db1_max_occs, db2_min_occs, db2_max_occs, db_out_min_occs, db_out_max_occs,
-        self.execute(['simple', kmer_db1, kmer_db2, op, kmer_db_out])
+        self.execute(['simple', kmer_db1, kmer_db2, op, kmer_db_out], threads=threads)
 
-    def set_kmer_counts(self, kmer_db_in, value, kmer_db_out):
+    def set_kmer_counts(self, kmer_db_in, value, kmer_db_out, threads=None):
         """Create a copy of the kmer database with all counts set to specified value"""
+        assert 1 <= value <= util.misc.MAX_INT32, 'can only set kmer counts to a positive 32-bit int'
         kmer_db_in, kmer_db_out = map(self._kmer_db_name, (kmer_db_in, kmer_db_out))
         # db1_min_occs, db1_max_occs, db2_min_occs, db2_max_occs, db_out_min_occs, db_out_max_occs,
-        self.execute(['transform', kmer_db_in, 'set_counts', value, kmer_db_out])
+        self.execute(['transform', kmer_db_in, 'set_counts', value, kmer_db_out], threads=threads)
 
 # end: class KmcTool(tools.Tool)
 
