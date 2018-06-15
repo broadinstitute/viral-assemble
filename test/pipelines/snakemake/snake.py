@@ -45,6 +45,7 @@ class SnakemakeRunner(object):
         'samples_metagenomics',
         'samples_assembly_failures',
         'samples_per_run',
+        'samples_outbreak'
     }
 
     def __init__(self, workdir=None):
