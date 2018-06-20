@@ -14,6 +14,7 @@ import random
 import numpy
 import os
 import os.path
+import glob
 import shutil
 import subprocess
 import functools
@@ -44,6 +45,7 @@ import tools.mafft
 import tools.mummer
 import tools.muscle
 import tools.gap2seq
+import tools.kmc
 
 # third-party
 import Bio.AlignIO
@@ -51,7 +53,6 @@ import Bio.SeqIO
 import Bio.Data.IUPACData
 
 log = logging.getLogger(__name__)
-
 
 class DenovoAssemblyError(RuntimeError):
 
@@ -446,10 +447,10 @@ __commands__.append(('gapfill_gap2seq', parser_gapfill_gap2seq))
 
 
 def _order_and_orient_orig(inFasta, inReference, outFasta,
-        outAlternateContigs=None,
+        outAlternateContigs=None, outImputed=None,
         breaklen=None, # aligner='nucmer', circular=False, trimmed_contigs=None,
         maxgap=200, minmatch=10, mincluster=None,
-        min_pct_id=0.6, min_contig_len=200, min_pct_contig_aligned=0.3):
+                           min_pct_id=0.6, min_contig_len=200, min_pct_contig_aligned=0.3, minLengthFraction=0, minUnambig=0, replaceLength=0):
     ''' This step cleans up the de novo assembly with a known reference genome.
         Uses MUMmer (nucmer or promer) to create a reference-based consensus
         sequence of aligned contigs (with runs of N's in between the de novo
@@ -484,17 +485,31 @@ def _order_and_orient_orig(inFasta, inReference, outFasta,
     )
     #if not trimmed_contigs:
     #    os.unlink(trimmed)
+
+    if outImputed:
+        print('calling impute_from_reference: inFasta={} inRef={}'.format(inFasta, inReference))
+        if util.file.fasta_length(outFasta) == util.file.fasta_length(inReference):
+            impute_from_reference(inFasta=outFasta, inReference=inReference,
+                                  outFasta=outImputed, minLengthFraction=minLengthFraction, minUnambig=minUnambig, replaceLength=replaceLength)
+        else:
+            print('NOTE: failed to scaffold {} to {}'.format(inFasta, inReference))
+            util.file.make_empty(outImputed)
+        print('returned from impute_from_reference')
+
     return 0
 
-def _call_order_and_orient_orig(inReference, outFasta, outAlternateContigs, **kwargs):
-    return _order_and_orient_orig(inReference=inReference, outFasta=outFasta, outAlternateContigs=outAlternateContigs, **kwargs)
+def _call_order_and_orient_orig(inReference, outFasta, outAlternateContigs, outImputed, **kwargs):
+    return _order_and_orient_orig(inReference=inReference, outFasta=outFasta, outAlternateContigs=outAlternateContigs, outImputed=outImputed, **kwargs)
 
 def order_and_orient(inFasta, inReference, outFasta,
-        outAlternateContigs=None, outReference=None,
-        breaklen=None, # aligner='nucmer', circular=False, trimmed_contigs=None,
-        maxgap=200, minmatch=10, mincluster=None,
-        min_pct_id=0.6, min_contig_len=200, min_pct_contig_aligned=0.3, n_genome_segments=0, 
-        outStats=None, threads=None):
+                     outAlternateContigs=None, outReference=None, outImputedRefs=None, outImputedMaskedRefs=None,
+                     outImputed=None, outImputedMasked=None,
+                     breaklen=None, # aligner='nucmer', circular=False, trimmed_contigs=None,
+                     maxgap=200, minmatch=10, mincluster=None,
+                     min_pct_id=0.6, min_contig_len=200, min_pct_contig_aligned=0.3, n_genome_segments=0,
+                     outStats=None, reads_kmer_db=None, 
+                     minLengthFraction=0., minUnambig=0, replaceLength=55,
+                     threads=None):
     ''' This step cleans up the de novo assembly with a known reference genome.
         Uses MUMmer (nucmer or promer) to create a reference-based consensus
         sequence of aligned contigs (with runs of N's in between the de novo
@@ -523,7 +538,8 @@ def order_and_orient(inFasta, inReference, outFasta,
 
     with util.file.tempfnames(suffixes=[ '.{}.ref.fasta'.format(ref_num) for ref_num in range(n_refs)]) as refs_fasta, \
          util.file.tempfnames(suffixes=[ '.{}.scaffold.fasta'.format(ref_num) for ref_num in range(n_refs)]) as scaffolds_fasta, \
-         util.file.tempfnames(suffixes=[ '.{}.altcontig.fasta'.format(ref_num) for ref_num in range(n_refs)]) as alt_contigs_fasta:
+         util.file.tempfnames(suffixes=[ '.{}.altcontig.fasta'.format(ref_num) for ref_num in range(n_refs)]) as alt_contigs_fasta, \
+         util.file.tempfnames(suffixes=[ '.{}.imputed.fasta'.format(ref_num) for ref_num in range(n_refs)]) as imputed_fasta:
 
         for ref_num in range(n_refs):
             this_ref_segs = ref_segments_all[ref_num*n_genome_segments : (ref_num+1)*n_genome_segments]
@@ -533,8 +549,10 @@ def order_and_orient(inFasta, inReference, outFasta,
         with concurrent.futures.ProcessPoolExecutor(max_workers=util.misc.sanitize_thread_count(threads)) as executor:
             retvals = executor.map(functools.partial(_call_order_and_orient_orig, inFasta=inFasta,
                 breaklen=breaklen, maxgap=maxgap, minmatch=minmatch, mincluster=mincluster, min_pct_id=min_pct_id,
-                min_contig_len=min_contig_len, min_pct_contig_aligned=min_pct_contig_aligned),
-                refs_fasta, scaffolds_fasta, alt_contigs_fasta)
+                                                     min_contig_len=min_contig_len, min_pct_contig_aligned=min_pct_contig_aligned,
+                                                     minLengthFraction=minLengthFraction, minUnambig=minUnambig, 
+                                                     replaceLength=replaceLength),
+                                   refs_fasta, scaffolds_fasta, alt_contigs_fasta, imputed_fasta if reads_kmer_db else [None]*n_refs)
         for r in retvals:
             # if an exception is raised by _call_order_and_orient_contig, the
             # concurrent.futures.Executor.map function documentations states
@@ -544,17 +562,38 @@ def order_and_orient(inFasta, inReference, outFasta,
             assert r==0
 
         scaffolds = [tuple(Bio.SeqIO.parse(scaffolds_fasta[ref_num], 'fasta')) for ref_num in range(n_refs)]
-        base_counts = [sum([len(seg.seq.ungap('N')) for seg in scaffold]) \
-            if len(scaffold)==n_genome_segments else 0 for scaffold in scaffolds]
+        count_unambig_in = scaffolds
+
+        if reads_kmer_db:
+            imputeds = functools.reduce(operator.concat, [tuple(Bio.SeqIO.parse(imputed_fasta[ref_num], 'fasta')) for ref_num in range(n_refs)], ())
+            with util.file.tempfnames(suffixes=('.imputeds.fasta', '.masked.fasta')) as (imp_fa, hm_fa):
+                Bio.SeqIO.write(imputeds, imp_fa, 'fasta-2line')
+                if outImputedRefs: shutil.copyfile(imp_fa, outImputedRefs)
+                tools.kmc.KmcTool().filter_reads(reads_kmer_db, imp_fa, hm_fa, db_min_occs=4, hard_mask=True)
+                hmasked_flat = tuple(Bio.SeqIO.parse(hm_fa, 'fasta'))
+                assert len(hmasked_flat) == n_refs * n_genome_segments  # FIXME
+                if outImputedMaskedRefs: Bio.SeqIO.write(hmasked_flat, outImputedMaskedRefs, 'fasta')
+
+                hmasked = [hmasked_flat[ref_num*n_genome_segments : (ref_num+1)*n_genome_segments] for ref_num in range(n_refs)]
+                count_unambig_in = hmasked
+
+        base_counts = [sum([len(seg.seq.ungap('N')) for seg in segs]) \
+                       if len(segs)==n_genome_segments else 0 for segs in count_unambig_in]
         best_ref_num = numpy.argmax(base_counts)
+        log.info('base_counts={} sorted_base_counts={} best_ref_num={}'.format(base_counts, sorted(base_counts), best_ref_num))
+
         if len(scaffolds[best_ref_num]) != n_genome_segments:
             raise IncompleteAssemblyError(len(scaffolds[best_ref_num]), n_genome_segments)
-        log.info('base_counts={} best_ref_num={}'.format(base_counts, best_ref_num))
+        log.info('base_counts={} sorted_base_counts={} best_ref_num={}'.format(base_counts, sorted(base_counts), best_ref_num))
         shutil.copyfile(scaffolds_fasta[best_ref_num], outFasta)
         if outAlternateContigs:
             shutil.copyfile(alt_contigs_fasta[best_ref_num], outAlternateContigs)
         if outReference:
             shutil.copyfile(refs_fasta[best_ref_num], outReference)
+        if outImputed and reads_kmer_db:
+            shutil.copyfile(imputed_fasta[best_ref_num], outImputed)
+        if outImputedMasked and reads_kmer_db:
+            Bio.SeqIO.write(hmasked[best_ref_num], outImputedMasked, 'fasta')
         if outStats:
             ref_ranks = (-numpy.array(base_counts)).argsort().argsort()
             with open(outStats, 'w') as stats_f:
@@ -590,6 +629,11 @@ def parser_order_and_orient(parser=argparse.ArgumentParser()):
                         If positive, the `inReference` parameter is treated as a list of genomes of nGenomeSegments each.""")
 
     parser.add_argument('--outReference', help='Output the reference chosen for scaffolding to this file')
+    parser.add_argument('--reads_kmer_db', help='If given, impute with each ref and mask using kmers from this db, during reference selection')
+    parser.add_argument('--outImputedRefs', help='Output the imputed genome for each reference')
+    parser.add_argument('--outImputedMaskedRefs', help='Output the imputed genome for each reference, with kmers not in reads masked')
+    parser.add_argument('--outImputed', help='Output the result of imputing to the chosen reference')
+    parser.add_argument('--outImputedMasked', help='Output the result of imputing to the chosen reference with bad kmers masked')
     parser.add_argument('--outStats', help='Output stats used in reference selection')
     #parser.add_argument('--aligner',
     #                    help='nucmer (nucleotide) or promer (six-frame translations) [default: %(default)s]',
@@ -657,6 +701,24 @@ def parser_order_and_orient(parser=argparse.ArgumentParser()):
         type=float,
         default=0.3,
         help="show-tiling: minimum percent of contig length in alignment (0.0 - 1.0, default: %(default)s)"
+    )
+    parser.add_argument(
+        "--minLengthFraction",
+        type=float,
+        default=0.5,
+        help="minimum length for contig, as fraction of reference (default: %(default)s)"
+    )
+    parser.add_argument(
+        "--minUnambig",
+        type=float,
+        default=0.5,
+        help="minimum percentage unambiguous bases for contig (default: %(default)s)"
+    )
+    parser.add_argument(
+        "--replaceLength",
+        type=int,
+        default=0,
+        help="length of ends to be replaced with reference (default: %(default)s)"
     )
     #parser.add_argument("--trimmed_contigs",
     #                    default=None,
@@ -731,7 +793,7 @@ def impute_from_reference(
 
                 # error if PoorAssembly
                 minLength = len(refSeqObj) * minLengthFraction
-                non_n_count = unambig_count(asmSeqObj.seq)
+                non_n_count = read_utils.unambig_count(asmSeqObj.seq)
                 seq_len = len(asmSeqObj)
                 log.info(
                     "Assembly Quality - segment {idx} - name {segname} - contig len {len_actual} / {len_desired} ({min_frac}) - unambiguous bases {unamb_actual} / {unamb_desired} ({min_unamb})".format(
@@ -1048,11 +1110,6 @@ def parser_refine_assembly(parser=argparse.ArgumentParser()):
 __commands__.append(('refine_assembly', parser_refine_assembly))
 
 
-def unambig_count(seq):
-    unambig = set(('A', 'T', 'C', 'G'))
-    return sum(1 for s in seq if s.upper() in unambig)
-
-
 def parser_filter_short_seqs(parser=argparse.ArgumentParser()):
     parser.add_argument("inFile", help="input sequence file")
     parser.add_argument("minLength", help="minimum length for contig", type=int)
@@ -1078,7 +1135,7 @@ def main_filter_short_seqs(args):
             Bio.SeqIO.write(
                 [
                     s for s in Bio.SeqIO.parse(inf, args.format)
-                    if len(s) >= args.minLength and unambig_count(s.seq) >= len(s) * args.minUnambig
+                    if len(s) >= args.minLength and read_utils.unambig_count(s.seq) >= len(s) * args.minUnambig
                 ], outf, args.output_format
             )
     return 0

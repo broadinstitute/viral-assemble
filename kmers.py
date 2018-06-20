@@ -73,10 +73,11 @@ __commands__.append(('dump_kmers', parser_dump_kmers))
 # =========================
 
 def filter_by_kmers(kmer_db, in_reads, out_reads, db_min_occs=None, db_max_occs=None, 
-                    read_min_occs=None, read_max_occs=None, threads=None):
+                    read_min_occs=None, read_max_occs=None, hard_mask=False, threads=None):
     """Filter sequences based on their kmer contents."""
+    print('filter_by_kmers: starting run')
     tools.kmc.KmcTool().filter_reads(kmer_db=kmer_db, in_reads=in_reads, out_reads=out_reads, db_min_occs=db_min_occs, db_max_occs=db_max_occs,
-                                     read_min_occs=read_min_occs, read_max_occs=read_max_occs,
+                                     read_min_occs=read_min_occs, read_max_occs=read_max_occs, hard_mask=hard_mask,
                                      threads=threads)
 
 def parser_filter_by_kmers(parser=argparse.ArgumentParser()):
@@ -90,6 +91,7 @@ def parser_filter_by_kmers(parser=argparse.ArgumentParser()):
                         help='filter out reads with fewer than this many db kmers; if a float, interpreted as fraction of read length')
     parser.add_argument('--readMaxOccs', dest='read_max_occs', type=int_or_float,
                         help='filter out reads with more than this many db kmers; if a float, interpreted as fraction of read length')
+    parser.add_argument('--hardMask', dest='hard_mask', default=False, action='store_true', help='In the output reads, mask the invalid kmers')
     util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, filter_by_kmers, split_args=True)
     return parser

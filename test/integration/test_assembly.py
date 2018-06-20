@@ -11,6 +11,7 @@ import pytest
 
 import Bio.SeqIO
 
+import read_utils
 import assembly
 import util.cmd
 import util.file
@@ -46,7 +47,7 @@ class TestAssemble(TestCaseWithTmp):
         with open(outFasta, 'rt') as inf:
             seq = Bio.SeqIO.read(inf, 'fasta')
             self.assertGreater(len(seq), 17000)
-            self.assertGreater(assembly.unambig_count(seq.seq), len(seq) * 0.95)
+            self.assertGreater(read_utils.unambig_count(seq.seq), len(seq) * 0.95)
 
 # in order to test the actual de novo pipeline, we need to add a clip db for trimmomatic
 # then we should test from G5012.3.testreads.bam all the way through the assembly pipe

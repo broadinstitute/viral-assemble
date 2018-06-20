@@ -88,7 +88,7 @@ class KmcTool(tools.Tool):
             assert len(input_fmt_opts) == 1, "All input files must be of the same format"
             input_fmt_opt = list(input_fmt_opts)[0]
 
-            args += '-f{} -k{} -ci{} -cx{} -cs{} -m{} -sm -t{} @{} {}'.format(input_fmt_opt, kmer_size, min_occs, max_occs, counter_cap, mem_limit_gb, threads,
+            args += '-f{} -k{} -ci{} -cx{} -cs{} -m{} -r -t{} @{} {}'.format(input_fmt_opt, kmer_size, min_occs, max_occs, counter_cap, mem_limit_gb, threads,
                                                                               seq_file_list, kmer_db).split()
             if kmc_opts: args += shlex.split(kmc_opts)
             args += [t_dir]
@@ -116,7 +116,7 @@ class KmcTool(tools.Tool):
 
 
     def filter_reads(self, kmer_db, in_reads, out_reads, db_min_occs=None, db_max_occs=None, 
-                     read_min_occs=None, read_max_occs=None, threads=None):
+                     read_min_occs=None, read_max_occs=None, hard_mask=False, threads=None):
         """Filter reads based on their kmer contents.
 
         Note that "occurrence of a kmer" means "occurrence of the kmer or its reverse complement".
@@ -135,6 +135,7 @@ class KmcTool(tools.Tool):
           read_min_occs: only keep reads with at least this many occurrences of kmers from database.  If `as_perc` is True, interpreted as percent
              of read length
           read_max_occs: only keep reads with no more than this many occurrence of kmers from the database
+          hard_mask: if True, in the output reads, kmers not passing the filter are replaced by Ns
         """
 
         if db_min_occs is None: db_min_occs=1
@@ -170,8 +171,9 @@ class KmcTool(tools.Tool):
 
             in_reads_fmt = 'q' if in_reads_type in ('.fq', '.fastq') else 'a'
 
-            self.execute('filter {} -ci{} -cx{} {} -f{} -ci{} -cx{} {}'.format(self._kmer_db_name(kmer_db), db_min_occs, db_max_occs, _in_reads, in_reads_fmt, 
-                                                                               read_min_occs, read_max_occs, _out_reads).split(), threads=threads)
+            self.execute('filter {} {} -ci{} -cx{} {} -f{} -ci{} -cx{} {}'.format('-hm' if hard_mask else '',
+                                                                                  self._kmer_db_name(kmer_db), db_min_occs, db_max_occs, _in_reads, in_reads_fmt,
+                                                                                  read_min_occs, read_max_occs, _out_reads).split(), threads=threads)
 
             if in_reads_type == '.bam':
                 assert out_reads.endswith('.bam')

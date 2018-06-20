@@ -10,6 +10,8 @@ from snakemake.utils import makedirs
 import os, os.path, time, shutil
 
 
+threads_max = 100
+
 rule all_assemble:
     input:
         # create final assemblies for all samples
@@ -42,9 +44,9 @@ rule assemble_trinity:
     output:
         fasta = config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta',
         subsamp_bam = config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.subsamp.bam'
+    threads: threads_max
     resources:
         mem     = 7,
-        threads = int(config.get("number_of_threads", 1))
     params: 
         LSF         = config.get('LSF_queues', {}).get('short', '-W 4:00'),
         UGER        = config.get('UGER_queues', {}).get('short', '-l h_rt=04:00:00'),
@@ -54,7 +56,7 @@ rule assemble_trinity:
         makedirs(expand("{dir}/{subdir}",
             dir=[config["data_dir"],config["tmp_dir"]],
             subdir=config["subdirs"]["assembly"]))
-        shell("{config[bin_dir]}/assembly.py assemble_trinity {input.bam} {input.clipDb} {output.fasta} --n_reads={params.n_reads} --outReads {output.subsamp_bam} --threads {resources.threads} --JVMmemory 5g")
+        shell("{config[bin_dir]}/assembly.py assemble_trinity {input.bam} {input.clipDb} {output.fasta} --n_reads={params.n_reads} --outReads {output.subsamp_bam} --threads {threads} --JVMmemory 5g")
 
 rule assemble_spades:
     ''' This step runs the SPAdes assembler.
@@ -62,29 +64,12 @@ rule assemble_spades:
     input:  taxfilt_reads=config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.taxfilt.bam',
             clipDb = objectify_remote(config["trim_clip_db"])
     output: contigs_spades=config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-spades.fasta'
-    resources: 
-            mem=12,
-            threads=int(config.get("number_of_threads", 1))
+    threads: threads_max
+    resources: mem=12
     params: n_reads=str(config["spades_n_reads"]),
             logid="{sample}"
     run:
-            shell("{config[bin_dir]}/assembly.py assemble_spades {input.taxfilt_reads} {input.clipDb} {output.contigs_spades} --nReads {params.n_reads} --threads {resources.threads} --memLimitGb {resources.mem}")
-
-
-rule assemble_trinity_spades:
-    ''' This step runs the Trinity assembler then the SPAdes assembler.
-    '''
-    input:  taxfilt_reads=config["data_dir"]+'/'+config["subdirs"]["per_sample"]+'/{sample}.taxfilt.bam',
-            clipDb = objectify_remote(config["trim_clip_db"]),
-            contigs_trinity=config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity.fasta'
-    output: contigs_trinity_spades=config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly1-trinity-spades.fasta'
-    resources: 
-            mem=12,
-            threads=int(config.get("number_of_threads", 1))
-    params: n_reads=str(config["spades_n_reads"]),
-            logid="{sample}"
-    run:
-            shell("{config[bin_dir]}/assembly.py assemble_spades {input.taxfilt_reads} {input.clipDb} {output.contigs_trinity_spades} --contigsUntrusted {input.contigs_trinity} --nReads {params.n_reads} --threads {resources.threads} --memLimitGb {resources.mem}")
+            shell("{config[bin_dir]}/assembly.py assemble_spades {input.taxfilt_reads} {input.clipDb} {output.contigs_trinity_spades} --contigsUntrusted {input.contigs_trinity} --nReads {params.n_reads} --threads {threads} --memLimitGb {resources.mem}")
 
             
 rule orient_and_impute:
@@ -113,9 +98,10 @@ rule orient_and_impute:
         refsel_genomes = objectify_remote(expand( '{refDir}/'+'{ref_name}.fasta', refDir=config["refsel_ref_db_dir"], ref_name="refsel" ))
     output: 
         fasta = config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3-modify.fasta'
+    threads: threads_max
     resources: 
         mem = 12,
-        threads = int(config.get("number_of_threads", 1))
+#        threads = int(config.get("number_of_threads", 1))
     params: 
         LSF  = config.get('LSF_queues', {}).get('short', '-W 4:00'),
         UGER = config.get('UGER_queues', {}).get('short', '-l h_rt=04:00:00'),
@@ -129,7 +115,11 @@ rule orient_and_impute:
         scaffold_ref = config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffold_ref.fasta',
         scaffolded_fasta = config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-scaffolded.fasta',
         gapfilled_fasta=config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-gapfilled.fasta',
-        alternate_fasta  = config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-alternate_sequences.fasta'
+        alternate_fasta  = config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-alternate_sequences.fasta',
+        imputed_refs_fasta  = config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-imputed_refs.fasta',
+        imputed_masked_refs_fasta  = config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-imputed_masked_refs.fasta',
+        imputed_fasta  = config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-imputed.fasta',
+        imputed_masked_fasta  = config["tmp_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.assembly2-imputed_masked.fasta',
     run:
         ono_extra = []
         if config.get("assembly_nucmer_max_gap"):
@@ -140,10 +130,14 @@ rule orient_and_impute:
             ono_extra.extend(["--mincluster", str(config["assembly_nucmer_min_cluster"])])
         if config.get("scaffold_min_pct_contig_aligned"):
             ono_extra.extend(["--min_pct_contig_aligned", str(config["scaffold_min_pct_contig_aligned"])])
+        if config.get("reads_kmer_db", ""):
+            ono_extra.extend(["--reads_kmer_db", config["reads_kmer_db"], "--outImputedRefs", params.imputed_refs_fasta, "--outImputedMaskedRefs",
+                              params.imputed_masked_refs_fasta])
         ono_extra = " ".join(ono_extra)
         n_genome_segments = len(config["accessions_for_ref_genome_build"])
-        shell("{config[bin_dir]}/assembly.py order_and_orient {input.fasta} {input.refsel_genomes} {params.scaffolded_fasta} {ono_extra} --outAlternateContigs {params.alternate_fasta} --nGenomeSegments {n_genome_segments} --outReference {params.scaffold_ref} --threads {resources.threads}")
-        shell("{config[bin_dir]}/assembly.py gapfill_gap2seq {params.scaffolded_fasta} {input.cleaned_reads} {params.gapfilled_fasta} --memLimitGb {resources[mem]} --maskErrors --randomSeed {config[random_seed]}")
+        shell("{config[bin_dir]}/assembly.py order_and_orient {input.fasta} {input.refsel_genomes} {params.scaffolded_fasta} {ono_extra} --outAlternateContigs {params.alternate_fasta} --nGenomeSegments {n_genome_segments} --outReference {params.scaffold_ref} --replaceLength {params.replace_length} --minLengthFraction {params.length} --minUnambig {params.min_unambig} --outImputed {params.imputed_fasta} --outImputedMasked {params.imputed_masked_fasta} --threads {threads}")
+#        shell("{config[bin_dir]}/assembly.py gapfill_gap2seq {params.scaffolded_fasta} {input.cleaned_reads} {params.gapfilled_fasta} --memLimitGb {resources[mem]} --maskErrors --randomSeed {config[random_seed]}")
+        shell("cp {params.scaffolded_fasta} {params.gapfilled_fasta}")
         shell("{config[bin_dir]}/assembly.py impute_from_reference {params.gapfilled_fasta} {params.scaffold_ref} {output.fasta} --newName {params.renamed_prefix}{wildcards.sample} --replaceLength {params.replace_length} --minLengthFraction {params.length} --minUnambig {params.min_unambig} --index")
 
 rule refine_assembly_1:
@@ -164,16 +158,16 @@ rule refine_assembly_1:
     output: 
         config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4-refined.fasta',
         config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly3.vcf.gz'
+    threads: threads_max
     resources: 
         mem     = 7,
-        threads = int(config.get("number_of_threads", 1))
     params: 
         LSF               = config.get('LSF_queues', {}).get('short', '-W 4:00'),
         UGER              = config.get('UGER_queues', {}).get('short', '-l h_rt=04:00:00'),
         logid             = "{sample}",
         novoalign_options = config.get("refine_assembly_1_novoalign_params", "-r Random -l 30 -g 40 -x 20 -t 502"),
         min_coverage      = "2"
-    shell:  "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {resources.threads}"
+    shell:  "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {threads}"
 
 rule refine_assembly_2:
     ''' This a second pass refinement step very similar to the first.
@@ -190,9 +184,9 @@ rule refine_assembly_2:
     output: 
         config["data_dir"]+'/'+config["subdirs"]["assembly"]+'/{sample}.fasta',
         config["tmp_dir"] +'/'+config["subdirs"]["assembly"]+'/{sample}.assembly4.vcf.gz'
+    threads: threads_max
     resources: 
         mem     = 7,
-        threads = int(config.get("number_of_threads", 1))
     params: 
         LSF               = config.get('LSF_queues', {}).get('short', '-W 4:00'),
         UGER              = config.get('UGER_queues', {}).get('short', '-l h_rt=04:00:00'),
@@ -200,7 +194,7 @@ rule refine_assembly_2:
         novoalign_options = config.get("refine_assembly_2_novoalign_params", "-r Random -l 40 -g 40 -x 20 -t 100"),
         min_coverage      = "3"
     shell:  
-        "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {resources.threads}"
+        "{config[bin_dir]}/assembly.py refine_assembly {input} {output[0]} --outVcf {output[1]} --min_coverage {params.min_coverage} --novo_params '{params.novoalign_options}' --threads {threads}"
 
 rule map_reads_to_self:
     ''' After the final assembly is produced, we also produce BAM files with all reads
@@ -215,9 +209,9 @@ rule map_reads_to_self:
     output: 
         config["data_dir"]+'/'+config["subdirs"]["align_self"]+'/{sample}.bam',
         config["data_dir"]+'/'+config["subdirs"]["align_self"]+'/{sample}.mapped.bam'
+    threads: threads_max
     resources: 
-        mem     = 4,
-        threads = int(config.get("number_of_threads", 1))
+        mem     = 4
     params: 
         LSF             = config.get('LSF_queues', {}).get('short', '-W 4:00'),
         UGER            = config.get('UGER_queues', {}).get('short', '-l h_rt=04:00:00'),
@@ -227,4 +221,4 @@ rule map_reads_to_self:
     run:
         makedirs([os.path.join(config["data_dir"], config["subdirs"]["align_self"]),
             os.path.join(config["reports_dir"], "assembly")])
-        shell("{config[bin_dir]}/read_utils.py align_and_fix {input} --outBamAll {output[0]} --outBamFiltered {output[1]} --aligner novoalign --aligner_options '{params.aligner_options}' --threads {resources.threads}")
+        shell("{config[bin_dir]}/read_utils.py align_and_fix {input} --outBamAll {output[0]} --outBamFiltered {output[1]} --aligner novoalign --aligner_options '{params.aligner_options}' --threads {threads}")

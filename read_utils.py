@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """
 Utilities for working with sequence reads, such as converting formats and
-fixing mate pairs.
+fixing mate pairs.   Some of the utilities are also useful for working with
+contigs or assemblies.
 """
 from __future__ import division
 
@@ -1363,6 +1364,29 @@ def parser_read_names(parser=argparse.ArgumentParser()):
     return parser
 
 __commands__.append(('read_names', parser_read_names))
+
+# =========================
+
+def unambig_count(seq):
+    unambig = set(('A', 'T', 'C', 'G'))
+    return sum(1 for s in seq if s.upper() in unambig)
+
+def seq_stats(seq_file):
+    """Print basic stats about sequences in a file"""
+    # for now, just support .fasta
+    seq_recs_all = tuple(SeqIO.parse(seq_file, 'fasta'))
+    for sr in seq_recs_all:
+        seq_recs = [sr]
+        tot_len = sum(map(len, seq_recs))
+        tot_len_unambig = sum(unambig_count(rec.seq) for rec in seq_recs)
+        print('id=', sr.id, 'tot_len=', tot_len, 'unambig=', tot_len_unambig, 'ambig=', tot_len-tot_len_unambig)
+
+def parser_seq_stats(parser=argparse.ArgumentParser()):
+    parser.add_argument('seq_file', help='a file with sequences (currently .fasta)')
+    util.cmd.attach_main(parser, seq_stats, split_args=True)
+    return parser
+
+__commands__.append(('seq_stats', parser_seq_stats))
 
 # =========================
 
