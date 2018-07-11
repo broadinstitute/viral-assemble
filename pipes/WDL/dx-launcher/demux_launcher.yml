@@ -130,11 +130,14 @@ runSpec:
       if [ "$(cat tar_file_ids | wc -l)" -gt 1 ]; then
         # if there are multiple run tarballs, launch a subjob to consolidate them
         subjob=$(dx-jobutil-new-job consolidate_tars --instance-type="$tar_consolidation_instance_size" -i upload_sentinel_record="$upload_sentinel_record" -i folder="$folder" -i run_id="$run_id")
+        # wait for the job to finish
+        dx wait $subjob
         run_tarball="$subjob:run_tarball"
+        # wait for the consolidated file
+        dx wait $run_tarball
       else
         run_tarball=$(cat tar_file_ids | tr -d '\n')
       fi
-      dx wait $run_tarball
       dx-jobutil-add-output run_tarball $run_tarball
 
       if [ -n "$demux_workflow_id" ]; then
