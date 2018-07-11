@@ -134,6 +134,7 @@ runSpec:
       else
         run_tarball=$(cat tar_file_ids | tr -d '\n')
       fi
+      dx wait $run_tarball
       dx-jobutil-add-output run_tarball $run_tarball
 
       if [ -n "$demux_workflow_id" ]; then
@@ -177,7 +178,7 @@ runSpec:
       # tar the consolidated directory and upload
       # TODO: consider zstd/lz4
       dx mkdir -p "$folder/$run_id"
-      tar_id=$(tar c -C run/ . | pigz -c | dx upload --brief -p --destination $(printf "%s/%s/%s.tar.gz" "$folder" "$run_id" "$run_id") -)
+      tar_id=$(tar c -C run/ . | pigz -c | dx upload --brief --wait -p --destination $(printf "%s/%s/%s.tar.gz" "$folder" "$run_id" "$run_id") -)
       dx-jobutil-add-output run_tarball "$tar_id"
     }
 
