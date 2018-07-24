@@ -1,5 +1,5 @@
 filechunkio>=1.8
-snakemake>=5.2.0
+snakemake>=5.2.1
 google-cloud-storage
 pysftp>=0.2.8
 boto3
