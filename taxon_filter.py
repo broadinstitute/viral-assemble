@@ -32,8 +32,10 @@ import tools.prinseq
 import tools.bmtagger
 import tools.picard
 import tools.samtools
+import tools.kmc
 from util.file import mkstempfname
 import read_utils
+import kmer_utils
 
 log = logging.getLogger(__name__)
 
@@ -848,6 +850,72 @@ __commands__.append(('bmtagger_build_db', parser_bmtagger_build_db))
 
 # ========================
 
+def undeplete_reads_in_gaps(taxon_fasta, raw_bam, cleaned_bam, undepleted_bam, kmer_size=tools.kmc.DEFAULT_KMER_SIZE,
+                            cleaned_min_occs=5, raw_min_occs_frac=.1, threads=None):
+    """Try to improve coverage of genome regions not well-covered by
+    cleaned reads, by looking for depleted reads that might align to
+    these regions.  In other words, we try to find possibly relevant
+    reads that were incorrectly identified as human or contaminant and
+    depleted -- but only in genome regions which the default depletion
+    process has left with low coverage which might cause gaps in
+    assembly.
+    """
+
+    # rather than kmers, could use alignment, e.g. align cleaned reads tothe taxon seqs
+    # can also start with kmers then try aligning reads that have some relevant kmers.   could use lastal for that?
+    # can find less-conserved bases in taxon seqs then generate expected mutations and add kmers from them.
+
+
+    # rename undeplete to better name (since undepleted can mean never depleted)
+    # check how counter_cap interacts with -cx
+    # check whether read limits should be put on output params in read filtering
+
+    with util.file.tmp_dir(suffix='_undeplete') as t_dir:
+        
+        # Gather kmers in the taxon
+        taxon_kmers_db = os.path.join(t_dir, 'taxon_kmers')
+        kmer_utils.build_kmer_db(seq_files=taxon_fasta, kmer_db=taxon_kmers_db, kmer_size=kmer_size)
+        
+        # Gather kmers well-covered by cleaned reads
+        cleaned_kmers_db = os.path.join(t_dir, 'cleaned_kmers')   # try trim and rmdup first?
+        kmer_utils.build_kmer_db(seq_files=cleaned_bam, kmer_db=cleaned_kmers_db, kmer_size=kmer_size, min_occs=cleaned_min_occs)
+
+        # maybe need to dedup cleaned reads first?
+
+        # Compute kmers in the taxon that are not well-covered by cleaned reads
+        taxon_minus_cleaned_db = os.path.join(t_dir, 'taxon_minus_cleaned')
+        kmer_utils.kmers_binary_op(op='kmers_subtract', kmer_db1=taxon_kmers_db, kmer_db2=cleaned_kmers_db,
+                                   kmer_db_out=taxon_minus_cleaned_db)
+
+        # Find raw reads that contain taxon kmers not well-covered by cleaned reads
+        undepleted_withdups_bam = os.path.join(t_dir, 'undepleted_withdups.bam')
+        kmer_utils.filter_reads(kmer_db=taxon_minus_cleaned_db, in_reads=raw_bam, out_reads=undepleted_withdups_bam,
+                                read_min_occs_frac=raw_min_occs_frac)
+
+        # Remove reads that are in cleaned reads
+        cleaned_reads_names = os.path.join(t_dir, 'cleaned_reads.read_names.txt')
+        read_utils.read_names(cleaned_bam, cleaned_reads_names)
+        util.cmd.run_cmd(read_utils, 'filter_bam', ['--exclude', undepleted_withdups_bam, cleaned_reads_names, undepleted_bam])
+
+def parser_undeplete_reads_in_gaps(parser=argparse.ArgumentParser()):
+    parser.add_argument('taxon_fasta', help='A fasta file of sequences from the taxon.')
+    parser.add_argument('raw_bam', help='The raw reads')
+    parser.add_argument('cleaned_bam', help='The cleaned reads')
+    parser.add_argument('undepleted_bam', help='The undepleted reads')
+    parser.add_argument('--kmerSize', '-k', dest='kmer_size', type=int, default=tools.kmc.DEFAULT_KMER_SIZE,
+                        help='kmer size to use for finding taxon kmers')
+    parser.add_argument('--cleanedMinOccs', dest='cleaned_min_occs', type=int, default=5,
+                        help='only undeplete raw reads where cleaned reads kmer coverage is below this')
+    parser.add_argument('--rawMinOccsFrac', dest='raw_min_occs_frac', type=float, default=.1,
+                        help='undeplete raw reads in which at least this fraction of kmers are taxon kmers')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, undeplete_reads_in_gaps, split_args=True)
+    return parser
+
+__commands__.append(('undeplete_reads_in_gaps', parser_undeplete_reads_in_gaps))
+
+
+# =======================================================================================================================
 
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
