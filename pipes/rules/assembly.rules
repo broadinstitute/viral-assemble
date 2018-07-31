@@ -228,3 +228,54 @@ rule map_reads_to_self:
         makedirs([os.path.join(config["data_dir"], config["subdirs"]["align_self"]),
             os.path.join(config["reports_dir"], "assembly")])
         shell("{config[bin_dir]}/read_utils.py align_and_fix {input} --outBamAll {output[0]} --outBamFiltered {output[1]} --aligner novoalign --aligner_options '{params.aligner_options}' --threads {resources.threads}")
+
+wildcard_constraints:
+    # File naming convention for KMC kmer databases, based on kmc command-line flags
+    # used to create the database:
+    # .kN. : kmer size N
+    # .ciN. : exclude kmers with fewer than N occurrences
+    # .cxN. : exclude kmers with more than N occurrences
+    # .csN. : cap kmer counters at N
+    K="\d\d",
+    CI="\d+",
+    CI2="\d+",
+    CX="\d+",
+    CS="\d+",
+    ADJ="raw|cleaned|taxfilt|asm"
+
+def kmc(kmc_db_prefix):
+    """Return the KMC kmer database filesnames given the database prefix"""
+    return [kmc_db_prefix+ext for ext in ('.kmc_pre', '.kmc_suf')]
+
+tmp_assembly_dir = config["tmp_dir"] +'/'+config["subdirs"]["assembly"]
+
+rule compute_kmers:
+    '''Compute kmers for a sample'''
+    input:
+        lambda wildcards: config["data_dir"] +'/'+config["subdirs"]["assembly"]+'/'+wildcards.sample+'.fasta' \
+            if wildcards.ADJ=='asm' else \
+            config["data_dir"] +'/'+config["subdirs"]["per_sample"]+'/'+wildcards.sample+'.'+wildcards.ADJ+'.bam'
+    output:
+        kmc(tmp_assembly_dir+'/{sample}.{ADJ}.k{K}.ci{CI}.cx{CX}.cs{CS}')
+    threads: lambda wildcards: 1 if wildcards.ADJ=='asm' else 64
+    resources: mem=12
+    run:
+        shell("{config[bin_dir]}/kmer_utils.py build_kmer_db {input} {output[0]} -k {wildcards.K} --minOccs {wildcards.CI} --maxOccs {wildcards.CX} --counterCap {wildcards.CS} --memLimitGb {resources.mem} --threads {threads}")
+
+rule compute_taxon_kmers:
+    '''Compute kmers in sequences from the taxon (not necessarily complete genomes)'''
+    input: "lastal_db/lastal.fasta"
+    output:
+        kmc('lastal_db/lastal.k{K}.ci{CI}.cx{CX}.cs{CS}')
+    resources: mem=12
+    run:
+        shell("{config[bin_dir]}/kmer_utils.py build_kmer_db {input} {output[0]} -k {wildcards.K} --minOccs {wildcards.CI} --maxOccs {wildcards.CX} --counterCap {wildcards.CS} --memLimitGb {resources.mem} --threads {threads}")
+
+rule find_reads_with_taxon_kmers:
+    '''Filter reads to those with taxon kmers'''
+    input: kmc('lastal_db/lastal.k{K}.ci{CI}.cx{CX}.cs{CS}'),
+           bam='data/01_per_sample/{sample}.{ADJ}.bam',
+    output: 'data/01_per_sample/{sample}.{ADJ}.filt.k{K}.ci{CI}.cx{CX}.cs{CS}.rci{CI2}.bam'
+    resources: mem=12
+    run:
+        shell("{config[bin_dir]}/kmer_utils.py filter_reads {input[0]} {input.bam} {output} --readMinOccs {wildcards.CI2}")
