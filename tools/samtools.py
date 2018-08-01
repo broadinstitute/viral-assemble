@@ -87,11 +87,11 @@ class SamtoolsTool(tools.Tool):
         #opts = args + ['-o', outFile, inFile] + regions
         #pysam.view(*opts)
 
-    def bam2fq(self, inBam, outFq1, outFq2=None):
+    def bam2fq(self, inBam, outFq1, outFq2=None, append_mate_num=False):
         if outFq2 is None:
-            self.execute('bam2fq', ['-n', inBam], stdout=outFq1)
+            self.execute('bam2fq', ['-N' if append_mate_num else '-n', inBam], stdout=outFq1)
         else:
-            self.execute('bam2fq', ['-1', outFq1, '-2', outFq2, inBam])
+            self.execute('bam2fq', (['-N'] if append_mate_num else []) + ['-1', outFq1, '-2', outFq2, inBam])
 
     def bam2fq_pipe(self, inBam):
         tool_cmd = [self.install_and_get_path(), 'bam2fq', '-n', inBam]
@@ -99,13 +99,15 @@ class SamtoolsTool(tools.Tool):
         p = subprocess.Popen(tool_cmd, stdout=subprocess.PIPE)
         return p
 
-    def bam2fa(self, inBam, outFa1, outFa2=None, outFa0=None):
+    def bam2fa(self, inBam, outFa1, outFa2=None, outFa0=None, append_mate_num=False):
         if outFa2 is None:
-            args = ['-n']
+            args = [] if append_mate_num else ['-n']
         else:
             args = ['-1', outFa1, '-2', outFa2]
         if outFa0:
             args += ['-0', outFa0]
+        if append_mate_num:
+            args += ['-N']
         args += [inBam]
         if outFa2 is None:
             self.execute('fasta', args, stdout=outFa1)

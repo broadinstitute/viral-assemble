@@ -1397,6 +1397,80 @@ __commands__.append(('extract_tarball', parser_extract_tarball))
 
 # =========================
 
+# =========================
+def unambig_count(seq):
+    unambig = set(('A', 'T', 'C', 'G'))
+    return sum(1 for s in seq if s.upper() in unambig)
+
+def seq_stats(seq_file):
+    """Print basic stats about sequences in a file"""
+    # for now, just support .fasta
+    seq_recs_all = tuple(SeqIO.parse(seq_file, 'fasta'))
+    for sr in seq_recs_all:
+        seq_recs = [sr]
+        tot_len = sum(map(len, seq_recs))
+        tot_len_unambig = sum(unambig_count(rec.seq) for rec in seq_recs)
+        print('id=', sr.id, 'tot_len=', tot_len, 'unambig=', tot_len_unambig, 'ambig=', tot_len-tot_len_unambig)
+
+def parser_seq_stats(parser=argparse.ArgumentParser()):
+    parser.add_argument('seq_file', help='a file with sequences (currently .fasta)')
+    util.cmd.attach_main(parser, seq_stats, split_args=True)
+    return parser
+
+__commands__.append(('seq_stats', parser_seq_stats))
+
+# =============================
+
+# add options to split by read group and/or by library.
+# factor out impl code common to fa and fq.
+# add option to gzip the output.
+# add small test cases.
+
+def bam2fa(in_bam, out_dir=None, no_mate_num=False, threads=None):
+    """Convert .bam to a pair of fastas"""
+    out_dir = out_dir or os.path.dirname(in_bam)
+    base = os.path.splitext(os.path.basename(in_bam))[0]
+    tools.samtools.SamtoolsTool().bam2fa(in_bam,
+                                         os.path.join(out_dir, base+'.1.fasta'),
+                                         os.path.join(out_dir, base+'.2.fasta'),
+                                         append_mate_num=not no_mate_num)
+
+def parser_bam2fa(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_bam', help='Input bam')
+    parser.add_argument('out_dir', nargs='?', help='output dir (defaults to dir of in_bam)')
+    parser.add_argument('--noMateNum', dest='no_mate_num', action='store_true', default=False,
+                        help='do not append /1 and /2 to read names')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, bam2fa, split_args=True)
+    return parser
+
+__commands__.append(('bam2fa', parser_bam2fa))
+
+# =========================================================
+
+def bam2fq(in_bam, out_dir=None, no_mate_num=False, threads=None):
+    """Convert .bam to a pair of fastqs"""
+    out_dir = out_dir or os.path.dirname(in_bam)
+    base = os.path.splitext(os.path.basename(in_bam))[0]
+    tools.samtools.SamtoolsTool().bam2fq(in_bam,
+                                         os.path.join(out_dir, base+'.1.fastq'),
+                                         os.path.join(out_dir, base+'.2.fastq'),
+                                         append_mate_num=not no_mate_num)
+
+def parser_bam2fq(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_bam', help='Input bam')
+    parser.add_argument('out_dir', nargs='?', help='output dir (defaults to dir of in_bam)')
+    parser.add_argument('--noMateNum', dest='no_mate_num', action='store_true', default=False,
+                        help='do not append /1 and /2 to read names')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, bam2fq, split_args=True)
+    return parser
+
+__commands__.append(('bam2fq', parser_bam2fq))
+
+# =========================================================
+
+
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
 
