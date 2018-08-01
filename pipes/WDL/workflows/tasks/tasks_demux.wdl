@@ -46,6 +46,7 @@ task illumina_demux {
   String? runStartDate
   Int?    maxReadsInRamPerTile
   Int?    maxRecordsInRam
+  Int?    tileLimit
   Boolean? forceGC=true
 
 
@@ -143,6 +144,7 @@ task illumina_demux {
       ${'--min_mismatch_delta=' + minMismatchDelta} \
       ${'--max_no_calls=' + maxNoCalls} \
       ${'--read_structure=' + readStructure} \
+      ${'--tile_limit=' + tileLimit} \
       ${'--minimum_quality=' + minimumQuality} \
       ${'--run_start_date=' + runStartDate} \
       $max_reads_in_ram_per_tile \
