@@ -44,6 +44,7 @@ import tools.mafft
 import tools.mummer
 import tools.muscle
 import tools.gap2seq
+import tools.abyss
 
 # third-party
 import Bio.AlignIO
@@ -443,6 +444,41 @@ def parser_gapfill_gap2seq(parser=argparse.ArgumentParser(description='Close gap
 
 
 __commands__.append(('gapfill_gap2seq', parser_gapfill_gap2seq))
+
+def gapfill_sealer(in_scaffold, in_bam, out_scaffold, threads=None, mem_limit_gb=4, time_soft_limit_minutes=60.0,
+                   random_seed=0, sealer_opts='', mask_errors=False):
+    ''' This step runs the abyss-sealer tool to close gaps between contigs in a scaffold.
+    '''
+    try:
+        tools.abyss.AbyssTool().gapfill(in_scaffold, in_bam, out_scaffold, sealer_opts=sealer_opts, threads=threads,
+                                        mem_limit_gb=mem_limit_gb, time_soft_limit_minutes=time_soft_limit_minutes, 
+                                        random_seed=random_seed)
+    except Exception as e:
+        if not mask_errors:
+            raise
+        log.warning('Gap-filling with Sealer failed (%s); ignoring error, emulating successful run where simply no gaps were filled.')
+        shutil.copyfile(in_scaffold, out_scaffold)
+
+def parser_gapfill_sealer(parser=argparse.ArgumentParser(description='Close gaps between contigs in a scaffold with Sealer')):
+    parser.add_argument('in_scaffold', help='FASTA file containing the scaffold.  Each FASTA record corresponds to one '
+                        'segment (for multi-segment genomes).  Contigs within each segment are separated by Ns.')
+    parser.add_argument('in_bam', help='Input unaligned reads, BAM format.')
+    parser.add_argument('out_scaffold', help='Output assembly.')
+    parser.add_argument('--memLimitGb', dest='mem_limit_gb', default=4.0, help='Max memory to use, in gigabytes %(default)s')
+    parser.add_argument('--timeSoftLimitMinutes', dest='time_soft_limit_minutes', default=60.0,
+                        help='Stop trying to close more gaps after this many minutes (default: %(default)s); '
+                        'this is a soft/advisory limit')
+    parser.add_argument('--maskErrors', dest='mask_errors', default=False, action='store_true',
+                        help='In case of any error, just copy in_scaffold to out_scaffold, emulating a successful run that '
+                        'simply could not fill any gaps.')
+    parser.add_argument('--sealerOpts', dest='sealer_opts', default='', help='(advanced) Extra command-line options to pass to Sealer')
+    parser.add_argument('--randomSeed', dest='random_seed', default=0, help='Random seed; 0 means use current time')
+    util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, gapfill_sealer, split_args=True)
+    return parser
+
+
+__commands__.append(('gapfill_sealer', parser_gapfill_sealer))
 
 
 def _order_and_orient_orig(inFasta, inReference, outFasta,

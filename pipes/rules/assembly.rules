@@ -8,7 +8,8 @@ __author__ = 'Kristian Andersen <andersen@broadinstitute.org>, Daniel Park <dpar
 
 from snakemake.utils import makedirs
 import os, os.path, time, shutil
-
+import tools
+import tools.samtools
 
 rule all_assemble:
     input:
@@ -237,11 +238,13 @@ wildcard_constraints:
     # .cxN. : exclude kmers with more than N occurrences
     # .csN. : cap kmer counters at N
     K="\d\d",
+    K2="\d\d",
     CI="\d+",
     CI2="\d+",
     CX="\d+",
     CS="\d+",
-    ADJ="raw|cleaned|taxfilt|asm"
+    ADJ="raw|cleaned|taxfilt|asm",
+    BLMSZ="\d+g"
 
 def kmc(kmc_db_prefix):
     """Return the KMC kmer database filesnames given the database prefix"""
@@ -279,3 +282,34 @@ rule find_reads_with_taxon_kmers:
     resources: mem=12
     run:
         shell("{config[bin_dir]}/kmer_utils.py filter_reads {input[0]} {input.bam} {output} --readMinOccs {wildcards.CI2}")
+        shell("samtools flagstat {output}")
+
+rule build_bloom_filter:
+    '''Build a bloom filter'''
+    input: 'data/01_per_sample/{sample}.{ADJ}.filt.k{K}.ci{CI}.cx{CX}.cs{CS}.rci{CI2}.bam'
+    output: 'data/01_per_sample/{sample}.{ADJ}.filt.k{K}.ci{CI}.cx{CX}.cs{CS}.rci{CI2}.bloom.k{K2}.blmsz{BLMSZ}.bloom'
+    resources: mem=100
+    threads: 100
+    run:
+        with tools.samtools.SamtoolsTool().bam2fq_tmp(input[0]) as (reads1, reads2):
+            shell("echo reads files are {reads1} {reads2}")
+            util.file.mkdir_p('/dev/shm/bloom')
+            mem_bloom = os.path.join('/dev/shm/bloom', os.path.basename(output[0]))
+            print('mem_bloom is', mem_bloom)
+            shell("abyss-bloom build -v -k{wildcards.K2} -b{wildcards.BLMSZ} -j{threads} {mem_bloom} {reads1} {reads2}")
+            shell("ln -s {mem_bloom} {output}")
+
+rule run_abyss_sealer:
+    '''Seal gaps with abyss-sealer'''
+    input: orig_assembly='data/02_assembly/{sample}.fasta',
+           taxfilt_bam='data/01_per_sample/{sample}.{ADJ}.filt.k{K}.ci{CI}.cx{CX}.cs{CS}.rci{CI2}.bam'
+    output: 'tmp/02_assembly/{sample}.finishing.sealer.{ADJ}.filt.k{K}.ci{CI}.cx{CX}.cs{CS}.rci{CI2}.fasta'
+    resources: mem=100
+    threads: 100
+    run:
+        shell("{config[bin_dir]}/assembly.py gapfill_sealer {input.orig_assembly} {input.taxfilt_bam} {output} --threads {threads}")
+
+
+
+
+
