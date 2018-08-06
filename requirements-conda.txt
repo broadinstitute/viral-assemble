@@ -1,4 +1,4 @@
-bbmap=38.18
+bbmap=38.19
 blast=2.7.1
 bmtagger=3.101
 bwa=0.7.17

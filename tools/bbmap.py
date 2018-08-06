@@ -18,7 +18,7 @@ import util.file
 import util.misc
 
 TOOL_NAME = 'bbmap'
-TOOL_VERSION = '38.18'
+TOOL_VERSION = '38.19'
 
 log = logging.getLogger(__name__)
 
