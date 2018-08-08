@@ -59,11 +59,3 @@ class AbyssTool(tools.Tool):
 
             shutil.copyfile( src = sealer_pfx + '_scaffold.fa', dst = out_scaffold )
             shutil.copyfile( src = sealer_pfx + '_merged.fa', dst = out_scaffold + '.merged.fa' )
-
-
-
-                      
-                      
-
-    
-
