@@ -9,6 +9,7 @@ import os
 import os.path
 import subprocess
 
+import shutil
 import tools
 import tools.samtools
 import tools.picard
@@ -182,9 +183,9 @@ class Bwa(tools.Tool):
             os.unlink(one_rg_inBam)
 
         # if the aligned bam file contains no reads after filtering
-        # just create an empty file
+        # just keep it without sorting
         if tools.samtools.SamtoolsTool().count(tmp_bam_aligned) == 0:
-            util.file.touch(outBam)
+            shutil.copy(tmp_bam_aligned, outBam)
         else:
             # samtools reheader seems to segfault on some alignments created by bwa
             # so rather than reheader, BWA will write out the RG given to it via '-R'
