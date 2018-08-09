@@ -773,20 +773,26 @@ def align_and_plot_coverage(
 
     aln_bam_dupe_processed = util.file.mkstempfname('.filtered_dupe_processed.bam')
     if excludeDuplicates:
-        opts = list(picardOptions)
-        dupe_removal_out_metrics = util.file.mkstempfname('.metrics')
-        tools.picard.MarkDuplicatesTool().execute(
-            [aln_bam], aln_bam_dupe_processed,
-            dupe_removal_out_metrics, picardOptions=opts,
-            JVMmemory=JVMmemory
-        )
+        aln_bam_count = samtools.count(aln_bam)
+        if aln_bam_count == 0:
+            # MarkDuplicates throws an exception when given 0 reads, so
+            # skip it
+            aln_bam_dupe_processed = aln_bam
+        else:
+            opts = list(picardOptions)
+            dupe_removal_out_metrics = util.file.mkstempfname('.metrics')
+            tools.picard.MarkDuplicatesTool().execute(
+                [aln_bam], aln_bam_dupe_processed,
+                dupe_removal_out_metrics, picardOptions=opts,
+                JVMmemory=JVMmemory
+            )
     else:
         aln_bam_dupe_processed = aln_bam
 
     samtools.sort(aln_bam_dupe_processed, bam_aligned)
     os.unlink(aln_bam)
     
-    if excludeDuplicates:
+    if excludeDuplicates and aln_bam_count > 0:
         os.unlink(aln_bam_dupe_processed)
 
     samtools.index(bam_aligned)
