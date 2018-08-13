@@ -1,3 +1,4 @@
+abyss=2.1.0
 blast=2.7.1
 bbmap=38.20
 bmtagger=3.101
