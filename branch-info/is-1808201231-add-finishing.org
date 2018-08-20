@@ -1,0 +1,36 @@
+Branch: is-1808201231-add-finishing
+
+To de novo assembly, adding a finishing step that tries to reduce or close assembly gaps.
+
+Notes on the finishing step:
+
+The finishing step will use some of the same techniques as the main assembly; however,
+making it a separate step has several advantages:
+   - the finishing step will only be run on assemblies on which the main pipeline leaves gaps;
+   and it will accept the scaffolds from them main pipeline as correct.  This means that
+   the step does not have the potential to make results worse for some samples (unlike changes
+   to the main assembly pipeline).  It will be relatively safe to use more experimental
+   techniques in this step.
+   - the finishing step will only be run for a fraction of samples, and for those it will focus
+   on reconstructing only a fraction of the genome.  This means more expensive techniques
+   can be used, such as overlap-based assembly.
+
+Some approaches we'll use in the finishing step:
+
+  - bringing in additional reads that were potentially relevant to the taxon, but were
+    not used in the main assembly.  These can be sourced from the cleaned reads, or
+    optionally from the raw reads (ideally of course we would fix depletion so that
+    going back to raw reads is never needed)
+
+    For a given gap, we can bring in reads that
+       - align to the gap edges
+       - align to the gap sequence in any of the known references
+       - are paired mates of reads that do the above
+       - share some overlap with reads that do the above	 
+	 
+  - reassemble potentially gap-spanning contigs from all reads potentially relevant to each gap
+
+    
+
+
+
