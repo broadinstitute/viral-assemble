@@ -1705,6 +1705,8 @@ def gap_seqs_from_refs(in_scaffold, in_refs, out_gap_seqs, min_gap_len, flank_le
          based on the references.
     '''
 
+    def DNASeq(s): return Seq(s, alphabet=IUPAC.ambiguous_dna)
+
     with util.file.tmp_dir('_gap_seqs_from_refs') as t_dir:
 
         refs_recs = tuple(Bio.SeqIO.parse(in_refs, 'fasta'))
@@ -1722,7 +1724,7 @@ def gap_seqs_from_refs(in_scaffold, in_refs, out_gap_seqs, min_gap_len, flank_le
                 flanks_hits = []
                 for flank_num in (0,1):
                     flank_fasta = os.path.join(t_dir, 'flank_{}.fasta'.format(flank_num))
-                    Bio.SeqIO.write([SeqRecord(Seq(flank_seqs[flank_num], alphabet=IUPAC.ambiguous_dna), id='flank')],
+                    Bio.SeqIO.write([SeqRecord(DNASeq(flank_seqs[flank_num]), id='flank')],
                                     flank_fasta, 'fasta')
                     flanks_hits.append(blastn.get_hits(inFasta=flank_fasta, db=refs_db_pfx,
                                                        blast_opts=['-task', 'blastn', '-word_size', 4, '-evalue', '1e-6',
@@ -1744,6 +1746,7 @@ def gap_seqs_from_refs(in_scaffold, in_refs, out_gap_seqs, min_gap_len, flank_le
                                                                                         len(targs_both_flanks),
                                                                                         len(targs_left_only),
                                                                                         len(targs_right_only)))
+
                 lens = set()
                 gap_seqs = []
                 for targ in targs_both_flanks:
@@ -1757,10 +1760,14 @@ def gap_seqs_from_refs(in_scaffold, in_refs, out_gap_seqs, min_gap_len, flank_le
                     assert hsps[0].sbjct_start < hsps[0].sbjct_end < hsps[1].sbjct_start < hsps[1].sbjct_end
                     subj_seq = refId2seq[hit_ids[i].split('|')[1]]
                     for i in range(2):
-                        assert subj_seq[hsps[i].sbjct_start-1:hsps[i].sbjct_end] == str(Seq(hsps[i].sbjct, alphabet=IUPAC.ambiguous_dna).ungap(gap='-'))
+                        assert subj_seq[hsps[i].sbjct_start-1:hsps[i].sbjct_end] == str(DNASeq(hsps[i].sbjct).ungap(gap='-'))
                     lens.add(hsps[1].sbjct_end - hsps[0].sbjct_start)
-                    gap_seqs.append(SeqRecord(Seq(subj_seq[hsps[0].sbjct_start-1:hsps[1].sbjct_end], alphabet=IUPAC.ambiguous_dna),
+                    gap_seqs.append(SeqRecord(DNASeq(subj_seq[hsps[0].sbjct_start-1:hsps[1].sbjct_end]),
                                               id='gap_{}_targ_{}'.format(gap_num, hit_ids[0])))
+                    gap_seqs.append(SeqRecord(DNASeq(hsps[0].query).ungap(gap='-') + \
+                                              DNASeq(subj_seq[hsps[0].sbjct_end:hsps[1].sbjct_start-1]) + \
+                                              DNASeq(hsps[1].query).ungap(gap='-'),
+                                              id='gap_{}_wflanks_targ_{}'.format(gap_num, hit_ids[0])))
 
                 print('lens: {} - {}'.format(len(lens), ', '.join(map(str, sorted(lens)))))
                 Bio.SeqIO.write(gap_seqs, '/tmp/gap.{}.fasta'.format(gap_num), 'fasta')
