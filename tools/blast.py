@@ -3,10 +3,15 @@
 import logging
 import os
 import subprocess
+import shutil
+import sys
+
+from Bio.Blast import NCBIXML
 
 import tools
 import tools.samtools
 import util.misc
+import util.file
 
 TOOL_NAME = "blast"
 TOOL_VERSION = "2.7.1"
@@ -32,7 +37,8 @@ class BlastTools(tools.Tool):
     def execute(self, *args):
         cmd = [self.install_and_get_path()]
         cmd.extend(args)
-        util.misc.run_and_print(cmd, buffered=True, check=True)
+        print('cmd=', cmd)
+        util.misc.run_and_print(map(str, cmd), buffered=True, check=True)
 
 
 class BlastnTool(BlastTools):
@@ -79,12 +85,19 @@ class BlastnTool(BlastTools):
             for hit in self.get_hits_pipe(inf, db, threads=threads):
                 yield hit
 
+    def get_hits(self, inFasta, db, blast_opts=None):
+        """Return blast hits"""
+        with util.file.tempfname(suffix='_blastn_get_hits') as xml_hits:
+            BLAST_OUTFMT_XML = '5'
+            self.execute(*(['-db', db, '-query', inFasta, '-outfmt', BLAST_OUTFMT_XML, '-out', xml_hits] + list(blast_opts or [])))
+            with open(xml_hits) as xml_hits_handle:
+                return list(NCBIXML.parse(xml_hits_handle))
 
 class MakeblastdbTool(BlastTools):
     """ Tool wrapper for makeblastdb """
     subtool_name = 'makeblastdb'
 
-    def build_database(self, fasta_files, database_prefix_path):
+    def build_database(self, fasta_files, database_prefix_path, makeblastdb_opts=None):
         """ builds a srprism database """
 
         input_fasta = ""
@@ -110,7 +123,7 @@ class MakeblastdbTool(BlastTools):
         else:
             raise IOError("No fasta file provided")
 
-        args = ['-dbtype', 'nucl', '-in', input_fasta, '-out', database_prefix_path]
+        args = ['-dbtype', 'nucl', '-in', input_fasta, '-out', database_prefix_path] + list(makeblastdb_opts or [])
         self.execute(*args)
 
         return database_prefix_path
