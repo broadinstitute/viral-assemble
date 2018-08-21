@@ -20,6 +20,7 @@ import operator
 import concurrent.futures
 import csv
 import re
+import collections
 
 try:
     from itertools import zip_longest    # pylint: disable=E0611
@@ -1679,35 +1680,57 @@ def dpdiff(inVcfs, outFile):
 
 #####################################################################################
 
+Gap = collections.namedtuple('Gap', 'gap_num flank_seqs gap_seq gap_seq_len scaffold_segment_id')
 
+def gaps_iter(scaffold_fasta, min_gap_len, min_flank_len, max_flank_len=None):
+    """Iterate over gaps in a DNA sequence."""
 
-def gaps_iter(seq, min_gap_len, flank_len):
-    """Iterate over gaps in a DNA sequence"""
+    max_flank_len = max_flank_len or min_flank_len
 
-    flank_regexp = r'([TCGA]{' + str(flank_len) + r'})'
-    gap_pattern = flank_regexp + r'N{' + str(min_gap_len) + r',}' + flank_regexp
-    print('gap_pattern=', gap_pattern)
-    for m in re.finditer(gap_pattern, seq):
-        flank_seqs = (m.group(1), m.group(2))
-        yield flank_seqs
+    def paren(s): return '(?:' + s + ')'
+    def rep(s, nmin='', nmax='', greedy=True):
+        return paren(paren(s)+'{'+str(nmin)+','+str(nmax)+'}'+('' if greedy else '?'))
+    Ns = rep('N', nmin=min_gap_len)
+    flank_re = '(' + rep('[^N]', nmin=min_flank_len, nmax=max_flank_len) + ')'
+    print('LLLL', min_flank_len, type(min_flank_len))
+    sub_flank_re = rep('[^N]', nmax=min_flank_len-1, greedy=False)
+    sub_Ns_re = rep('N', nmax=min_gap_len-1)
+    gap_re = Ns
+    flanked_gap_re = flank_re + '(' + gap_re + rep(sub_flank_re+'N+', greedy=False) + ')' + flank_re
 
-def gap_seqs_from_refs(in_scaffold, in_refs, out_gap_seqs, min_gap_len, flank_len, threads=None):
+    print('RRRRRRRRRRRRRR', flanked_gap_re)
+
+    gap_num = 0
+    for scaffold_segment_num, scaffold_segment in enumerate(Bio.SeqIO.parse(scaffold_fasta, 'fasta')):
+        for m in re.finditer(flanked_gap_re, str(scaffold_segment.seq)):
+            print('MATCH', m.group(0), 'groups', m.groups())
+            yield Gap(gap_num=gap_num, flank_seqs=(m.group(1), m.group(3)), gap_seq=m.group(2),
+                      gap_seq_len=len(m.group(2)),
+                      scaffold_segment_id=scaffold_segment.id)
+            gap_num += 1
+
+def gap_seqs_from_refs(in_scaffold, in_refs, out_gap_seqs_fasta, out_gap_seqs_info=None, min_gap_len=10,
+                       min_flank_len=200, max_flank_len=None, threads=None):
     '''For each gap in an assembly, determine the likely approximate sequence in the gap
     based on a set of reference sequences.
 
     Inputs:
-       scaffold: the assembly scaffold; a fasta file with possibly gapped sequence(s)
-       refs: the known reference sequences from the taxon.  They can be in any order,
+       in_scaffold: the assembly scaffold; a fasta file with possibly gapped sequence(s)
+       in_refs: the known reference sequences from the taxon.  They can be in any order,
          and need not represent complete genome segments.
 
     Outputs:
-       gap_seqs: fasta file that, for each gap, gives the possible sequences in that gap,
-         based on the references.
+       out_gap_seqs_fasta: fasta file that gives the possible sequences in gaps, based on the references
+       out_gap_seqs_info: a tsv table that for each sequence record in out_gap_seqs_fasta gives information about
+          the gap filled by that sequence
     '''
 
-    def DNASeq(s): return Seq(s, alphabet=IUPAC.ambiguous_dna)
+    DNASeq = functools.partial(Seq, alphabet=IUPAC.ambiguous_dna)
+    out_gap_seqs_info = out_gap_seqs_info or out_gap_seqs_fasta+'.info.tsv'
 
-    with util.file.tmp_dir('_gap_seqs_from_refs') as t_dir:
+    with util.file.tmp_dir('_gap_seqs_from_refs') as t_dir, open(out_gap_seqs_info, 'w') as out_gap_seqs_info_file:
+        gap_seqs_info_writer = csv.DictWriter(out_gap_seqs_info_file,
+                                              fieldnames = ('fasta_rec_id', 'gap_num'), delimiter='\t')
 
         refs_recs = tuple(Bio.SeqIO.parse(in_refs, 'fasta'))
         refId2seq = {ref_rec.id : str(ref_rec.seq) for ref_rec in refs_recs}
@@ -1718,59 +1741,57 @@ def gap_seqs_from_refs(in_scaffold, in_refs, out_gap_seqs, min_gap_len, flank_le
 
         blastn = tools.blast.BlastnTool()
 
-        for scaffold_segment_num, scaffold_segment in enumerate(Bio.SeqIO.parse(in_scaffold, 'fasta')):
-            for gap_num, flank_seqs in enumerate(gaps_iter(seq=str(scaffold_segment.seq),
-                                                           min_gap_len=min_gap_len, flank_len=flank_len)):
-                flanks_hits = []
-                for flank_num in (0,1):
-                    flank_fasta = os.path.join(t_dir, 'flank_{}.fasta'.format(flank_num))
-                    Bio.SeqIO.write([SeqRecord(DNASeq(flank_seqs[flank_num]), id='flank')],
-                                    flank_fasta, 'fasta')
-                    flanks_hits.append(blastn.get_hits(inFasta=flank_fasta, db=refs_db_pfx,
-                                                       blast_opts=['-task', 'blastn', '-word_size', 4, '-evalue', '1e-6',
-                                                                   '-perc_identity', '60', '-qcov_hsp_perc', '95', '-max_hsps', '1',
-                                                                   '-max_target_seqs', '2000']))
+        for gap in gaps_iter(in_scaffold, min_gap_len, min_flank_len, max_flank_len):
+            print('GGGGGGGGGGGap=', gap)
+            flanks_hits = []
+            for flank_num in (0,1):
+                flank_fasta = os.path.join(t_dir, 'flank_{}.fasta'.format(flank_num))
+                Bio.SeqIO.write([SeqRecord(DNASeq(gap.flank_seqs[flank_num]), id='flank')],
+                                flank_fasta, 'fasta')
+                flanks_hits.append(blastn.get_hits(inFasta=flank_fasta, db=refs_db_pfx,
+                                                   blast_opts=['-task', 'blastn', '-word_size', 4, '-evalue', '1e-6',
+                                                               '-perc_identity', '60', '-qcov_hsp_perc', '95', '-max_hsps', '1',
+                                                               '-max_target_seqs', '2000']))
 
-                targ2hits = [{}, {}]
+            targ2hits = [{}, {}]
 
-                print(flanks_hits[0])
+            print(flanks_hits[0])
+            for i in range(2):
+                for alignment_num, alignment in enumerate(flanks_hits[i][0].alignments):
+                    targ2hits[i][alignment.hit_id] = alignment
+
+            targs_both_flanks = sorted(set(targ2hits[0].keys()) & set(targ2hits[1].keys()))
+            targs_left_only = sorted(set(targ2hits[0].keys()) - set(targ2hits[1].keys()))
+            targs_right_only = sorted(set(targ2hits[1].keys()) - set(targ2hits[0].keys()))
+            print('gap: {} targs_both_flanks: {} leftOnly: {} rightOnly: {}'.format(gap.gap_num,
+                                                                                    len(targs_both_flanks),
+                                                                                    len(targs_left_only),
+                                                                                    len(targs_right_only)))
+
+            lens = set()
+            gap_seqs = []
+            for targ in targs_both_flanks:
+                hit_ids = [targ2hits[i][targ].hit_id for i in range(2)]
+                assert hit_ids[0] == hit_ids[1]
+                hsps = [targ2hits[i][targ].hsps[0] for i in range(2)]
+                print(targ,
+                      hsps[0].sbjct_start, hsps[0].sbjct_end, hsps[0].strand,
+                      hsps[1].sbjct_start, hsps[1].sbjct_end, hsps[1].strand,
+                      )
+                assert hsps[0].sbjct_start < hsps[0].sbjct_end < hsps[1].sbjct_start < hsps[1].sbjct_end
+                subj_seq = refId2seq[hit_ids[i].split('|')[1]]
                 for i in range(2):
-                    for alignment_num, alignment in enumerate(flanks_hits[i][0].alignments):
-#                        print('alignment=', dir(alignment), vars(alignment))
-                        targ2hits[i][alignment.hit_id] = alignment
+                    assert subj_seq[hsps[i].sbjct_start-1:hsps[i].sbjct_end] == str(DNASeq(hsps[i].sbjct).ungap(gap='-'))
+                lens.add(hsps[1].sbjct_end - hsps[0].sbjct_start)
+                gap_seqs.append(SeqRecord(DNASeq(subj_seq[hsps[0].sbjct_start-1:hsps[1].sbjct_end]),
+                                          id='gap_{}_targ_{}'.format(gap.gap_num, hit_ids[0])))
+                gap_seqs.append(SeqRecord(DNASeq(hsps[0].query).ungap(gap='-') + \
+                                          DNASeq(subj_seq[hsps[0].sbjct_end:hsps[1].sbjct_start-1]) + \
+                                          DNASeq(hsps[1].query).ungap(gap='-'),
+                                          id='gap_{}_wflanks_targ_{}'.format(gap.gap_num, hit_ids[0])))
 
-                targs_both_flanks = sorted(set(targ2hits[0].keys()) & set(targ2hits[1].keys()))
-                targs_left_only = sorted(set(targ2hits[0].keys()) - set(targ2hits[1].keys()))
-                targs_right_only = sorted(set(targ2hits[1].keys()) - set(targ2hits[0].keys()))
-                print('gap: {} targs_both_flanks: {} leftOnly: {} rightOnly: {}'.format(gap_num,
-                                                                                        len(targs_both_flanks),
-                                                                                        len(targs_left_only),
-                                                                                        len(targs_right_only)))
-
-                lens = set()
-                gap_seqs = []
-                for targ in targs_both_flanks:
-                    hit_ids = [targ2hits[i][targ].hit_id for i in range(2)]
-                    assert hit_ids[0] == hit_ids[1]
-                    hsps = [targ2hits[i][targ].hsps[0] for i in range(2)]
-                    print(targ,
-                          hsps[0].sbjct_start, hsps[0].sbjct_end, hsps[0].strand,
-                          hsps[1].sbjct_start, hsps[1].sbjct_end, hsps[1].strand,
-                          )
-                    assert hsps[0].sbjct_start < hsps[0].sbjct_end < hsps[1].sbjct_start < hsps[1].sbjct_end
-                    subj_seq = refId2seq[hit_ids[i].split('|')[1]]
-                    for i in range(2):
-                        assert subj_seq[hsps[i].sbjct_start-1:hsps[i].sbjct_end] == str(DNASeq(hsps[i].sbjct).ungap(gap='-'))
-                    lens.add(hsps[1].sbjct_end - hsps[0].sbjct_start)
-                    gap_seqs.append(SeqRecord(DNASeq(subj_seq[hsps[0].sbjct_start-1:hsps[1].sbjct_end]),
-                                              id='gap_{}_targ_{}'.format(gap_num, hit_ids[0])))
-                    gap_seqs.append(SeqRecord(DNASeq(hsps[0].query).ungap(gap='-') + \
-                                              DNASeq(subj_seq[hsps[0].sbjct_end:hsps[1].sbjct_start-1]) + \
-                                              DNASeq(hsps[1].query).ungap(gap='-'),
-                                              id='gap_{}_wflanks_targ_{}'.format(gap_num, hit_ids[0])))
-
-                print('lens: {} - {}'.format(len(lens), ', '.join(map(str, sorted(lens)))))
-                Bio.SeqIO.write(gap_seqs, '/tmp/gap.{}.fasta'.format(gap_num), 'fasta')
+            print('lens: {} - {}'.format(len(lens), ', '.join(map(str, sorted(lens)))))
+            Bio.SeqIO.write(gap_seqs, '/tmp/gap.{}.fasta'.format(gap.gap_num), 'fasta')
 
 
                         # for hsp_num, hsp in enumerate(alignment.hsps):
@@ -1787,9 +1808,9 @@ def parser_gap_seqs_from_refs(parser=argparse.ArgumentParser()):
     parser.add_argument('in_scaffold', help='FASTA file containing the scaffold.  Each FASTA record corresponds to one '
                         'segment (for multi-segment genomes).  Contigs within each segment are separated by Ns.')
     parser.add_argument('in_refs', help='Taxon sequences')
-    parser.add_argument('out_gap_seqs', help='The possible seq in each gap.')
-    parser.add_argument('--minGapLen', dest='min_gap_len', default=5, help='Min gap to close')
-    parser.add_argument('--flankLen', dest='flank_len', default=200, help='length of gap flanks')
+    parser.add_argument('out_gap_seqs_fasta', help='The possible seq in each gap.')
+    parser.add_argument('--minGapLen', dest='min_gap_len', type=int, default=5, help='Min gap to close')
+    parser.add_argument('--minFlankLen', dest='min_flank_len', type=int, default=200, help='length of gap flanks')
     util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, gap_seqs_from_refs, split_args=True)
     return parser
