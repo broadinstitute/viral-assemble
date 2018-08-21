@@ -1692,18 +1692,13 @@ def gaps_iter(scaffold_fasta, min_gap_len, min_flank_len, max_flank_len=None):
         return paren(paren(s)+'{'+str(nmin)+','+str(nmax)+'}'+('' if greedy else '?'))
     Ns = rep('N', nmin=min_gap_len)
     flank_re = '(' + rep('[^N]', nmin=min_flank_len, nmax=max_flank_len) + ')'
-    print('LLLL', min_flank_len, type(min_flank_len))
     sub_flank_re = rep('[^N]', nmax=min_flank_len-1, greedy=False)
-    sub_Ns_re = rep('N', nmax=min_gap_len-1)
-    gap_re = Ns
-    flanked_gap_re = flank_re + '(' + gap_re + rep(sub_flank_re+'N+', greedy=False) + ')' + flank_re
-
-    print('RRRRRRRRRRRRRR', flanked_gap_re)
+    gap_re = '(' + rep('N+'+sub_flank_re, greedy=False) + Ns + rep(sub_flank_re+'N+', greedy=False) + ')'
+    flanked_gap_re = flank_re + gap_re + flank_re
 
     gap_num = 0
     for scaffold_segment_num, scaffold_segment in enumerate(Bio.SeqIO.parse(scaffold_fasta, 'fasta')):
         for m in re.finditer(flanked_gap_re, str(scaffold_segment.seq)):
-            print('MATCH', m.group(0), 'groups', m.groups())
             yield Gap(gap_num=gap_num, flank_seqs=(m.group(1), m.group(3)), gap_seq=m.group(2),
                       gap_seq_len=len(m.group(2)),
                       scaffold_segment_id=scaffold_segment.id)
