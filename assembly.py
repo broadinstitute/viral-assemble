@@ -46,6 +46,7 @@ import tools.mummer
 import tools.muscle
 import tools.gap2seq
 import tools.blast
+import tools.abyss
 
 # third-party
 import numpy
@@ -449,6 +450,43 @@ def parser_gapfill_gap2seq(parser=argparse.ArgumentParser(description='Close gap
 
 
 __commands__.append(('gapfill_gap2seq', parser_gapfill_gap2seq))
+
+def gapfill_sealer(
+    in_scaffold,
+    inBam,
+    out_scaffold,
+    k,
+    b,
+    P=4,
+    always_succeed=False,
+    threads=1,
+    sealer_opts=''
+):
+    ''' This step runs the Sealer tool from ABySS assembler to close gaps in the assembly.
+    '''
+    reads = list(map(util.file.mkstempfname, ['.reads.1.fastq', '.reads.2.fastq']))
+    samtools = tools.samtools.SamtoolsTool()
+    samtools.bam2fq( inBam, reads[0], reads[1] )
+    tools.abyss.AbyssTool().gapfill( in_scaffold, reads[0], reads[1], out_scaffold, 
+                                     k, b, sealer_opts=sealer_opts.split() )
+    os.unlink(reads[0])
+    os.unlink(reads[1])
+
+def parser_gapfill_sealer(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_scaffold', help='Scaffold with gaps (FASTA witht Ns)')
+    parser.add_argument('inBam', help='Input unaligned reads, BAM format.')
+    parser.add_argument('out_scaffold', help='Output assembly.')
+    parser.add_argument('-k', type=int, action='append', help='kmer sizes')
+    parser.add_argument('-b', type=int, help='bloom filter size (gb)')
+    parser.add_argument('-P', type=int, help='max paths')
+    parser.add_argument('--sealer_opts', help='Extra sealer options.')
+
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, gapfill_sealer, split_args=True)
+    return parser
+
+
+__commands__.append(('gapfill_sealer', parser_gapfill_sealer))
 
 
 def _order_and_orient_orig(inFasta, inReference, outFasta,
