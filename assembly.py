@@ -33,6 +33,7 @@ import util.file
 import util.misc
 import util.vcf
 import read_utils
+import kmer_utils
 import tools
 import tools.picard
 import tools.samtools
@@ -47,6 +48,7 @@ import tools.muscle
 import tools.gap2seq
 import tools.blast
 import tools.abyss
+import tools.bbmap
 
 # third-party
 import numpy
@@ -363,6 +365,7 @@ def assemble_spades(
     n_reads=10000000,
     outReads=None,
     mask_errors=False,
+        adapters=None,
     max_kmer_sizes=1,
     mem_limit_gb=8,
     threads=None,
@@ -379,9 +382,21 @@ def assemble_spades(
                              trim_opts=dict(maxinfo_target_length=35, maxinfo_strictness=.2))
 
     with tools.picard.SamToFastqTool().execute_tmp(trim_rmdup_bam, includeUnpaired=True, illuminaClipping=True
-                                                   ) as (reads_fwd, reads_bwd, reads_unpaired):
+                                                   ) as (reads_fwd, reads_bwd, reads_unpaired), \
+                                                   util.file.tmp_dir('_asm_spades') as t_dir:
+        reads_merged = None
+        if adapters:
+            reads_merged = os.path.join(t_dir, 'reads_merged.fq')
+            reads_fwd_unm = os.path.join(t_dir, 'reads_fwd.unm.fq')
+            reads_bwd_unm = os.path.join(t_dir, 'reads_bwd.unm.fq')
+            tools.bbmap.BBMapTool().execute('bbmerge-auto.sh', in1=reads_fwd, in2=reads_bwd, out=reads_merged,
+                                            outu1=reads_fwd_unm, outu2=reads_bwd_unm,
+                                            adapter=adapters, vstrict=True, rem=True, extend2=50, ecct=True)
+            reads_fwd = reads_fwd_unm
+            reads_bwd = reads_bwd_unm
         try:
             tools.spades.SpadesTool().assemble(reads_fwd=reads_fwd, reads_bwd=reads_bwd, reads_unpaired=reads_unpaired,
+                                               reads_merged=reads_merged,
                                                contigs_untrusted=contigs_untrusted, contigs_trusted=contigs_trusted,
                                                contigs_out=out_fasta, filter_contigs=filter_contigs,
                                                kmer_sizes=kmer_sizes, mask_errors=mask_errors, max_kmer_sizes=max_kmer_sizes,
@@ -1742,7 +1757,7 @@ def gaps_iter(scaffold_fasta, min_gap_len, min_flank_len, max_flank_len=None):
                       scaffold_segment_id=scaffold_segment.id)
             gap_num += 1
 
-def gap_seqs_from_refs(in_scaffold, in_refs, out_gap_seqs_fasta, out_gap_seqs_info=None, min_gap_len=10,
+def gap_seqs_from_refs(in_scaffold, in_refs, out_gap_seqs_fasta, reads_bam, clip_db, out_gap_seqs_info=None, min_gap_len=10,
                        min_flank_len=200, max_flank_len=None, threads=None):
     '''For each gap in an assembly, determine the likely approximate sequence in the gap
     based on a set of reference sequences.
@@ -1778,7 +1793,7 @@ def gap_seqs_from_refs(in_scaffold, in_refs, out_gap_seqs_fasta, out_gap_seqs_in
             print('GGGGGGGGGGGap=', gap)
             flanks_hits = []
             for flank_num in (0,1):
-                flank_fasta = os.path.join(t_dir, 'flank_{}.fasta'.format(flank_num))
+                flank_fasta = os.path.join(t_dir, 'gap_{}_flank_{}.fasta'.format(gap.gap_num, flank_num))
                 Bio.SeqIO.write([SeqRecord(DNASeq(gap.flank_seqs[flank_num]), id='flank')],
                                 flank_fasta, 'fasta')
                 flanks_hits.append(blastn.get_hits(inFasta=flank_fasta, db=refs_db_pfx,
@@ -1824,8 +1839,26 @@ def gap_seqs_from_refs(in_scaffold, in_refs, out_gap_seqs_fasta, out_gap_seqs_in
                                           id='gap_{}_wflanks_targ_{}'.format(gap.gap_num, hit_ids[0])))
 
             print('lens: {} - {}'.format(len(lens), ', '.join(map(str, sorted(lens)))))
-            Bio.SeqIO.write(gap_seqs, '/tmp/gap.{}.fasta'.format(gap.gap_num), 'fasta')
+            gap_seq_fasta = os.path.join(t_dir, 'gap.{}.fasta'.format(gap.gap_num))
+            Bio.SeqIO.write(gap_seqs, gap_seq_fasta, 'fasta')
+            kmer_size = 19
+            gap_seq_fasta_kmers = gap_seq_fasta + '.k{}'.format(kmer_size)
+            kmer_utils.build_kmer_db(seq_files=[gap_seq_fasta], kmer_db=gap_seq_fasta_kmers, kmer_size=kmer_size)
+            gap_relevant_reads = os.path.join(t_dir, 'gap.{}.relevant_reads.bam'.format(gap.gap_num))
+            kmer_utils.filter_reads(kmer_db=gap_seq_fasta_kmers, in_reads=reads_bam, out_reads=gap_relevant_reads,
+                                    read_min_occs=1)
+            print('RELEVANT_READS', tools.samtools.SamtoolsTool().count(gap_relevant_reads))
+            gap_contigs = os.path.join(t_dir, 'gap.{}.contigs.fasta'.format(gap.gap_num))
+            flanks_fasta = os.path.join(t_dir, 'gap.{}.flanks.fasta'.format(gap.gap_num))
 
+            Bio.SeqIO.write([SeqRecord(DNASeq(gap.flank_seqs[flank_num]), id='flank{}'.format(flank_num)) for flank_num in (0,1)],
+                            flanks_fasta, 'fasta')
+
+            assemble_spades(in_bam=gap_relevant_reads,
+                            clip_db=clip_db,
+                            out_fasta=gap_contigs,
+                            contigs_trusted=flanks_fasta,
+                            adapters='/ndata/lasv/data/00_raw/K1.adapters.fasta')
 
                         # for hsp_num, hsp in enumerate(alignment.hsps):
                         #     print('------------ seg={} gap={} flank={} align_num={} hsp={}\nflankseq={} -----------\n\n'.format(scaffold_segment_num, gap_num, i, alignment_num, hsp_num,
@@ -1842,6 +1875,8 @@ def parser_gap_seqs_from_refs(parser=argparse.ArgumentParser()):
                         'segment (for multi-segment genomes).  Contigs within each segment are separated by Ns.')
     parser.add_argument('in_refs', help='Taxon sequences')
     parser.add_argument('out_gap_seqs_fasta', help='The possible seq in each gap.')
+    parser.add_argument('reads_bam', help='The reads')
+    parser.add_argument('clip_db', help='Adapters and contaminants')
     parser.add_argument('--minGapLen', dest='min_gap_len', type=int, default=5, help='Min gap to close')
     parser.add_argument('--minFlankLen', dest='min_flank_len', type=int, default=200, help='length of gap flanks')
     util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))

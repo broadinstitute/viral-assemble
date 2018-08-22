@@ -14,6 +14,7 @@ import tempfile
 import tools
 import tools.samtools
 import tools.picard
+import tools.bbmap
 import util.file
 import util.misc
 
@@ -39,7 +40,7 @@ class SpadesTool(tools.Tool):
         log.debug(' '.join(tool_cmd))
         subprocess.check_call(tool_cmd)
 
-    def assemble(self, reads_fwd, reads_bwd, contigs_out, reads_unpaired=None, contigs_trusted=None,
+    def assemble(self, reads_fwd, reads_bwd, contigs_out, reads_unpaired=None, reads_merged=None, contigs_trusted=None,
                  contigs_untrusted=None, kmer_sizes=(55,65), mask_errors=False, max_kmer_sizes=1, 
                  filter_contigs=False, mem_limit_gb=8, threads=None, spades_opts=''):
         '''Assemble contigs from RNA-seq reads and (optionally) pre-existing contigs.
@@ -83,9 +84,11 @@ class SpadesTool(tools.Tool):
                     log.debug('spades_dir=' + spades_dir)
                     args = []
                     if reads_fwd and reads_bwd and os.path.getsize(reads_fwd) > 0 and os.path.getsize(reads_bwd) > 0:
-                        args += ['-1', reads_fwd, '-2', reads_bwd ]
+                        args += ['--pe1-1', reads_fwd, '--pe1-2', reads_bwd ]
                     if reads_unpaired and os.path.getsize(reads_unpaired) > 0:
-                        args += [ '--s1', reads_unpaired ]
+                        args += ['--pe1-s', reads_unpaired ]
+                    if reads_merged and os.path.getsize(reads_merged) > 0:
+                        args += ['--pe1-m', reads_merged]
                     if contigs_trusted: args += [ '--trusted-contigs', contigs_trusted ]
                     if contigs_untrusted: args += [ '--untrusted-contigs', contigs_untrusted ]
                     if kmer_size: args += [ '-k', kmer_size ]
