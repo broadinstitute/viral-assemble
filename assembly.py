@@ -871,6 +871,9 @@ def refine_assembly(
     chr_names=None,
     keep_all_reads=False,
     already_realigned_bam=None,
+    outDeambigFasta=None,
+    outAlignedBam=None,
+    outRmdupBam=None,
     JVMmemory=None,
     threads=None,
     gatk_path=None,
@@ -901,7 +904,7 @@ def refine_assembly(
     gatk = tools.gatk.GATKTool(path=gatk_path)
 
     # Create deambiguated genome for GATK
-    deambigFasta = util.file.mkstempfname('.deambig.fasta')
+    deambigFasta = outDeambigFasta or util.file.mkstempfname('.deambig.fasta')
     deambig_fasta(inFasta, deambigFasta)
     picard_index.execute(deambigFasta, overwrite=True)
     samtools.faidx(deambigFasta, overwrite=True)
@@ -910,7 +913,7 @@ def refine_assembly(
         realignBam = already_realigned_bam
     else:
         # Novoalign reads to self
-        novoBam = util.file.mkstempfname('.novoalign.bam')
+        novoBam = outAlignedBam or util.file.mkstempfname('.novoalign.bam')
         min_qual = 0 if keep_all_reads else 1
         novoalign.execute(inBam, inFasta, novoBam, options=novo_params.split(), min_qual=min_qual, JVMmemory=JVMmemory)
         rmdupBam = util.file.mkstempfname('.rmdup.bam')
@@ -918,7 +921,10 @@ def refine_assembly(
         if not keep_all_reads:
             opts.append('REMOVE_DUPLICATES=true')
         picard_mkdup.execute([novoBam], rmdupBam, picardOptions=opts, JVMmemory=JVMmemory)
-        os.unlink(novoBam)
+        if outRmdupBam:
+            shutill.copyfile(rmdupBam, outRmdupBam)
+        if not outAlignedBam:
+            os.unlink(novoBam)
         realignBam = util.file.mkstempfname('.realign.bam')
         gatk.local_realign(rmdupBam, deambigFasta, realignBam, JVMmemory=JVMmemory, threads=threads)
         os.unlink(rmdupBam)
@@ -931,7 +937,8 @@ def refine_assembly(
     gatk.ug(realignBam, deambigFasta, tmpVcf, JVMmemory=JVMmemory, threads=threads)
     if already_realigned_bam is None:
         os.unlink(realignBam)
-    os.unlink(deambigFasta)
+    if not outDeambigFasta:
+        os.unlink(deambigFasta)
     name_opts = []
     if chr_names:
         name_opts = ['--name'] + chr_names
@@ -1023,6 +1030,10 @@ def parser_refine_assembly(parser=argparse.ArgumentParser()):
         action="store_true",
         dest="keep_all_reads"
     )
+    devel_args = parser.add_argument_group('devel', 'Arguments mainly meant for use by viral-ngs developers')
+    devel_args.add_argument('--outDeambigFasta', help='Assembly deambiguated (for GATK)')
+    devel_args.add_argument('--outAlignedBam', help='Reads aligned to inFasta')
+    devel_args.add_argument('--outRmdupBam', help='Reads aligned to inFasta, deduplicated')
     parser.add_argument(
         '--JVMmemory',
         default=tools.gatk.GATKTool.jvmMemDefault,
