@@ -1,0 +1,8 @@
+Branch: is-1808252024-add-benchmarks
+
+Adding support for benchmarking.
+Each benchmark will compute some stats and store them in a uniform format;
+we'll add scripts to compare these stats between branches, and present
+the comparisons in useful form.
+
+
