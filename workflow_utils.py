@@ -18,14 +18,21 @@ import os.path
 import shutil
 import glob
 import collections
+import time
+import getpass
+import uuid
 
 import dxpy
 import dxpy.bindings.dxfile_functions
+import boto3
 
 import util.cmd
 import util.file
 
 _log = logging.getLogger(__name__)
+
+logging.basicConfig(format="%(asctime)s - %(module)s:%(lineno)d:%(funcName)s - %(levelname)s - %(message)s")
+_log.setLevel(logging.DEBUG)
 
 def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy."""
@@ -50,7 +57,7 @@ def get_workflow_inputs(workflow_name, t_dir, docker_img):
         return json.loads(subprocess.check_output('womtool inputs ' + workflow_name + '.wdl', shell=True))
     
 
-def _get_dx_val(val, dx_cache = '/dev/shm/dxcache'):
+def _get_dx_val(val, dx_cache = '/data/dxcache'):
     """Resolve a dx value: if it is a scalar, just return that;
     if it is a dx file, fetch the file, cache it locally, and return the path to the file."""
 
@@ -183,16 +190,40 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, output_dir):
             # print(json.dumps(wdl_result, indent=4, separators=(',', ': ')))
             # print('---------------------------')
 
-def record_run_results(docker_img, cromwell_output):
-    #asdf
 
-    # so, we also need to generate a unique id for this run;
-    # since there can be multiple runs.
+def create_run_id():
+    """Generate a unique ID for a run (set of steps run as part of one workflow)."""
+    return util.file.string_to_file_name('-'.join(map(str, 
+                                                       ('analysis-', time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime())[2:], 
+                                                        getpass.getuser(),
+                                                        uuid.uuid4()))))[:1024]
 
-    # also, need to see how to handle failures, full or partial.
-    #
+def get_docker_hash(docker_img):
+    if docker_img.startswith('sha256:'):
+        return docker_img
+    digest_line = subprocess.check_output('docker images ' + docker_img + ' --digests --no-trunc --format '
+                                          '"{{.Repository}}:{{.Tag}} {{.Digest}}"',
+                                          shell=True)
+    assert digest_line.count('\n') == 1
+    img, digest = digest_line.strip().split()
+    assert img == docker_img + (':latest' if ':' not in docker_img else '')
+    assert digest.startswith('sha256:') and len(digest) == 71
+    return digest
 
-    pass
+# def record_run_results(docker_img, cromwell_output):
+#     #asdf
+
+#     # so, we also need to generate a unique id for this run;
+#     # since there can be multiple runs.
+
+#     # also, need to see how to handle failures, full or partial.
+#     #
+#     sdb_client = boto3.client('sdb')
+#    response = sdb_client.put_attributes(DomainName='viral_ngs_benchmarks',
+#                                         ItemName=create_run_id(),
+#                                         Attributes=[
+                                            
+#                                         ])
 
 # =======================
 def full_parser():
@@ -201,8 +232,10 @@ def full_parser():
 
 if __name__ == '__main__':
     #print(_pretty_print_json(_parse_cromwell_output_str(util.file.slurp_file('/dev/shm/cromwell_out/wdl_output.txt'))))
+    #print(get_docker_hash('quay.io/broadinstitute/viral-ngs'))
+    #record_run_results(0,0)
     if True:
         run_dx_locally(workflow_name='assemble_denovo', analysis_dxid='analysis-FJfqjg005Z3Vp5Q68jxzx5q1',
                        docker_img='quay.io/broadinstitute/viral-ngs',
-                       output_dir='/dev/shm/cromwell_out')
+                       output_dir=os.path.join('/data/benchruns', create_run_id()))
     #util.cmd.main_argparse(__commands__, __doc__)
