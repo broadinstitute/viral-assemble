@@ -1,1 +1,2 @@
 *.rules linguist-language=Python
+* annex.backend=MD5E
