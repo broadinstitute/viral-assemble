@@ -7,7 +7,7 @@ __author__ = "ilya@broadinstitute.org"
 __commands__ = []
 
 import platform
-assert platform.python_version().startswith('2.7')  # dxpy requirement
+assert platform.python_version().startswith('2.7')  # dxpy requirement; should drop and use command-line
 
 import argparse
 import logging
@@ -21,6 +21,8 @@ import collections
 import time
 import getpass
 import uuid
+import SimpleHTTPServer
+import SocketServer
 
 import dxpy
 import dxpy.bindings.dxfile_functions
@@ -62,7 +64,7 @@ def get_workflow_inputs(workflow_name, t_dir, docker_img):
         return json.loads(subprocess.check_output('womtool inputs ' + workflow_name + '.wdl', shell=True))
     
 
-def _get_dx_val(val, dx_cache = '/data/dxcache'):
+def _get_dx_val(val, dx_cache = 'inputs'):
     """Resolve a dx value: if it is a scalar, just return that;
     if it is a dx file, fetch the file, cache it locally, and return the path to the file."""
 
@@ -85,9 +87,14 @@ def _get_dx_val(val, dx_cache = '/data/dxcache'):
                 fs_info = os.statvfs(dx_cache)
                 assert file_size < fs_info.f_bsize * fs_info.f_bavail
                 dxpy.bindings.dxfile_functions.download_dxfile(dxid=dxid, filename=cache_file+'.fetching', show_progress=True)
-                if os.path.getsize(cache_file+'.fetching') == file_size:
-                    os.rename(cache_file+'.fetching', cache_file)
+                assert os.path.getsize(cache_file+'.fetching') == file_size
+                os.rename(cache_file+'.fetching', cache_file)
                 print('fetched', dxid, 'to', cache_file)
+                print('curdir is ', os.getcwd())
+                _run('git annex add ' + cache_file)
+                key = subprocess.check_output('git annex lookupkey ' + cache_file, shell=True).strip()
+                _run('git annex registerurl ' + key + ' ' + ' http://localhost:8080/dx/' + dxid)
+                _run('git annex metadata -s dxid+=' + dxid + ' ' + cache_file)
         else:
             raise RuntimeError('Unknown dxid {}'.format(dxid))
         return cache_file
@@ -101,7 +108,7 @@ def _parse_cromwell_output_str(cromwell_output_str):
     json_end = cromwell_output_str.index('\n}\n', json_beg) + 2
     return json.loads(cromwell_output_str[json_beg:json_end])
 
-def run_dx_locally(workflow_name, analysis_dxid, docker_img):
+def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
     """Run a dx analysis locally, using a specified version of viral-ngs.
 
     Notes:
@@ -109,28 +116,34 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img):
        - record the actual git hash (since git tag might change)
 
     """
-    analysis_id = create_run_id()
+    analysis_id = create_analysis_id()
 
     _run('docker pull ' + docker_img)
 
     analysis = dxpy.DXAnalysis(dxid=analysis_dxid)
     analysis_descr = analysis.describe()
 
+    assert os.path.exists('.git/annex')
+    data_repo_dir = os.getcwd()
+
     with util.file.tmp_dir('_workflow_copy') as t_dir_orig:
         with util.file.pushd_popd(t_dir_orig):
-            _run('git clone /ndata/cromwell-workflow-logs ' + analysis_id)
+            _run('git clone ' + data_repo_dir + ' ' + analysis_id)
             t_dir_git = os.path.join(t_dir_orig, analysis_id)
             util.file.mkdir_p(t_dir_git)
             with util.file.pushd_popd(t_dir_git):
                 _run('git annex init')
-                t_dir = os.path.join(t_dir_git, analysis_id)
+                t_dir = os.path.join(t_dir_git, analysis_dir + '-' + analysis_id)
                 util.file.mkdir_p(t_dir)
                 with util.file.pushd_popd(t_dir):
                     print('TTTTTTTTTTT t_dir=', t_dir)
                     output_dir = os.path.join(t_dir, 'output')
 
+                    util.file.mkdir_p('inputs')
+
                     wdl_wf_inputs = get_workflow_inputs(workflow_name, t_dir, docker_img=docker_img)
 
+                    # TODO: diff stages may have same-name inputs
                     dx_wf_inputs = { k.split('.')[-1] : v for k, v in analysis_descr['runInput'].items()}   # check for dups
                     dx_wf_orig_inputs = { k.split('.')[-1] : v for k, v in analysis_descr['originalInput'].items()}   # check for dups
                     print('\n'.join(dx_wf_inputs.keys()))
@@ -210,13 +223,13 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img):
                 _run('chmod -R u+w *')
                 _run('git annex add')
                 _run('git commit -m after_running_analysis_' + analysis_id + '.')
-                _run('git annex initremote content type=directory directory=/ndata/git-annex-content/ encryption=none')
-                _run('git annex copy --all --to content')
+#                _run('git annex initremote content type=directory directory=/ndata/git-annex-content/ encryption=none')
+                _run('git annex move --all --to origin')
                 _run('git annex dead here')
                 _run('git annex sync')
 
-def create_run_id():
-    """Generate a unique ID for a run (set of steps run as part of one workflow)."""
+def create_analysis_id():
+    """Generate a unique ID for the analysis."""
     return util.file.string_to_file_name('-'.join(map(str, 
                                                        ('analysis', time.strftime('%Y%m%d-%H%M%S', time.localtime())[2:], 
                                                         uuid.uuid4()))))[:1024]
@@ -255,6 +268,97 @@ def gather_run_results(docker_img, cromwell_output):
 #                                         ])
 
 # =======================
+
+########################################################################################################################
+
+def run_analysis_wdl(workflow_name, dx_analysis, docker_img, analysis_dir):
+    """Run a WDL workflow.
+
+    Args:
+        workflow_name: base name of the workflow from pipes/WDL/workflows
+        dx_analysis: dx analysis from which to take the workflow's inputs
+        docker_img: docker image ID (tag or hash) to use
+        output_folder: put all results in this folder
+    """
+    run_dx_locally(workflow_name, dx_analysis, docker_img, analysis_dir)
+    
+
+def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
+    parser.add_argument('workflow_name', help='Workflow name')
+    parser.add_argument('dx_analysis')
+    parser.add_argument('docker_img')
+    parser.add_argument('analysis_dir')
+    util.cmd.attach_main(parser, run_analysis_wdl, split_args=True)
+
+__commands__.append(('run_analysis_wdl', parser_run_analysis_wdl))
+
+
+########################################################################################################################
+
+class RedirectToDNAnexus(SimpleHTTPServer.SimpleHTTPRequestHandler):
+
+   def do_GET(self):
+       try:
+           print('path=', self.path)
+           try:
+               file_info_json = subprocess.check_output('dx describe --json ' + self._get_dx_id(), shell=True)
+           except subprocess.CalledProcessError as e:
+               print('CalledProcessError:', e)
+               raise
+           print('got file_info_json', file_info_json)
+           file_info = json.loads(file_info_json)
+           print('got file_info', file_info)
+           assert file_info['id'] == self._get_dx_id()
+
+           self.send_response(307)
+           if False and 'media' in file_info:
+               self.send_header('Content-Type', file_info['media'])
+           if False and 'size' in file_info:
+               self.send_header('Content-Length', str(file_info['size']))
+           #self.send_header('Content-Disposition', 'attachment; filename="{}"'.format(file_info['name']))
+
+           new_path = subprocess.check_output('dx make_download_url --duration 2h ' + self._get_dx_id(), shell=True)
+           print('new_path=', new_path)
+           self.send_header('Location', new_path)
+           self.end_headers()
+       except (IOError, subprocess.CalledProcessError):
+           self.send_error(404, 'file not found')
+
+   def do_HEAD(self):
+       self.do_GET()
+
+   def _get_dx_id(self):
+       return self.path[len('/dx/'):]
+
+def run_dx_url_server(dummy, port=8080):
+    """Start a webserver that will redirect URL requests of the form http://localhost/dx/file-xxxxxx to DNAnexus.
+    This gives each dx file a stable URL, permitting such files to be added to git-annex with the addurl command."""
+
+    server = None
+    try:           
+        SocketServer.TCPServer.allow_reuse_address = True
+        server = SocketServer.TCPServer(("", port), RedirectToDNAnexus)
+        server.serve_forever()
+    except Exception as e:
+        if server is None:
+            print('No server!')
+        else:
+            print('calling shutdown...')
+            server.shutdown()
+            print('calling server_close...')
+            server.server_close()
+            print('re-raising exception', e)
+            raise
+
+def parser_run_dx_url_server(parser=argparse.ArgumentParser()):
+    parser.add_argument('dummy', help='Ignored argument (running command with no args just prints help)')
+    parser.add_argument('--port', default=8080, help='Port on which to run the webserver')
+    util.cmd.attach_main(parser, run_dx_url_server, split_args=True)
+
+__commands__.append(('run_dx_url_server', parser_run_dx_url_server))
+
+########################################################################################################################
+
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
 
@@ -263,7 +367,8 @@ if __name__ == '__main__':
     #print(_pretty_print_json(_parse_cromwell_output_str(util.file.slurp_file('/dev/shm/cromwell_out/wdl_output.txt'))))
     #print(get_docker_hash('quay.io/broadinstitute/viral-ngs'))
     #record_run_results(0,0)
-    if True:
+    if False:
         run_dx_locally(workflow_name='assemble_denovo', analysis_dxid='analysis-FJfqjg005Z3Vp5Q68jxzx5q1',
                        docker_img='quay.io/broadinstitute/viral-ngs')
-    #util.cmd.main_argparse(__commands__, __doc__)
+    util.cmd.main_argparse(__commands__, __doc__)
+
