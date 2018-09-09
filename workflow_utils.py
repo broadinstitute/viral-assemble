@@ -61,15 +61,17 @@ def get_workflow_inputs(workflow_name, t_dir, docker_img):
             shutil.copy(f, '.')
         for f in glob.glob('source/pipes/WDL/workflows/tasks/*.wdl'):
             shutil.copy(f, '.')
+        shutil.rmtree('source')
+        os.unlink('wdl.tar')
         return json.loads(subprocess.check_output('womtool inputs ' + workflow_name + '.wdl', shell=True))
     
 
-def _get_dx_val(val, dx_cache = 'inputs'):
+def _get_dx_val(val, dx_files_dir = 'input_files'):
     """Resolve a dx value: if it is a scalar, just return that;
     if it is a dx file, fetch the file, cache it locally, and return the path to the file."""
 
     print('parsing val: ', val)
-    util.file.mkdir_p(dx_cache)
+    util.file.mkdir_p(dx_files_dir)
     if isinstance(val, collections.Mapping) and '$dnanexus_link' in val:
         link = val['$dnanexus_link']
         if isinstance(link, collections.Mapping):
@@ -77,29 +79,43 @@ def _get_dx_val(val, dx_cache = 'inputs'):
         elif link.startswith('file-'):
             dxid = link
             descr = dxpy.describe(dxid)
-            cache_file = os.path.join(dx_cache, dxid) + '-' + descr['name']
+            dx_file = os.path.join(dx_files_dir, dxid) + '-' + descr['name']
             file_size = int(descr['size'])
-            if not os.path.isfile(cache_file) or os.path.getsize(cache_file) != file_size:
-                print('fetching', dxid, 'to', cache_file)
+
+            # see if the file is cached in git-annex
+            ga_mdata = json.loads(subprocess.check_output('git annex metadata --json --key=WORM-s0-m0--dx-' + dxid,
+                                                          shell=True).strip())
+            if ga_mdata['fields']:
+                ga_key = ga_mdata['fields']['ga_key'][0]
+                _run('git annex get --key ' + ga_key)
+                _run('git annex fromkey ' + ga_key + ' ' + dx_file)
+
+            if not os.path.isfile(dx_file) or os.path.getsize(dx_file) != file_size:
+                print('fetching', dxid, 'to', dx_file)
                 # TODO: check that there is enough free space (with some to spare)
-                if os.path.isfile(cache_file):
-                    os.unlink(cache_file)
-                fs_info = os.statvfs(dx_cache)
+                if os.path.isfile(dx_file):
+                    os.unlink(dx_file)
+                fs_info = os.statvfs(dx_files_dir)
                 assert file_size < fs_info.f_bsize * fs_info.f_bavail
-                dxpy.bindings.dxfile_functions.download_dxfile(dxid=dxid, filename=cache_file+'.fetching', show_progress=True)
-                assert os.path.getsize(cache_file+'.fetching') == file_size
-                os.rename(cache_file+'.fetching', cache_file)
-                print('fetched', dxid, 'to', cache_file)
+                dxpy.bindings.dxfile_functions.download_dxfile(dxid=dxid, filename=dx_file+'.fetching', show_progress=True)
+                assert os.path.getsize(dx_file+'.fetching') == file_size
+                os.rename(dx_file+'.fetching', dx_file)
+                print('fetched', dxid, 'to', dx_file)
                 print('curdir is ', os.getcwd())
-                _run('git annex add ' + cache_file)
-                key = subprocess.check_output('git annex lookupkey ' + cache_file, shell=True).strip()
-                _run('git annex registerurl ' + key + ' ' + ' http://localhost:8080/dx/' + dxid)
-                _run('git annex metadata -s dxid+=' + dxid + ' ' + cache_file)
+                _run('git annex add ' + dx_file)
+                ga_key = subprocess.check_output('git annex lookupkey ' + dx_file, shell=True).strip()
+                _run('git annex metadata -s dxid+=' + dxid + ' ' + dx_file)
+                # record a mapping from the dxid to the git-annex key
+                _run('git annex metadata --key=WORM-s0-m0--{} -s ga_key+={}'.format('dx-'+dxid, ga_key))
+                # register a URL that can be used to re-fetch this file from DNAnexus;
+                # the URL is only valid if the 'run_dx_url_server' command is running.
+                _run('git annex registerurl ' + ga_key + ' ' + ' http://localhost:8080/dx/' + dxid)
         else:
             raise RuntimeError('Unknown dxid {}'.format(dxid))
-        return cache_file
+        return dx_file
     else:
         return val
+# end: def _get_dx_val(val, dx_files_dir = 'input_files')
 
 def _parse_cromwell_output_str(cromwell_output_str):
     """Parse cromwell output"""
@@ -116,9 +132,12 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
        - record the actual git hash (since git tag might change)
 
     """
-    analysis_id = create_analysis_id()
+    assert not os.path.isabs(analysis_dir)
+
+    analysis_id = create_analysis_id(workflow_name)
 
     _run('docker pull ' + docker_img)
+    docker_img_hash = docker_img + '@' + get_docker_hash(docker_img)
 
     analysis = dxpy.DXAnalysis(dxid=analysis_dxid)
     analysis_descr = analysis.describe()
@@ -128,8 +147,8 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
 
     with util.file.tmp_dir('_workflow_copy') as t_dir_orig:
         with util.file.pushd_popd(t_dir_orig):
-            _run('git clone ' + data_repo_dir + ' ' + analysis_id)
-            t_dir_git = os.path.join(t_dir_orig, analysis_id)
+            _run('git clone ' + data_repo_dir + ' data')
+            t_dir_git = os.path.join(t_dir_orig, 'data')
             util.file.mkdir_p(t_dir_git)
             with util.file.pushd_popd(t_dir_git):
                 _run('git annex init')
@@ -137,11 +156,17 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
                 util.file.mkdir_p(t_dir)
                 with util.file.pushd_popd(t_dir):
                     print('TTTTTTTTTTT t_dir=', t_dir)
-                    output_dir = os.path.join(t_dir, 'output')
 
-                    util.file.mkdir_p('inputs')
+                    util.file.dump_file('analysis_params.json',
+                                        _pretty_print_json({'docker_img': docker_img,
+                                                            'docker_img_hash': docker_img_hash,
+                                                            'inputs_from_dx_analysis': analysis_dxid}))
 
-                    wdl_wf_inputs = get_workflow_inputs(workflow_name, t_dir, docker_img=docker_img)
+                    output_dir = 'output'
+
+                    util.file.mkdir_p('input_files')
+
+                    wdl_wf_inputs = get_workflow_inputs(workflow_name, t_dir, docker_img=docker_img_hash)
 
                     # TODO: diff stages may have same-name inputs
                     dx_wf_inputs = { k.split('.')[-1] : v for k, v in analysis_descr['runInput'].items()}   # check for dups
@@ -172,17 +197,14 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
 
                     ################# put in the right docker ID!!  and find a place to keep the docker cache.
 
-                    with open('wf.json', 'wt') as wf_out:
+                    with open('inputs.json', 'wt') as wf_out:
                         json.dump(new_wdl_wf_inputs, wf_out, indent=4, separators=(',', ': '))
 
-                    if docker_img:
-                        # TODO: option to update just some of the tasks.
-                        # actually, when compiling WDL, should have this option -- or, actually,
-                        # should make a new workflow where older apps are reused for stages that have not changed.
-                        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img))
+                    # TODO: option to update just some of the tasks.
+                    # actually, when compiling WDL, should have this option -- or, actually,
+                    # should make a new workflow where older apps are reused for stages that have not changed.
+                    _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_hash))
 
-                    shutil.rmtree(output_dir, ignore_errors=True)
-                    assert not os.path.exists(output_dir)
                     util.file.mkdir_p(output_dir)
                     util.file.mkdir_p(os.path.join(output_dir, 'outputs'))
                     util.file.mkdir_p(os.path.join(output_dir, 'logs'))
@@ -192,24 +214,24 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
                                      "final_workflow_log_dir": os.path.join(output_dir, 'logs'),
                                      "final_call_logs_dir": os.path.join(output_dir, 'call_logs')
                     }
-
-                    with open('wf_opts.json', 'wt') as wf_opts_file:
-                        json.dump(wf_opts_dict, wf_opts_file, indent=4, separators=(',', ': '))
+                    util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
 
                     # add cromwell labels: dx project, the docker tag we ran on, etc.
 
                     _log.info('Validating workflow')
-                    _run('womtool validate -i wf.json ' + workflow_name + '.wdl')
+                    _run('womtool validate -i inputs.json ' + workflow_name + '.wdl')
                     _log.info('Validated workflow; calling cromwell')
                     wdl_result_str = subprocess.check_output('cromwell run ' + workflow_name + \
-                                                             '.wdl -i wf.json -o wf_opts.json' + \
+                                                             '.wdl -i inputs.json -o cromwell_opts.json' + \
                                                              ' -m ' + os.path.join(output_dir, 'metadata'),
                                                              shell=True)
                     _log.info('Cromwell returned')
 
                     cromwell_output = _parse_cromwell_output_str(wdl_result_str)
                     #print('WDL_RESULT_STR=', wdl_result_str)
-                    util.file.dump_file(os.path.join(output_dir, 'wdl_output.txt'), wdl_result_str)
+                    util.file.dump_file(os.path.join(output_dir, 'cromwell_output.txt'), wdl_result_str)
+                    util.file.dump_file(os.path.join(output_dir, 'cromwell_output.json'),
+                                        _pretty_print_json(cromwell_output))
 
 
                     # wdl_result = json.loads(wdl_result_str)
@@ -219,6 +241,7 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
                     # print(json.dumps(wdl_result, indent=4, separators=(',', ': ')))
                     # print('---------------------------')
 
+                _run('rm *.wdl')
                 _run('sudo chown -R ec2-user * || true')
                 _run('chmod -R u+w *')
                 _run('git annex add')
@@ -228,11 +251,11 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
                 _run('git annex dead here')
                 _run('git annex sync')
 
-def create_analysis_id():
+def create_analysis_id(workflow_name):
     """Generate a unique ID for the analysis."""
     return util.file.string_to_file_name('-'.join(map(str, 
                                                        ('analysis', time.strftime('%Y%m%d-%H%M%S', time.localtime())[2:], 
-                                                        uuid.uuid4()))))[:1024]
+                                                        uuid.uuid4(), workflow_name))))[:1024]
 
 def get_docker_hash(docker_img):
     if docker_img.startswith('sha256:'):
