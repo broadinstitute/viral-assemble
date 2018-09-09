@@ -223,7 +223,7 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
                     _log.info('Validated workflow; calling cromwell')
                     wdl_result_str = subprocess.check_output('cromwell run ' + workflow_name + \
                                                              '.wdl -i inputs.json -o cromwell_opts.json' + \
-                                                             ' -m ' + os.path.join(output_dir, 'metadata'),
+                                                             ' -m ' + os.path.join(output_dir, 'metadata.json'),
                                                              shell=True)
                     _log.info('Cromwell returned')
 
