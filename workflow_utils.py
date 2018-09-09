@@ -106,7 +106,7 @@ def _get_dx_val(val, dx_files_dir = 'input_files'):
                 ga_key = subprocess.check_output('git annex lookupkey ' + dx_file, shell=True).strip()
                 _run('git annex metadata -s dxid+=' + dxid + ' ' + dx_file)
                 # record a mapping from the dxid to the git-annex key
-                _run('git annex metadata --key=WORM-s0-m0--{} -s ga_key+={}'.format('dx-'+dxid, ga_key))
+                _run('git annex metadata --key=WORM-s0-m0--{} -s ga_key={}'.format('dx-'+dxid, ga_key))
                 # register a URL that can be used to re-fetch this file from DNAnexus;
                 # the URL is only valid if the 'run_dx_url_server' command is running.
                 _run('git annex registerurl ' + ga_key + ' ' + ' http://localhost:8080/dx/' + dxid)
@@ -241,7 +241,8 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
                     # print(json.dumps(wdl_result, indent=4, separators=(',', ': ')))
                     # print('---------------------------')
 
-                _run('rm *.wdl')
+                    _run('rm *.wdl')
+
                 _run('sudo chown -R ec2-user * || true')
                 _run('chmod -R u+w *')
                 _run('git annex add')
