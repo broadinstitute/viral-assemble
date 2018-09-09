@@ -124,7 +124,7 @@ def _parse_cromwell_output_str(cromwell_output_str):
     json_end = cromwell_output_str.index('\n}\n', json_beg) + 2
     return json.loads(cromwell_output_str[json_beg:json_end])
 
-def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
+def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, params=None):
     """Run a dx analysis locally, using a specified version of viral-ngs.
 
     Notes:
@@ -133,6 +133,12 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
 
     """
     assert not os.path.isabs(analysis_dir)
+
+    if not params:
+        params = {}
+    else:
+        print('params=', util.file.slurp_file(params).strip())
+        params = json.loads(util.file.slurp_file(params).strip())
 
     analysis_id = create_analysis_id(workflow_name)
 
@@ -176,7 +182,12 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir):
                     for wdl_wf_input, wdl_wf_input_descr in wdl_wf_inputs.items():
                         wdl_wf_input_full = wdl_wf_input
                         wdl_wf_input = wdl_wf_input.split('.')[-1]
-                        if wdl_wf_input in dx_wf_inputs:
+                        if wdl_wf_input in params:
+                            dx_wf_input = params[wdl_wf_input]
+                            new_wdl_wf_inputs[wdl_wf_input_full] = map(_get_dx_val, dx_wf_input) \
+                                                                   if isinstance(dx_wf_input, list) \
+                                                                      else _get_dx_val(dx_wf_input)
+                        elif wdl_wf_input in dx_wf_inputs:
                             print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_inputs[wdl_wf_input])
                             dx_wf_input = dx_wf_inputs[wdl_wf_input]
                             new_wdl_wf_inputs[wdl_wf_input_full] = map(_get_dx_val, dx_wf_input) \
@@ -295,7 +306,7 @@ def gather_run_results(docker_img, cromwell_output):
 
 ########################################################################################################################
 
-def run_analysis_wdl(workflow_name, dx_analysis, docker_img, analysis_dir):
+def run_analysis_wdl(workflow_name, dx_analysis, docker_img, analysis_dir, params):
     """Run a WDL workflow.
 
     Args:
@@ -304,7 +315,7 @@ def run_analysis_wdl(workflow_name, dx_analysis, docker_img, analysis_dir):
         docker_img: docker image ID (tag or hash) to use
         output_folder: put all results in this folder
     """
-    run_dx_locally(workflow_name, dx_analysis, docker_img, analysis_dir)
+    run_dx_locally(workflow_name, dx_analysis, docker_img, analysis_dir, params)
     
 
 def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
@@ -312,6 +323,7 @@ def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('dx_analysis')
     parser.add_argument('docker_img')
     parser.add_argument('analysis_dir')
+    parser.add_argument('--params', help='override params')
     util.cmd.attach_main(parser, run_analysis_wdl, split_args=True)
 
 __commands__.append(('run_analysis_wdl', parser_run_analysis_wdl))
