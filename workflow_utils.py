@@ -177,7 +177,8 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, param
                     # TODO: diff stages may have same-name inputs
                     dx_wf_inputs = { k.split('.')[-1] : v for k, v in analysis_descr['runInput'].items()}   # check for dups
                     dx_wf_orig_inputs = { k.split('.')[-1] : v for k, v in analysis_descr['originalInput'].items()}   # check for dups
-                    print('\n'.join(dx_wf_inputs.keys()))
+                    print('DX_WF_RUNINPUTS', '\n'.join(dx_wf_inputs.keys()))
+                    print('DX_WF_ORIGINPUTS', '\n'.join(dx_wf_orig_inputs.keys()))
                     new_wdl_wf_inputs = {}
                     for wdl_wf_input, wdl_wf_input_descr in wdl_wf_inputs.items():
                         wdl_wf_input_full = wdl_wf_input
