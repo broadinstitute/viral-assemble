@@ -165,6 +165,7 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
             with util.file.pushd_popd(t_dir_git):
                 _run('git annex init')
                 _run('git annex describe here running_' + analysis_id)
+                _run('git config annex.security.allowed-http-addresses "127.0.0.1 ::1 localhost"')
                 if data_remote:
                     _run('git annex enableremote ' + data_remote)
 
@@ -241,7 +242,7 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
                                         _pretty_print_json(dict(analysis_descr=analysis_descr,
                                                                 docker_img=docker_img,
                                                                 docker_img_hash=docker_img_hash,
-                                                                inputs_from_dx_analysis=analysis_dxid,
+                                                                inputs_from_dx_analysis=analysis_inputs_from_dx_analysis,
                                                                 **dict(analysis_labels or {}))))
 
                     # add cromwell labels: dx project, the docker tag we ran on, etc.
