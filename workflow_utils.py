@@ -232,6 +232,12 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, param
                     }
                     util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
 
+                    util.file.dump_file('analysis_labels.json',
+                                        _pretty_print_json({'analysis_descr': descr,
+                                                            'docker_img': docker_img,
+                                                            'docker_img_hash': docker_img_hash,
+                                                            'inputs_from_dx_analysis': analysis_dxid}))
+
                     # add cromwell labels: dx project, the docker tag we ran on, etc.
 
                     _log.info('Validating workflow')
@@ -239,8 +245,10 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, param
                     _log.info('Validated workflow; calling cromwell')
                     try:
                         cromwell_output_str = subprocess.check_output('cromwell run ' + workflow_name + \
-                                                                      '.wdl -i inputs.json -o cromwell_opts.json' + \
-                                                                      ' -m ' + os.path.join(output_dir, 'metadata.json'),
+                                                                      '.wdl -i inputs.json -l analysis_labels.json ' + \
+                                                                      ' -o cromwell_opts.json' + \
+                                                                      ' -m ' + \
+                                                                      os.path.join(output_dir, 'cromwell_execution_metadata.json'),
                                                                       shell=True)
                         cromwell_returncode = 0
                     except subprocess.CalledProcessError as called_process_error:
@@ -249,20 +257,22 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, param
                         
                     _log.info('Cromwell returned with return code %d', cromwell_returncode)
 
-                    util.file.dump_file('analysis_params.json',
-                                        _pretty_print_json({'analysis_descr': descr,
-                                                            'docker_img': docker_img,
-                                                            'docker_img_hash': docker_img_hash,
-                                                            'inputs_from_dx_analysis': analysis_dxid,
-                                                            'cromwell_returncode': cromwell_returncode}))
-
                     util.file.dump_file(os.path.join(output_dir, 'cromwell_output.txt'), cromwell_output_str)
-                    
-                    if cromwell_returncode == 0:
-                        cromwell_output_json = _parse_cromwell_output_str(cromwell_output_str)
-                        util.file.dump_file(os.path.join(output_dir, 'cromwell_output.json'),
-                                            _pretty_print_json(cromwell_output_json))
 
+                    if cromwell_returncode == 0:
+                        def make_paths_relative(v):
+                            if isinstance(v, str) and os.path.isabs(v) and v.startswith(os.getcwd()):
+                                return os.path.relpath(v)
+                            if isinstance(v, list):
+                                return list(map(make_paths_relative, v))
+                            return v
+                        cromwell_output_json = {k: make_paths_relative(v)
+                                                for k, v in _parse_cromwell_output_str(cromwell_output_str)}
+                        util.file.dump_file('outputs.json',
+                                            _pretty_print_json(cromwell_output_json))
+                        util.file.make_empty('analysis_succeeded.txt')
+                    else:
+                        util.file.make_empty('analysis_failed.txt')
 
                     _run('rm *.wdl')
 
