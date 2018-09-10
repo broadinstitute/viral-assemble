@@ -345,7 +345,7 @@ def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dir')
     parser.add_argument('--analysisInputsSpecified', dest='analysis_inputs_specified',
                         help='override analysis_inputs_specified')
-    parser.add_argument('--analsisDescr', dest='analysis_descr', help='description of the run')
+    parser.add_argument('--analysisDescr', dest='analysis_descr', help='description of the run')
     parser.add_argument('--dataRepo', dest='data_repo', help='git data repository')
     parser.add_argument('--dataRemote', dest='data_remote', help='git-annex data remote')
     parser.add_argument('--analysisLabels', dest='analysis_labels', nargs=2, action='append',
