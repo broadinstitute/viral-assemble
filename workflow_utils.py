@@ -128,8 +128,10 @@ def _parse_cromwell_output_str(cromwell_output_str):
     json_end = cromwell_output_str.index('\n}\n', json_beg) + 2
     return json.loads(cromwell_output_str[json_beg:json_end])
 
-def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, params=None, descr=''):
-    """Run a dx analysis locally, using a specified version of viral-ngs.
+def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img, analysis_dir, analysis_inputs_specified=None, 
+                     analysis_descr='', analysis_labels=None,
+                     data_repo=None, data_remote=None):
+    """Run a WDL analysis locally, using a specified version of viral-ngs.
 
     Notes:
 
@@ -138,31 +140,34 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, param
     """
     assert not os.path.isabs(analysis_dir)
 
-    if not params:
-        params = {}
+    if not analysis_inputs_specified:
+        analysis_inputs_specified = {}
     else:
-        print('params=', util.file.slurp_file(params).strip())
-        params = json.loads(util.file.slurp_file(params).strip())
+        print('analysis_inputs_specified=', util.file.slurp_file(analysis_inputs_specified).strip())
+        analysis_inputs_specified = json.loads(util.file.slurp_file(analysis_inputs_specified).strip())
 
     analysis_id = create_analysis_id(workflow_name)
 
     _run('docker pull ' + docker_img)
     docker_img_hash = docker_img + '@' + get_docker_hash(docker_img)
 
-    analysis = dxpy.DXAnalysis(dxid=analysis_dxid)
-    analysis_descr = analysis.describe()
+    dx_analysis = dxpy.DXAnalysis(dxid=analysis_inputs_from_dx_analysis)
+    dx_analysis_descr = dx_analysis.describe()
 
     assert os.path.exists('.git/annex')
-    data_repo_dir = os.getcwd()
+    data_repo = data_repo or os.getcwd()
 
     with util.file.tmp_dir('_workflow_copy') as t_dir_orig:
         with util.file.pushd_popd(t_dir_orig):
-            _run('git clone ' + data_repo_dir + ' data')
+            _run('git clone ' + data_repo + ' data')
             t_dir_git = os.path.join(t_dir_orig, 'data')
             util.file.mkdir_p(t_dir_git)
             with util.file.pushd_popd(t_dir_git):
                 _run('git annex init')
                 _run('git annex describe here running_' + analysis_id)
+                if data_remote:
+                    _run('git annex enableremote ' + data_remote)
+
                 t_dir = os.path.join(t_dir_git, analysis_dir + '-' + analysis_id)
                 util.file.mkdir_p(t_dir)
                 with util.file.pushd_popd(t_dir):
@@ -179,16 +184,16 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, param
                     # described at https://git-annex.branchable.com/tips/local_caching_of_annexed_files/
 
                     # TODO: diff stages may have same-name inputs
-                    dx_wf_inputs = { k.split('.')[-1] : v for k, v in analysis_descr['runInput'].items()}   # check for dups
-                    dx_wf_orig_inputs = { k.split('.')[-1] : v for k, v in analysis_descr['originalInput'].items()}   # check for dups
+                    dx_wf_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['runInput'].items()}   # check for dups
+                    dx_wf_orig_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['originalInput'].items()}   # check for dups
                     print('DX_WF_RUNINPUTS', '\n'.join(dx_wf_inputs.keys()))
                     print('DX_WF_ORIGINPUTS', '\n'.join(dx_wf_orig_inputs.keys()))
                     new_wdl_wf_inputs = {}
                     for wdl_wf_input, wdl_wf_input_descr in wdl_wf_inputs.items():
                         wdl_wf_input_full = wdl_wf_input
                         wdl_wf_input = wdl_wf_input.split('.')[-1]
-                        if wdl_wf_input in params:
-                            dx_wf_input = params[wdl_wf_input]
+                        if wdl_wf_input in analysis_inputs_specified:
+                            dx_wf_input = analysis_inputs_specified[wdl_wf_input]
                             new_wdl_wf_inputs[wdl_wf_input_full] = map(_get_dx_val, dx_wf_input) \
                                                                    if isinstance(dx_wf_input, list) \
                                                                       else _get_dx_val(dx_wf_input)
@@ -233,10 +238,11 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, param
                     util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
 
                     util.file.dump_file('analysis_labels.json',
-                                        _pretty_print_json({'analysis_descr': descr,
-                                                            'docker_img': docker_img,
-                                                            'docker_img_hash': docker_img_hash,
-                                                            'inputs_from_dx_analysis': analysis_dxid}))
+                                        _pretty_print_json(dict(analysis_descr=analysis_descr,
+                                                                docker_img=docker_img,
+                                                                docker_img_hash=docker_img_hash,
+                                                                inputs_from_dx_analysis=analysis_dxid,
+                                                                **dict(analysis_labels or {}))))
 
                     # add cromwell labels: dx project, the docker tag we ran on, etc.
 
@@ -280,7 +286,7 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, param
                 _run('git annex add')
                 _run('git commit -m after_running_analysis_' + analysis_id + '.')
 #                _run('git annex initremote content type=directory directory=/ndata/git-annex-content/ encryption=none')
-                _run('git annex move --all --to origin -J{}'.format(util.misc.available_cpu_count()))
+                _run('git annex move --all --to {} -J{}'.format(data_remote or 'origin', util.misc.available_cpu_count()))
                 _run('git annex dead here')
                 _run('git annex sync --message git_annex_sync_analysis_{}'.format(analysis_id))
 
@@ -331,25 +337,20 @@ def gather_run_results(docker_img, cromwell_output):
 
 ########################################################################################################################
 
-def run_analysis_wdl(workflow_name, dx_analysis, docker_img, analysis_dir, params, descr):
-    """Run a WDL workflow.
-
-    Args:
-        workflow_name: base name of the workflow from pipes/WDL/workflows
-        dx_analysis: dx analysis from which to take the workflow's inputs
-        docker_img: docker image ID (tag or hash) to use
-        output_folder: put all results in this folder
-    """
-    run_dx_locally(workflow_name, dx_analysis, docker_img, analysis_dir, params, descr)
-    
 
 def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('workflow_name', help='Workflow name')
-    parser.add_argument('dx_analysis')
+    parser.add_argument('analysis_inputs_from_dx_analysis')
     parser.add_argument('docker_img')
     parser.add_argument('analysis_dir')
-    parser.add_argument('--params', help='override params')
-    parser.add_argument('--descr', help='description of the run')
+    parser.add_argument('--analysisInputsSpecified', dest='analysis_inputs_specified',
+                        help='override analysis_inputs_specified')
+    parser.add_argument('--analsisDescr', dest='analysis_descr', help='description of the run')
+    parser.add_argument('--dataRepo', dest='data_repo', help='git data repository')
+    parser.add_argument('--dataRemote', dest='data_remote', help='git-annex data remote')
+    parser.add_argument('--analysisLabels', dest='analysis_labels', nargs=2, action='append',
+                        help='labels to attach to the analysis')
+
     util.cmd.attach_main(parser, run_analysis_wdl, split_args=True)
 
 __commands__.append(('run_analysis_wdl', parser_run_analysis_wdl))
