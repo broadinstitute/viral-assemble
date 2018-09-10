@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """
 Utilities for dealing with workflows, including cloud workflows.
+
+Commands to help jointly version code and data using tools such as git-annex and DataLad.
 """
 
 __author__ = "ilya@broadinstitute.org"
@@ -30,6 +32,7 @@ import boto3
 
 import util.cmd
 import util.file
+import util.misc
 
 _log = logging.getLogger(__name__)
 
@@ -41,6 +44,7 @@ def workflow_utils_init():
     subprocess.check_call('conda install cromwell dxpy git-annex')
 
 def _pretty_print_json(json_dict):
+    """Return a pretty-printed version of a dict converted to json, as a string."""
     return json.dumps(json_dict, indent=4, separators=(',', ': '))
 
 def _run(cmd):
@@ -124,7 +128,7 @@ def _parse_cromwell_output_str(cromwell_output_str):
     json_end = cromwell_output_str.index('\n}\n', json_beg) + 2
     return json.loads(cromwell_output_str[json_beg:json_end])
 
-def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, params=None):
+def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, params=None, descr=''):
     """Run a dx analysis locally, using a specified version of viral-ngs.
 
     Notes:
@@ -158,21 +162,21 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, param
             util.file.mkdir_p(t_dir_git)
             with util.file.pushd_popd(t_dir_git):
                 _run('git annex init')
+                _run('git annex describe here running_' + analysis_id)
                 t_dir = os.path.join(t_dir_git, analysis_dir + '-' + analysis_id)
                 util.file.mkdir_p(t_dir)
                 with util.file.pushd_popd(t_dir):
                     print('TTTTTTTTTTT t_dir=', t_dir)
-
-                    util.file.dump_file('analysis_params.json',
-                                        _pretty_print_json({'docker_img': docker_img,
-                                                            'docker_img_hash': docker_img_hash,
-                                                            'inputs_from_dx_analysis': analysis_dxid}))
 
                     output_dir = 'output'
 
                     util.file.mkdir_p('input_files')
 
                     wdl_wf_inputs = get_workflow_inputs(workflow_name, t_dir, docker_img=docker_img_hash)
+
+                    # TODO: use git annex batch mode to determine the keys for all the file-xxxx files, then
+                    # use batch mode to get the keys.  use -J to parallelize.  also option to use a cache remote, as
+                    # described at https://git-annex.branchable.com/tips/local_caching_of_annexed_files/
 
                     # TODO: diff stages may have same-name inputs
                     dx_wf_inputs = { k.split('.')[-1] : v for k, v in analysis_descr['runInput'].items()}   # check for dups
@@ -233,36 +237,46 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, param
                     _log.info('Validating workflow')
                     _run('womtool validate -i inputs.json ' + workflow_name + '.wdl')
                     _log.info('Validated workflow; calling cromwell')
-                    wdl_result_str = subprocess.check_output('cromwell run ' + workflow_name + \
-                                                             '.wdl -i inputs.json -o cromwell_opts.json' + \
-                                                             ' -m ' + os.path.join(output_dir, 'metadata.json'),
-                                                             shell=True)
-                    _log.info('Cromwell returned')
+                    try:
+                        cromwell_output_str = subprocess.check_output('cromwell run ' + workflow_name + \
+                                                                      '.wdl -i inputs.json -o cromwell_opts.json' + \
+                                                                      ' -m ' + os.path.join(output_dir, 'metadata.json'),
+                                                                      shell=True)
+                        cromwell_returncode = 0
+                    except subprocess.CalledProcessError as called_process_error:
+                        cromwell_output_str = called_process_error.output
+                        cromwell_returncode = called_process_error.returncode
+                        
+                    _log.info('Cromwell returned with return code %d', cromwell_returncode)
 
-                    cromwell_output = _parse_cromwell_output_str(wdl_result_str)
-                    #print('WDL_RESULT_STR=', wdl_result_str)
-                    util.file.dump_file(os.path.join(output_dir, 'cromwell_output.txt'), wdl_result_str)
-                    util.file.dump_file(os.path.join(output_dir, 'cromwell_output.json'),
-                                        _pretty_print_json(cromwell_output))
+                    util.file.dump_file('analysis_params.json',
+                                        _pretty_print_json({'analysis_descr': descr,
+                                                            'docker_img': docker_img,
+                                                            'docker_img_hash': docker_img_hash,
+                                                            'inputs_from_dx_analysis': analysis_dxid,
+                                                            'cromwell_returncode': cromwell_returncode}))
 
+                    util.file.dump_file(os.path.join(output_dir, 'cromwell_output.txt'), cromwell_output_str)
+                    
+                    if cromwell_returncode == 0:
+                        cromwell_output_json = _parse_cromwell_output_str(cromwell_output_str)
+                        util.file.dump_file(os.path.join(output_dir, 'cromwell_output.json'),
+                                            _pretty_print_json(cromwell_output_json))
 
-                    # wdl_result = json.loads(wdl_result_str)
-                    # print('---------------------------')
-                    # print('WDL RESULT:')
-                    # print('---------------------------')
-                    # print(json.dumps(wdl_result, indent=4, separators=(',', ': ')))
-                    # print('---------------------------')
 
                     _run('rm *.wdl')
 
-                _run('sudo chown -R ec2-user * || true')
-                _run('chmod -R u+w *')
+                _run('sudo chown -R $USER . || true')
                 _run('git annex add')
                 _run('git commit -m after_running_analysis_' + analysis_id + '.')
 #                _run('git annex initremote content type=directory directory=/ndata/git-annex-content/ encryption=none')
-                _run('git annex move --all --to origin')
+                _run('git annex move --all --to origin -J{}'.format(util.misc.available_cpu_count()))
                 _run('git annex dead here')
                 _run('git annex sync')
+
+                # enable cleanup
+                _run('chmod -R u+w . || true')
+
 
 def create_analysis_id(workflow_name):
     """Generate a unique ID for the analysis."""
@@ -307,7 +321,7 @@ def gather_run_results(docker_img, cromwell_output):
 
 ########################################################################################################################
 
-def run_analysis_wdl(workflow_name, dx_analysis, docker_img, analysis_dir, params):
+def run_analysis_wdl(workflow_name, dx_analysis, docker_img, analysis_dir, params, descr):
     """Run a WDL workflow.
 
     Args:
@@ -316,7 +330,7 @@ def run_analysis_wdl(workflow_name, dx_analysis, docker_img, analysis_dir, param
         docker_img: docker image ID (tag or hash) to use
         output_folder: put all results in this folder
     """
-    run_dx_locally(workflow_name, dx_analysis, docker_img, analysis_dir, params)
+    run_dx_locally(workflow_name, dx_analysis, docker_img, analysis_dir, params, descr)
     
 
 def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
@@ -325,6 +339,7 @@ def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('docker_img')
     parser.add_argument('analysis_dir')
     parser.add_argument('--params', help='override params')
+    parser.add_argument('--descr', help='description of the run')
     util.cmd.attach_main(parser, run_analysis_wdl, split_args=True)
 
 __commands__.append(('run_analysis_wdl', parser_run_analysis_wdl))
