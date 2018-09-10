@@ -272,7 +272,7 @@ def run_dx_locally(workflow_name, analysis_dxid, docker_img, analysis_dir, param
 #                _run('git annex initremote content type=directory directory=/ndata/git-annex-content/ encryption=none')
                 _run('git annex move --all --to origin -J{}'.format(util.misc.available_cpu_count()))
                 _run('git annex dead here')
-                _run('git annex sync')
+                _run('git annex sync --message git_annex_sync_analysis_{}'.format(analysis_id))
 
                 # enable cleanup
                 _run('chmod -R u+w . || true')
