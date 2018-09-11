@@ -276,7 +276,7 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
                                                               '.wdl -i inputs.json -l analysis_labels.json ' + \
                                                               ' -o cromwell_opts.json' + \
                                                               ' -m ' + \
-                                                              os.path.join(output_dir, 'cromwell_execution_metadata.json'))
+                                                              'cromwell_execution_metadata.json')
                         cromwell_returncode = 0
                     except subprocess.CalledProcessError as called_process_error:
                         cromwell_output_str = called_process_error.output
@@ -285,10 +285,10 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
                     _log.info('Cromwell returned with return code %d', cromwell_returncode)
 
                     util.file.dump_file(os.path.join(output_dir, 'cromwell_output.txt'), cromwell_output_str)
+                    _run('sed -i -- "s|{}|{}|g" cromwell_execution_metadata.json'.format(t_dir+'/', ''))
 
                     if cromwell_returncode == 0:
                         def make_paths_relative(v):
-                            print('make_paths_relative: v=', v, 't_dir_git=', t_dir_git)
                             if _is_str(v) and os.path.isabs(v) and v.startswith(t_dir):
                                 return os.path.relpath(v, t_dir)
                             if isinstance(v, list):
