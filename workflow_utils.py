@@ -166,6 +166,7 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
         analysis_inputs_specified = json.loads(util.file.slurp_file(analysis_inputs_specified).strip())
 
     analysis_id = create_analysis_id(workflow_name)
+    print('ANALYSIS_ID is ', analysis_id)
 
     _run('docker pull ' + docker_img)
     docker_img_hash = docker_img + '@' + get_docker_hash(docker_img)
@@ -361,8 +362,8 @@ def gather_run_results(docker_img, cromwell_output):
 def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('workflow_name', help='Workflow name')
     parser.add_argument('analysis_inputs_from_dx_analysis')
-    parser.add_argument('docker_img')
     parser.add_argument('analysis_dir')
+    parser.add_argument('--dockerImg', dest='docker_img', default='quay.io/broadinstitute/viral-ngs')
     parser.add_argument('--analysisInputsSpecified', dest='analysis_inputs_specified',
                         help='override analysis_inputs_specified')
     parser.add_argument('--analysisDescr', dest='analysis_descr', help='description of the run')
