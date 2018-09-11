@@ -98,10 +98,14 @@ def _get_dx_val(val, dx_files_dir = 'input_files'):
     util.file.mkdir_p(dx_files_dir)
     if isinstance(val, collections.Mapping) and '$dnanexus_link' in val:
         link = val['$dnanexus_link']
-        if isinstance(link, collections.Mapping):
+        if isinstance(link, collections.Mapping) and 'analysis' in link:
+            print('link is ', link)
             return _get_dx_val(dxpy.DXAnalysis(link['analysis']).describe()['output'][link['stage']+'.'+link['field']])
-        elif link.startswith('file-'):
-            dxid = link
+        elif (_is_str(link) and link.startswith('file-')) or (isinstance(link, collections.Mapping) and 'id' in link and _is_str(link['id']) and link['id'].startswith('file-')):
+            if _is_str(link) and link.startswith('file-'):
+                dxid = link
+            else:
+                dxid = link['id']
             descr = dxpy.describe(dxid)
             dx_file = os.path.join(dx_files_dir, dxid) + '-' + descr['name']
             file_size = int(descr['size'])
@@ -134,7 +138,7 @@ def _get_dx_val(val, dx_files_dir = 'input_files'):
                 # the URL is only valid if the 'run_dx_url_server' command is running.
                 _run('git annex registerurl ' + ga_key + ' ' + ' http://localhost:8080/dx/' + dxid)
         else:
-            raise RuntimeError('Unknown dxid {}'.format(dxid))
+            raise RuntimeError('Cannot parse dx link {}'.format(link))
         return dx_file
     else:
         return val
