@@ -60,6 +60,7 @@ def _run(cmd):
 
 def _run_get_output(cmd):
     print('running command: ', cmd)
+    beg_time = time.time()
     output = subprocess.check_output(cmd, shell=True)
     print('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
     return output
@@ -287,8 +288,8 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
                     if cromwell_returncode == 0:
                         def make_paths_relative(v):
                             print('make_paths_relative: v=', v, 't_dir_git=', t_dir_git)
-                            if is_str(v) and os.path.isabs(v) and v.startswith(t_dir_git):
-                                return os.path.relpath(v, t_dir_git)
+                            if _is_str(v) and os.path.isabs(v) and v.startswith(t_dir):
+                                return os.path.relpath(v, t_dir)
                             if isinstance(v, list):
                                 return list(map(make_paths_relative, v))
                             return v
