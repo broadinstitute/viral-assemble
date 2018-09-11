@@ -268,6 +268,7 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
                                                                 docker_img=docker_img,
                                                                 docker_img_hash=docker_img_hash,
                                                                 inputs_from_dx_analysis=analysis_inputs_from_dx_analysis,
+                                                                analysis_id=analysis_id,
                                                                 **dict(analysis_labels or {}))))
 
                     # add cromwell labels: dx project, the docker tag we ran on, etc.
