@@ -171,8 +171,11 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
     _run('docker pull ' + docker_img)
     docker_img_hash = docker_img + '@' + get_docker_hash(docker_img)
 
-    dx_analysis = dxpy.DXAnalysis(dxid=analysis_inputs_from_dx_analysis)
-    dx_analysis_descr = dx_analysis.describe()
+    if analysis_inputs_from_dx_analysis:
+        dx_analysis = dxpy.DXAnalysis(dxid=analysis_inputs_from_dx_analysis)
+        dx_analysis_descr = dx_analysis.describe()
+    else:
+        dx_analysis_descr = dict(runInput={}, originalInput={})
 
     assert os.path.exists('.git/annex')
     data_repo = data_repo or os.getcwd()
@@ -213,26 +216,23 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
                     for wdl_wf_input, wdl_wf_input_descr in wdl_wf_inputs.items():
                         wdl_wf_input_full = wdl_wf_input
                         wdl_wf_input = wdl_wf_input.split('.')[-1]
-                        if wdl_wf_input in analysis_inputs_specified:
-                            dx_wf_input = analysis_inputs_specified[wdl_wf_input]
+                        def _set_input(dx_wf_input):
                             new_wdl_wf_inputs[wdl_wf_input_full] = map(_get_dx_val, dx_wf_input) \
                                                                    if isinstance(dx_wf_input, list) \
                                                                       else _get_dx_val(dx_wf_input)
+
+                        if wdl_wf_input in analysis_inputs_specified:
+                            _set_input(analysis_inputs_specified[wdl_wf_input])
                         elif wdl_wf_input in dx_wf_inputs:
                             print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_inputs[wdl_wf_input])
-                            dx_wf_input = dx_wf_inputs[wdl_wf_input]
-                            new_wdl_wf_inputs[wdl_wf_input_full] = map(_get_dx_val, dx_wf_input) \
-                                                                   if isinstance(dx_wf_input, list) \
-                                                                      else _get_dx_val(dx_wf_input)
+                            _set_input(dx_wf_inputs[wdl_wf_input])
                         elif '(optional' not in wdl_wf_input_descr and wdl_wf_input in dx_wf_orig_inputs:
                             print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_orig_inputs[wdl_wf_input])
-                            dx_wf_input = dx_wf_orig_inputs[wdl_wf_input]
-                            new_wdl_wf_inputs[wdl_wf_input_full] = map(_get_dx_val, dx_wf_input) \
-                                                                   if isinstance(dx_wf_input, list) \
-                                                                      else _get_dx_val(dx_wf_input)
+                            _set_input(dx_wf_orig_inputs[wdl_wf_input])
                         else:
                             print('MISSING', wdl_wf_input, wdl_wf_input_descr)
-                            assert '(optional' in wdl_wf_input_descr
+                            assert '(optional' in wdl_wf_input_descr, \
+                                'Missing required argument: {} {}'.format(wdl_wf_input, wdl_wf_input_descr)
 
 
                     print(_pretty_print_json(new_wdl_wf_inputs))
@@ -361,7 +361,7 @@ def gather_run_results(docker_img, cromwell_output):
 
 def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('workflow_name', help='Workflow name')
-    parser.add_argument('analysis_dir', default='runs/an',
+    parser.add_argument('--analysisDir', dest='analysis_dir', default='runs/an',
                         help='directory where analysis will be stored; a unique suffix will be added')
     parser.add_argument('--analysisInputsFromDxAnalysis', dest='analysis_inputs_from_dx_analysis',
                         help='DNAnexus analysis ID to take analysis inputs from; specific ones can be overridden by '
