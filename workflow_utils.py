@@ -361,11 +361,14 @@ def gather_run_results(docker_img, cromwell_output):
 
 def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('workflow_name', help='Workflow name')
-    parser.add_argument('analysis_inputs_from_dx_analysis')
-    parser.add_argument('analysis_dir')
+    parser.add_argument('analysis_dir', default='runs/an',
+                        help='directory where analysis will be stored; a unique suffix will be added')
+    parser.add_argument('--analysisInputsFromDxAnalysis', dest='analysis_inputs_from_dx_analysis',
+                        help='DNAnexus analysis ID to take analysis inputs from; specific ones can be overridden by '
+                        '--analysisInputsSpecified')
     parser.add_argument('--dockerImg', dest='docker_img', default='quay.io/broadinstitute/viral-ngs')
     parser.add_argument('--analysisInputsSpecified', dest='analysis_inputs_specified',
-                        help='override analysis_inputs_specified')
+                        help='explicitly specified analysis inputs')
     parser.add_argument('--analysisDescr', dest='analysis_descr', help='description of the run')
     parser.add_argument('--dataRepo', dest='data_repo', help='git data repository')
     parser.add_argument('--dataRemote', dest='data_remote', help='git-annex data remote')
