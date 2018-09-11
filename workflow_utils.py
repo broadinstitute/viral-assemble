@@ -39,9 +39,14 @@ _log = logging.getLogger(__name__)
 logging.basicConfig(format="%(asctime)s - %(module)s:%(lineno)d:%(funcName)s - %(levelname)s - %(message)s")
 _log.setLevel(logging.DEBUG)
 
-def workflow_utils_init():
-    """Install the dependencies: cromwell and dxpy and git-annex."""
-    subprocess.check_call('conda install cromwell dxpy git-annex')
+def _is_str(obj):
+    """Test if obj is a string type, in a python2/3 compatible way.
+    From https://stackoverflow.com/questions/4232111/stringtype-and-nonetype-in-python3-x
+    """
+    try:
+        return isinstance(obj, basestring)
+    except NameError:
+        return isinstance(obj, str)
 
 def _pretty_print_json(json_dict):
     """Return a pretty-printed version of a dict converted to json, as a string."""
@@ -49,8 +54,22 @@ def _pretty_print_json(json_dict):
 
 def _run(cmd):
     print('running command: ', cmd)
+    beg_time = time.time()
     subprocess.check_call(cmd, shell=True)
-    print('command succeeded: ', cmd)
+    print('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
+
+def _run_get_output(cmd):
+    print('running command: ', cmd)
+    output = subprocess.check_output(cmd, shell=True)
+    print('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
+    return output
+
+def _run_get_json(cmd):
+    return json.loads(_run_get_output(cmd).strip())
+
+def workflow_utils_init():
+    """Install the dependencies: cromwell and dxpy and git-annex."""
+    _run('conda install cromwell dxpy git-annex')
 
 #
 # given a dx analysis, run it locally
@@ -67,7 +86,7 @@ def get_workflow_inputs(workflow_name, t_dir, docker_img):
             shutil.copy(f, '.')
         shutil.rmtree('source')
         os.unlink('wdl.tar')
-        return json.loads(subprocess.check_output('womtool inputs ' + workflow_name + '.wdl', shell=True))
+        return _run_get_json('womtool inputs ' + workflow_name + '.wdl')
     
 
 def _get_dx_val(val, dx_files_dir = 'input_files'):
@@ -87,8 +106,7 @@ def _get_dx_val(val, dx_files_dir = 'input_files'):
             file_size = int(descr['size'])
 
             # see if the file is cached in git-annex
-            ga_mdata = json.loads(subprocess.check_output('git annex metadata --json --key=WORM-s0-m0--dx-' + dxid,
-                                                          shell=True).strip())
+            ga_mdata = _run_get_json('git annex metadata --json --key=WORM-s0-m0--dx-' + dxid)
             if ga_mdata['fields']:
                 ga_key = ga_mdata['fields']['ga_key'][0]
                 _run('git annex get --key ' + ga_key)
@@ -107,7 +125,7 @@ def _get_dx_val(val, dx_files_dir = 'input_files'):
                 print('fetched', dxid, 'to', dx_file)
                 print('curdir is ', os.getcwd())
                 _run('git annex add ' + dx_file)
-                ga_key = subprocess.check_output('git annex lookupkey ' + dx_file, shell=True).strip()
+                ga_key = _run_get_output('git annex lookupkey ' + dx_file).strip()
                 _run('git annex metadata -s dxid+=' + dxid + ' ' + dx_file)
                 # record a mapping from the dxid to the git-annex key
                 _run('git annex metadata --key=WORM-s0-m0--{} -s ga_key={}'.format('dx-'+dxid, ga_key))
@@ -237,6 +255,7 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
                                      "final_call_logs_dir": os.path.join(output_dir, 'call_logs')
                     }
                     util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
+                    util.file.dump_file('execution_env.json', _pretty_print_json(dict(ncpus=util.misc.available_cpu_count())))
 
                     util.file.dump_file('analysis_labels.json',
                                         _pretty_print_json(dict(analysis_descr=analysis_descr,
@@ -251,12 +270,11 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
                     _run('womtool validate -i inputs.json ' + workflow_name + '.wdl')
                     _log.info('Validated workflow; calling cromwell')
                     try:
-                        cromwell_output_str = subprocess.check_output('cromwell run ' + workflow_name + \
-                                                                      '.wdl -i inputs.json -l analysis_labels.json ' + \
-                                                                      ' -o cromwell_opts.json' + \
-                                                                      ' -m ' + \
-                                                                      os.path.join(output_dir, 'cromwell_execution_metadata.json'),
-                                                                      shell=True)
+                        cromwell_output_str = _run_get_output('cromwell run ' + workflow_name + \
+                                                              '.wdl -i inputs.json -l analysis_labels.json ' + \
+                                                              ' -o cromwell_opts.json' + \
+                                                              ' -m ' + \
+                                                              os.path.join(output_dir, 'cromwell_execution_metadata.json'))
                         cromwell_returncode = 0
                     except subprocess.CalledProcessError as called_process_error:
                         cromwell_output_str = called_process_error.output
@@ -268,13 +286,14 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
 
                     if cromwell_returncode == 0:
                         def make_paths_relative(v):
-                            if isinstance(v, str) and os.path.isabs(v) and v.startswith(os.getcwd()):
-                                return os.path.relpath(v)
+                            print('make_paths_relative: v=', v, 't_dir_git=', t_dir_git)
+                            if is_str(v) and os.path.isabs(v) and v.startswith(t_dir_git):
+                                return os.path.relpath(v, t_dir_git)
                             if isinstance(v, list):
                                 return list(map(make_paths_relative, v))
                             return v
                         cromwell_output_json = {k: make_paths_relative(v)
-                                                for k, v in _parse_cromwell_output_str(cromwell_output_str)}
+                                                for k, v in _parse_cromwell_output_str(cromwell_output_str).items()}
                         util.file.dump_file('outputs.json',
                                             _pretty_print_json(cromwell_output_json))
                         util.file.make_empty('analysis_succeeded.txt')
@@ -304,9 +323,8 @@ def create_analysis_id(workflow_name):
 def get_docker_hash(docker_img):
     if docker_img.startswith('sha256:'):
         return docker_img
-    digest_line = subprocess.check_output('docker images ' + docker_img + ' --digests --no-trunc --format '
-                                          '"{{.Repository}}:{{.Tag}} {{.Digest}}"',
-                                          shell=True)
+    digest_line = _run_get_output('docker images ' + docker_img + ' --digests --no-trunc --format '
+                                  '"{{.Repository}}:{{.Tag}} {{.Digest}}"')
     assert digest_line.count('\n') == 1
     img, digest = digest_line.strip().split()
     assert img == docker_img + (':latest' if ':' not in docker_img else '')
@@ -365,12 +383,10 @@ class RedirectToDNAnexus(SimpleHTTPServer.SimpleHTTPRequestHandler):
        try:
            print('path=', self.path)
            try:
-               file_info_json = subprocess.check_output('dx describe --json ' + self._get_dx_id(), shell=True)
+               file_info = _run_get_json('dx describe --json ' + self._get_dx_id())
            except subprocess.CalledProcessError as e:
                print('CalledProcessError:', e)
                raise
-           print('got file_info_json', file_info_json)
-           file_info = json.loads(file_info_json)
            print('got file_info', file_info)
            assert file_info['id'] == self._get_dx_id()
 
@@ -381,7 +397,7 @@ class RedirectToDNAnexus(SimpleHTTPServer.SimpleHTTPRequestHandler):
                self.send_header('Content-Length', str(file_info['size']))
            #self.send_header('Content-Disposition', 'attachment; filename="{}"'.format(file_info['name']))
 
-           new_path = subprocess.check_output('dx make_download_url --duration 2h ' + self._get_dx_id(), shell=True)
+           new_path = _run_get_output('dx make_download_url --duration 2h ' + self._get_dx_id())
            print('new_path=', new_path)
            self.send_header('Location', new_path)
            self.end_headers()
