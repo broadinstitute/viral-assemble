@@ -67,8 +67,7 @@ def analyze_workflows():
     print(stats)
     for bam, mdatas in bam2analyses.items():
         if len(mdatas) > 1:
-            print('bam=', bam, 'analyses=', [mdata['analysis_id'] for mdata in mdatas])
-            print('MMMMMMMMMMMMMMMM', mdata.keys())
+            print('bam=', bam, 'analyses=', '\n'.join(map(str, [mdata['analysis_id'] for mdata in mdatas])))
 
             def canonicalize_val(v, analysis_id):
                 if not _is_str(v): return v
@@ -76,22 +75,38 @@ def analyze_workflows():
                 v = os.path.join('runs', analysis_id, v)
                 if _is_str(v) and os.path.islink(v) and os.path.lexists(v) and '.git/annex/objects' in os.path.realpath(v):
                     return os.path.basename(os.path.realpath(v))
-                print('not canon: ', v)
+                #print('not canon: ', v)
                 return orig_v
 
             for i in range(len(mdatas)):
                 for j in range(i+1, len(mdatas)):
-                    def get_items(mdata):
-                        analysis_id = mdata['analysis_id']
-                        mdata = mdata['outputs']
-                        mdata = {k: canonicalize_val(v, analysis_id) for k, v in mdata.items()}
-                        print('canonicalized version', mdata)
-                        return set(map(str, mdata.items()))
-                    items_i = get_items(mdatas[i])
-                    items_j = get_items(mdatas[j])
-                    print('------------differing items----------------')
-                    print('\n'.join(map(str, items_i ^ items_j)))
-                    print('------------end differing items----------------')
+                    if mdatas[i]['outputs']['assemble_denovo.refine_2x_and_plot.assembly_length_unambiguous'] == \
+                       mdatas[j]['outputs']['assemble_denovo.refine_2x_and_plot.assembly_length_unambiguous']: continue
+                    print('COMPARING ', mdatas[i]['analysis_id'], mdatas[j]['analysis_id'])
+                    def show_diff(which):
+                        def get_items(mdata):
+                            analysis_id = mdata['analysis_id']
+                            mdata = mdata[which]
+                            mdata = {k: canonicalize_val(v, analysis_id) for k, v in mdata.items()}
+                            mdata = {k:v for k,v in mdata.items() if isinstance(v, (int, float)) or _is_str(v) and not v.startswith('SHA256')}
+                            #print('canonicalized version', mdata)
+                            return mdata
+                        items_i = get_items(mdatas[i])
+                        items_j = get_items(mdatas[j])
+                        print('\n\n\n')
+                        #print('KEYS', items_i.keys())
+                        assert items_i.keys() == items_j.keys()
+                        print('------------differing items {}----------', which)
+                        for k in sorted(items_i.keys()):
+                            if items_i[k] != items_j[k]:
+                                print(k, items_i[k], items_j[k])
+                        #print('\n'.join(sorted(map(str, items_i ^ items_j))))
+                        print('--------end differing items {}-----------', which)
+                        print('\n\n\n')
+                    print('********* i={} j={}\n'.format(i,j))
+                    show_diff('inputs')
+                    show_diff('outputs')
+                    print('***************************************')
 
 if __name__ == '__main__':
     analyze_workflows()
