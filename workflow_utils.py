@@ -23,6 +23,7 @@ import collections
 import time
 import getpass
 import uuid
+import functools
 import SimpleHTTPServer
 import SocketServer
 
@@ -53,7 +54,7 @@ def _pretty_print_json(json_dict):
     return json.dumps(json_dict, indent=4, separators=(',', ': '))
 
 def _run(cmd):
-    print('running command: ', cmd)
+    print('running command: ', cmd, 'cwd=', os.getcwd())
     beg_time = time.time()
     subprocess.check_call(cmd, shell=True)
     print('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
@@ -76,21 +77,20 @@ def workflow_utils_init():
 # given a dx analysis, run it locally
 #
 
-def get_workflow_inputs(workflow_name, t_dir, docker_img):
+def get_workflow_inputs(workflow_name, docker_img):
     """Run womtool to get the inputs of the wdl workflow"""
-    with util.file.pushd_popd(t_dir):
-        _run('docker run --rm ' + docker_img + ' tar cf - source/pipes/WDL > wdl.tar')
-        _run('tar xvf wdl.tar')
-        for f in glob.glob('source/pipes/WDL/workflows/*.wdl'):
-            shutil.copy(f, '.')
-        for f in glob.glob('source/pipes/WDL/workflows/tasks/*.wdl'):
-            shutil.copy(f, '.')
-        shutil.rmtree('source')
-        os.unlink('wdl.tar')
-        return _run_get_json('womtool inputs ' + workflow_name + '.wdl')
+    _run('docker run --rm ' + docker_img + ' tar cf - source/pipes/WDL > wdl.tar')
+    _run('tar xvf wdl.tar')
+    for f in glob.glob('source/pipes/WDL/workflows/*.wdl'):
+        shutil.copy(f, '.')
+    for f in glob.glob('source/pipes/WDL/workflows/tasks/*.wdl'):
+        shutil.copy(f, '.')
+    shutil.rmtree('source')
+    os.unlink('wdl.tar')
+    return _run_get_json('womtool inputs ' + workflow_name + '.wdl')
     
 
-def _get_dx_val(val, dx_files_dir = 'input_files'):
+def _get_dx_val(val, dx_files_dir):
     """Resolve a dx value: if it is a scalar, just return that;
     if it is a dx file, fetch the file, cache it locally, and return the path to the file."""
 
@@ -100,7 +100,8 @@ def _get_dx_val(val, dx_files_dir = 'input_files'):
         link = val['$dnanexus_link']
         if isinstance(link, collections.Mapping) and 'analysis' in link:
             print('link is ', link)
-            return _get_dx_val(dxpy.DXAnalysis(link['analysis']).describe()['output'][link['stage']+'.'+link['field']])
+            return _get_dx_val(dxpy.DXAnalysis(link['analysis']).describe()['output'][link['stage']+'.'+link['field']],
+                               dx_files_dir)
         elif (_is_str(link) and link.startswith('file-')) or (isinstance(link, collections.Mapping) and 'id' in link and _is_str(link['id']) and link['id'].startswith('file-')):
             if _is_str(link) and link.startswith('file-'):
                 dxid = link
@@ -151,15 +152,19 @@ def _parse_cromwell_output_str(cromwell_output_str):
     json_end = cromwell_output_str.index('\n}\n', json_beg) + 2
     return json.loads(cromwell_output_str[json_beg:json_end])
 
-def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img, analysis_dir, analysis_inputs_specified=None, 
-                     analysis_descr='', analysis_labels=None,
-                     data_repo=None, data_remote=None):
-    """Run a WDL analysis locally, using a specified version of viral-ngs.
+def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img, analysis_dir, analysis_inputs_specified=None, 
+                        analysis_descr='', analysis_labels=None,
+                        data_repo=None, data_remote=None, cromwell_opts=''):
+    """Submit a WDL analysis to a Cromwell server.
 
-    Notes:
-
-       - record the actual git hash (since git tag might change)
-
+    Args:
+        workflow_name: name of the workflow, from pipes/WDL/workflows
+        docker_img: docker image from which all viral-ngs and WDL code is taken.
+        analysis_inputs_from_dx_analysis: id of a DNAnexus analysis from which to take analysis inputs
+        analysis_inputs_specified: json file specifying analysis inputs directly; overrides any given by
+         analysis_inputs_from_dx_analysis
+        analysis_labels: json file specifying any analysis labels
+        analysis_dir: relative path where analysis results will be put.  a unique analysis ID will be appended.
     """
     assert not os.path.isabs(analysis_dir)
 
@@ -184,141 +189,145 @@ def run_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img
     assert os.path.exists('.git/annex')
     data_repo = data_repo or os.getcwd()
 
-    with util.file.tmp_dir('_workflow_copy') as t_dir_orig:
-        with util.file.pushd_popd(t_dir_orig):
-            _run('git clone ' + data_repo + ' data')
-            t_dir_git = os.path.join(t_dir_orig, 'data')
-            util.file.mkdir_p(t_dir_git)
-            with util.file.pushd_popd(t_dir_git):
-                _run('git annex init')
-                _run('git annex describe here running_' + analysis_id)
-                _run('git config annex.security.allowed-http-addresses "127.0.0.1 ::1 localhost"')
-                if data_remote:
-                    _run('git annex enableremote ' + data_remote)
+    cromwell_tmp_dir = '/data/ilya-work/pipelines'
+    util.file.mkdir_p(cromwell_tmp_dir)
 
-                t_dir = os.path.join(t_dir_git, analysis_dir + '-' + analysis_id)
-                util.file.mkdir_p(t_dir)
-                with util.file.pushd_popd(t_dir):
-                    print('TTTTTTTTTTT t_dir=', t_dir)
+    _run('git config annex.security.allowed-http-addresses "127.0.0.1 ::1 localhost"')
+                # if data_remote:
+                #     _run('git annex enableremote ' + data_remote)
 
-                    output_dir = 'output'
+    t_dir = os.path.join(cromwell_tmp_dir, analysis_dir + '-' + analysis_id)
+    util.file.mkdir_p(t_dir)
+    with util.file.pushd_popd(t_dir):
+        print('TTTTTTTTTTT t_dir=', t_dir)
 
-                    util.file.mkdir_p('input_files')
+        output_dir = os.path.join(t_dir, 'output')
 
-                    wdl_wf_inputs = get_workflow_inputs(workflow_name, t_dir, docker_img=docker_img_hash)
+        input_files_dir = os.path.join(t_dir, 'input_files')
+        util.file.mkdir_p(input_files_dir)
 
-                    # TODO: use git annex batch mode to determine the keys for all the file-xxxx files, then
-                    # use batch mode to get the keys.  use -J to parallelize.  also option to use a cache remote, as
-                    # described at https://git-annex.branchable.com/tips/local_caching_of_annexed_files/
+        get_dx_val = functools.partial(_get_dx_val, dx_files_dir=input_files_dir)
 
-                    # TODO: diff stages may have same-name inputs
-                    dx_wf_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['runInput'].items()}   # check for dups
-                    dx_wf_orig_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['originalInput'].items()}   # check for dups
-                    print('DX_WF_RUNINPUTS', '\n'.join(dx_wf_inputs.keys()))
-                    print('DX_WF_ORIGINPUTS', '\n'.join(dx_wf_orig_inputs.keys()))
-                    new_wdl_wf_inputs = {}
-                    for wdl_wf_input, wdl_wf_input_descr in wdl_wf_inputs.items():
-                        wdl_wf_input_full = wdl_wf_input
-                        wdl_wf_input = wdl_wf_input.split('.')[-1]
-                        def _set_input(dx_wf_input):
-                            new_wdl_wf_inputs[wdl_wf_input_full] = map(_get_dx_val, dx_wf_input) \
-                                                                   if isinstance(dx_wf_input, list) \
-                                                                      else _get_dx_val(dx_wf_input)
+        wdl_wf_inputs = get_workflow_inputs(workflow_name, t_dir, docker_img=docker_img_hash)
 
-                        if wdl_wf_input in analysis_inputs_specified:
-                            _set_input(analysis_inputs_specified[wdl_wf_input])
-                        elif wdl_wf_input in dx_wf_inputs:
-                            print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_inputs[wdl_wf_input])
-                            _set_input(dx_wf_inputs[wdl_wf_input])
-                        elif '(optional' not in wdl_wf_input_descr and wdl_wf_input in dx_wf_orig_inputs:
-                            print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_orig_inputs[wdl_wf_input])
-                            _set_input(dx_wf_orig_inputs[wdl_wf_input])
-                        else:
-                            print('MISSING', wdl_wf_input, wdl_wf_input_descr)
-                            assert '(optional' in wdl_wf_input_descr, \
-                                'Missing required argument: {} {}'.format(wdl_wf_input, wdl_wf_input_descr)
+        # TODO: use git annex batch mode to determine the keys for all the file-xxxx files, then
+        # use batch mode to get the keys.  use -J to parallelize.  also option to use a cache remote, as
+        # described at https://git-annex.branchable.com/tips/local_caching_of_annexed_files/
+
+        # TODO: diff stages may have same-name inputs
+        dx_wf_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['runInput'].items()}   # check for dups
+        dx_wf_orig_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['originalInput'].items()}   # check for dups
+        print('DX_WF_RUNINPUTS', '\n'.join(dx_wf_inputs.keys()))
+        print('DX_WF_ORIGINPUTS', '\n'.join(dx_wf_orig_inputs.keys()))
+        new_wdl_wf_inputs = {}
+        for wdl_wf_input, wdl_wf_input_descr in wdl_wf_inputs.items():
+            wdl_wf_input_full = wdl_wf_input
+            wdl_wf_input = wdl_wf_input.split('.')[-1]
+
+            def _set_input(dx_wf_input):
+                new_wdl_wf_inputs[wdl_wf_input_full] = map(get_dx_val, dx_wf_input) \
+                                                       if isinstance(dx_wf_input, list) \
+                                                          else get_dx_val(dx_wf_input)
+
+            if wdl_wf_input in analysis_inputs_specified:
+                _set_input(analysis_inputs_specified[wdl_wf_input])
+            elif wdl_wf_input in dx_wf_inputs:
+                print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_inputs[wdl_wf_input])
+                _set_input(dx_wf_inputs[wdl_wf_input])
+            elif '(optional' not in wdl_wf_input_descr and wdl_wf_input in dx_wf_orig_inputs:
+                print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_orig_inputs[wdl_wf_input])
+                _set_input(dx_wf_orig_inputs[wdl_wf_input])
+            else:
+                print('MISSING', wdl_wf_input, wdl_wf_input_descr)
+                assert '(optional' in wdl_wf_input_descr, \
+                    'Missing required argument: {} {}'.format(wdl_wf_input, wdl_wf_input_descr)
 
 
-                    print(_pretty_print_json(new_wdl_wf_inputs))
+        print(_pretty_print_json(new_wdl_wf_inputs))
 
-                    ################# put in the right docker ID!!  and find a place to keep the docker cache.
+        ################# put in the right docker ID!!  and find a place to keep the docker cache.
 
-                    with open('inputs.json', 'wt') as wf_out:
-                        json.dump(new_wdl_wf_inputs, wf_out, indent=4, separators=(',', ': '))
+        with open('inputs.json', 'wt') as wf_out:
+            json.dump(new_wdl_wf_inputs, wf_out, indent=4, separators=(',', ': '))
 
-                    # TODO: option to update just some of the tasks.
-                    # actually, when compiling WDL, should have this option -- or, actually,
-                    # should make a new workflow where older apps are reused for stages that have not changed.
-                    _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_hash))
+        # TODO: option to update just some of the tasks.
+        # actually, when compiling WDL, should have this option -- or, actually,
+        # should make a new workflow where older apps are reused for stages that have not changed.
+        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_hash))
 
-                    util.file.mkdir_p(output_dir)
-                    util.file.mkdir_p(os.path.join(output_dir, 'outputs'))
-                    util.file.mkdir_p(os.path.join(output_dir, 'logs'))
-                    util.file.mkdir_p(os.path.join(output_dir, 'call_logs'))
-                    #util.file.mkdir_p(os.path.join(output_dir, 'metadata'))
-                    wf_opts_dict = { "final_workflow_outputs_dir": os.path.join(output_dir, 'outputs'),
-                                     "final_workflow_log_dir": os.path.join(output_dir, 'logs'),
-                                     "final_call_logs_dir": os.path.join(output_dir, 'call_logs')
-                    }
-                    util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
-                    util.file.dump_file('execution_env.json', _pretty_print_json(dict(ncpus=util.misc.available_cpu_count())))
+        util.file.mkdir_p(output_dir)
+        util.file.mkdir_p(os.path.join(output_dir, 'outputs'))
+        util.file.mkdir_p(os.path.join(output_dir, 'logs'))
+        util.file.mkdir_p(os.path.join(output_dir, 'call_logs'))
+        #util.file.mkdir_p(os.path.join(output_dir, 'metadata'))
+        wf_opts_dict = { "final_workflow_outputs_dir": os.path.join(output_dir, 'outputs'),
+                         "final_workflow_log_dir": os.path.join(output_dir, 'logs'),
+                         "final_call_logs_dir": os.path.join(output_dir, 'call_logs')
+        }
+        util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
+        util.file.dump_file('execution_env.json', _pretty_print_json(dict(ncpus=util.misc.available_cpu_count())))
 
-                    util.file.dump_file('analysis_labels.json',
-                                        _pretty_print_json(dict(analysis_descr=analysis_descr,
-                                                                docker_img=docker_img,
-                                                                docker_img_hash=docker_img_hash,
-                                                                inputs_from_dx_analysis=analysis_inputs_from_dx_analysis,
-                                                                analysis_id=analysis_id,
-                                                                **dict(analysis_labels or {}))))
+        util.file.dump_file('analysis_labels.json',
+                            _pretty_print_json(dict(analysis_descr=analysis_descr,
+                                                    docker_img=docker_img,
+                                                    docker_img_hash=docker_img_hash,
+                                                    inputs_from_dx_analysis=analysis_inputs_from_dx_analysis,
+                                                    analysis_id=analysis_id,
+                                                    **dict(analysis_labels or {}))))
 
-                    # add cromwell labels: dx project, the docker tag we ran on, etc.
+        # add cromwell labels: dx project, the docker tag we ran on, etc.
 
-                    _log.info('Validating workflow')
-                    _run('womtool validate -i inputs.json ' + workflow_name + '.wdl')
-                    _log.info('Validated workflow; calling cromwell')
-                    try:
-                        cromwell_output_str = _run_get_output('cromwell run ' + workflow_name + \
-                                                              '.wdl -i inputs.json -l analysis_labels.json ' + \
-                                                              ' -o cromwell_opts.json' + \
-                                                              ' -m ' + \
-                                                              'cromwell_execution_metadata.json')
-                        cromwell_returncode = 0
-                    except subprocess.CalledProcessError as called_process_error:
-                        cromwell_output_str = called_process_error.output
-                        cromwell_returncode = called_process_error.returncode
-                        
-                    _log.info('Cromwell returned with return code %d', cromwell_returncode)
+        _log.info('Validating workflow')
+        _run('womtool validate -i inputs.json ' + workflow_name + '.wdl')
+        _log.info('Validated workflow; calling cromwell')
+        _run('zip imports.zip *.wdl')
+        try:
+            cromwell_output_str = _run_get_output('cromwell ' + cromwell_opts + ' submit ' + workflow_name + \
+                                                  '.wdl -t wdl -i inputs.json -l analysis_labels.json ' + \
+                                                  ' -o cromwell_opts.json' + \
+                                                  ' -p imports.zip -h http://localhost:8000')
+            cromwell_returncode = 0
+        except subprocess.CalledProcessError as called_process_error:
+            cromwell_output_str = called_process_error.output
+            cromwell_returncode = called_process_error.returncode
 
-                    util.file.dump_file(os.path.join(output_dir, 'cromwell_output.txt'), cromwell_output_str)
-                    _run('sed -i -- "s|{}|{}|g" cromwell_execution_metadata.json'.format(t_dir+'/', ''))
+        _log.info('Cromwell returned with return code %d', cromwell_returncode)
+        print('cromwell output is ', cromwell_output_str)
+#        import sys
+#        sys.exit(0)
 
-                    if cromwell_returncode == 0:
-                        def make_paths_relative(v):
-                            if _is_str(v) and os.path.isabs(v) and v.startswith(t_dir):
-                                return os.path.relpath(v, t_dir)
-                            if isinstance(v, list):
-                                return list(map(make_paths_relative, v))
-                            return v
-                        cromwell_output_json = {k: make_paths_relative(v)
-                                                for k, v in _parse_cromwell_output_str(cromwell_output_str).items()}
-                        util.file.dump_file('outputs.json',
-                                            _pretty_print_json(cromwell_output_json))
-                        util.file.make_empty('analysis_succeeded.txt')
-                    else:
-                        util.file.make_empty('analysis_failed.txt')
 
-                    _run('rm *.wdl')
+        # util.file.dump_file(os.path.join(output_dir, 'cromwell_output.txt'), cromwell_output_str)
+        # _run('sed -i -- "s|{}|{}|g" cromwell_execution_metadata.json'.format(t_dir+'/', ''))
 
-                _run('sudo chown -R $USER . || true')
-                _run('git annex add')
-                _run('git commit -m after_running_analysis_' + analysis_id + '.')
-#                _run('git annex initremote content type=directory directory=/ndata/git-annex-content/ encryption=none')
-                _run('git annex move --all --to {} -J{}'.format(data_remote or 'origin', util.misc.available_cpu_count()))
-                _run('git annex dead here')
-                _run('git annex sync --message git_annex_sync_analysis_{}'.format(analysis_id))
+        # if cromwell_returncode == 0:
+        #     def make_paths_relative(v):
+        #         if _is_str(v) and os.path.isabs(v) and v.startswith(t_dir):
+        #             return os.path.relpath(v, t_dir)
+        #         if isinstance(v, list):
+        #             return list(map(make_paths_relative, v))
+        #         return v
+        #     cromwell_output_json = {k: make_paths_relative(v)
+        #                             for k, v in _parse_cromwell_output_str(cromwell_output_str).items()}
+        #     util.file.dump_file('outputs.json',
+        #                         _pretty_print_json(cromwell_output_json))
+        #     util.file.make_empty('analysis_succeeded.txt')
+        # else:
+        #     util.file.make_empty('analysis_failed.txt')
 
-                # enable cleanup
-                _run('chmod -R u+w . || true')
+        _run('rm *.wdl')
+
+#                 _run('sudo chown -R $USER . || true')
+#                 _run('git annex add')
+#                 _run('git commit -m after_running_analysis_' + analysis_id + '.')
+# #                _run('git annex initremote content type=directory directory=/ndata/git-annex-content/ encryption=none')
+#                 _run('git annex move --all --to {} -J{}'.format(data_remote or 'origin', util.misc.available_cpu_count()))
+#                 _run('git annex dead here')
+#                 # pull and merge here first? and try the sync several times, after a pause maybe
+#                 _run('git annex sync --message git_annex_sync_analysis_{}'.format(analysis_id))
+
+#                 # enable cleanup
+#                 _run('chmod -R u+w . || true')
 
 
 def create_analysis_id(workflow_name):
@@ -364,9 +373,9 @@ def gather_run_results(docker_img, cromwell_output):
 ########################################################################################################################
 
 
-def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
+def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('workflow_name', help='Workflow name')
-    parser.add_argument('--analysisDir', dest='analysis_dir', default='runs/an',
+    parser.add_argument('--analysisDir', dest='analysis_dir', default='an',
                         help='directory where analysis will be stored; a unique suffix will be added')
     parser.add_argument('--analysisInputsFromDxAnalysis', dest='analysis_inputs_from_dx_analysis',
                         help='DNAnexus analysis ID to take analysis inputs from; specific ones can be overridden by '
@@ -374,15 +383,16 @@ def parser_run_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('--dockerImg', dest='docker_img', default='quay.io/broadinstitute/viral-ngs')
     parser.add_argument('--analysisInputsSpecified', dest='analysis_inputs_specified',
                         help='explicitly specified analysis inputs')
-    parser.add_argument('--analysisDescr', dest='analysis_descr', help='description of the run')
+    parser.add_argument('--analysisDescr', dest='analysis_descr', default='an analysis', help='description of the run')
     parser.add_argument('--dataRepo', dest='data_repo', help='git data repository')
     parser.add_argument('--dataRemote', dest='data_remote', help='git-annex data remote')
     parser.add_argument('--analysisLabels', dest='analysis_labels', nargs=2, action='append',
                         help='labels to attach to the analysis')
+    parser.add_argument('--cromwellOpts', dest='cromwell_opts', default='', help='command-line flags to pass to cromwell')
 
-    util.cmd.attach_main(parser, run_analysis_wdl, split_args=True)
+    util.cmd.attach_main(parser, submit_analysis_wdl, split_args=True)
 
-__commands__.append(('run_analysis_wdl', parser_run_analysis_wdl))
+__commands__.append(('submit_analysis_wdl', parser_submit_analysis_wdl))
 
 
 ########################################################################################################################
@@ -448,6 +458,76 @@ def parser_run_dx_url_server(parser=argparse.ArgumentParser()):
 __commands__.append(('run_dx_url_server', parser_run_dx_url_server))
 
 ########################################################################################################################
+
+def analyze_workflows():
+    bam2analyses = collections.defaultdict(list)
+    stats = collections.Counter()
+    for analysis in os.listdir('runs'):
+        def _file(name): return os.path.join('runs', analysis, name)
+        if not os.path.isfile(_file('cromwell_execution_metadata.json')):
+            stats['no_metadata'] += 1
+            continue
+        mdata = json.loads(util.file.slurp_file(_file('cromwell_execution_metadata.json')).strip())
+        if not mdata['workflowName'].startswith('assemble_denovo'):
+            stats['wrong_workflowName'] += 1
+            continue
+        if not mdata['status'] == 'Succeeded':
+            stats['wrong_status'] += 1
+            continue
+        stats['considered'] += 1
+        mdata = copy.deepcopy(mdata)
+        mdata['analysis_id'] = analysis
+        bam = mdata['inputs']['assemble_denovo.reads_unmapped_bam']
+        bam2analyses[bam].append(mdata)
+        print(analysis)
+    print(stats)
+    diffs = []
+    for bam, mdatas in bam2analyses.items():
+        if len(mdatas) > 1:
+            print('bam=', bam, 'analyses=', '\n'.join(map(str, [mdata['analysis_id'] for mdata in mdatas])))
+
+            def canonicalize_val(v, analysis_id):
+                if not _is_str(v): return v
+                orig_v = v
+                v = os.path.join('runs', analysis_id, v)
+                if _is_str(v) and os.path.islink(v) and os.path.lexists(v) and '.git/annex/objects' in os.path.realpath(v):
+                    return os.path.basename(os.path.realpath(v))
+                #print('not canon: ', v)
+                return orig_v
+
+            for i in range(len(mdatas)):
+                for j in range(i+1, len(mdatas)):
+                    if mdatas[i]['outputs']['assemble_denovo.refine_2x_and_plot.assembly_length_unambiguous'] == \
+                       mdatas[j]['outputs']['assemble_denovo.refine_2x_and_plot.assembly_length_unambiguous']: continue
+                    print('COMPARING ', mdatas[i]['analysis_id'], mdatas[j]['analysis_id'])
+                    def show_diff(which):
+                        def get_items(mdata):
+                            analysis_id = mdata['analysis_id']
+                            mdata = mdata[which]
+                            mdata = {k: canonicalize_val(v, analysis_id) for k, v in mdata.items()}
+                            mdata = {k:v for k,v in mdata.items() if isinstance(v, (int, float)) or _is_str(v) and not v.startswith('SHA256')}
+                            #print('canonicalized version', mdata)
+                            return mdata
+                        items_i = get_items(mdatas[i])
+                        items_j = get_items(mdatas[j])
+                        print('\n\n\n')
+                        #print('KEYS', items_i.keys())
+                        assert items_i.keys() == items_j.keys()
+                        print('------------differing items {}----------', which)
+                        for k in sorted(items_i.keys()):
+                            if items_i[k] != items_j[k]:
+                                print(k, items_i[k], items_j[k])
+                                if k == 'assemble_denovo.refine_2x_and_plot.assembly_length_unambiguous':
+                                    pass
+                        #print('\n'.join(sorted(map(str, items_i ^ items_j))))
+                        print('--------end differing items {}-----------', which)
+                        print('\n\n\n')
+                    print('********* i={} j={}\n'.format(i,j))
+                    show_diff('inputs')
+                    show_diff('outputs')
+                    print('***************************************')
+
+#########################################################################################################################
 
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
