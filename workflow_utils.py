@@ -208,7 +208,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
 
         get_dx_val = functools.partial(_get_dx_val, dx_files_dir=input_files_dir)
 
-        wdl_wf_inputs = get_workflow_inputs(workflow_name, t_dir, docker_img=docker_img_hash)
+        wdl_wf_inputs = get_workflow_inputs(workflow_name, docker_img=docker_img_hash)
 
         # TODO: use git annex batch mode to determine the keys for all the file-xxxx files, then
         # use batch mode to get the keys.  use -J to parallelize.  also option to use a cache remote, as
@@ -315,7 +315,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
         # else:
         #     util.file.make_empty('analysis_failed.txt')
 
-        _run('rm *.wdl')
+        _run('rm imports.zip *.wdl')
 
 #                 _run('sudo chown -R $USER . || true')
 #                 _run('git annex add')
