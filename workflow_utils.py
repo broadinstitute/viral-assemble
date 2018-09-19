@@ -464,6 +464,26 @@ __commands__.append(('run_dx_url_server', parser_run_dx_url_server))
 
 ########################################################################################################################
 
+def save_analysis_metadata(dummy):
+    for wf in _run_get_json('curl -X GET "http://localhost:8000/api/workflows/v1/query" -H "accept: application/json"')['results']:
+        mdata = _run_get_json('curl -X GET "http://localhost:8000/api/workflows/v1/{}/metadata?expandSubWorkflows=false" -H "accept: application/json"'.format(wf['id']))
+        if os.path.isfile(mdata['workflowLog']):
+            assert mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
+            mdata_fname = mdata['workflowLog'][:-4]+'.metadata.json'
+            if not os.path.isfile(mdata_fname):
+                util.file.dump_file(mdata_fname, _pretty_print_json(mdata))
+                _log.info('Wrote metadata to %s', mdata_fname)
+
+def parser_save_analysis_metadata(parser=argparse.ArgumentParser()):
+    parser.add_argument('dummy', help='Ignored argument (running command with no args just prints help)')
+    util.cmd.attach_main(parser, save_analysis_metadata, split_args=True)
+
+__commands__.append(('save_analysis_metadata', parser_save_analysis_metadata))
+
+
+
+########################################################################################################################
+
 def gather_analyses(dirs):
     """Gather analyses from various sources into one simple uniform format."""
     pass
