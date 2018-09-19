@@ -394,6 +394,11 @@ def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
 
 __commands__.append(('submit_analysis_wdl', parser_submit_analysis_wdl))
 
+########################################################################################################################
+
+def finalize_analysis_wdl(analysis_dir):
+    """Save metadata, mark final workflow result, make paths relative to analysis dir."""
+    pass
 
 ########################################################################################################################
 
@@ -456,6 +461,12 @@ def parser_run_dx_url_server(parser=argparse.ArgumentParser()):
     util.cmd.attach_main(parser, run_dx_url_server, split_args=True)
 
 __commands__.append(('run_dx_url_server', parser_run_dx_url_server))
+
+########################################################################################################################
+
+def gather_analyses(dirs):
+    """Gather analyses from various sources into one simple uniform format."""
+    pass
 
 ########################################################################################################################
 
