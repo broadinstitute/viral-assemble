@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+
+# * Preamble
+
 """
 Utilities for dealing with workflows, including cloud workflows.
 
@@ -24,6 +27,7 @@ import time
 import getpass
 import uuid
 import functools
+import glob
 import SimpleHTTPServer
 import SocketServer
 
@@ -39,6 +43,8 @@ _log = logging.getLogger(__name__)
 
 logging.basicConfig(format="%(asctime)s - %(module)s:%(lineno)d:%(funcName)s - %(levelname)s - %(message)s")
 _log.setLevel(logging.DEBUG)
+
+# * Generic utils
 
 def _is_str(obj):
     """Test if obj is a string type, in a python2/3 compatible way.
@@ -73,6 +79,9 @@ def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy and git-annex."""
     _run('conda install cromwell dxpy git-annex')
 
+# * get_workflow_inputs
+
+
 #
 # given a dx analysis, run it locally
 #
@@ -90,6 +99,7 @@ def get_workflow_inputs(workflow_name, docker_img):
     return _run_get_json('womtool inputs ' + workflow_name + '.wdl')
     
 
+# * _get_dx_val
 def _get_dx_val(val, dx_files_dir):
     """Resolve a dx value: if it is a scalar, just return that;
     if it is a dx file, fetch the file, cache it locally, and return the path to the file."""
@@ -151,6 +161,8 @@ def _parse_cromwell_output_str(cromwell_output_str):
     json_beg = cromwell_output_str.index('Final Outputs:') + len('Final Outputs:')
     json_end = cromwell_output_str.index('\n}\n', json_beg) + 2
     return json.loads(cromwell_output_str[json_beg:json_end])
+
+# * submit_analysis_wdl
 
 def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img, analysis_dir, analysis_inputs_specified=None, 
                         analysis_descr='', analysis_labels=None,
@@ -396,11 +408,11 @@ __commands__.append(('submit_analysis_wdl', parser_submit_analysis_wdl))
 
 ########################################################################################################################
 
-def finalize_analysis_wdl(analysis_dir):
-    """Save metadata, mark final workflow result, make paths relative to analysis dir."""
-    pass
+    
 
 ########################################################################################################################
+
+# * RedirectToDNAnexus
 
 class RedirectToDNAnexus(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
@@ -464,9 +476,38 @@ __commands__.append(('run_dx_url_server', parser_run_dx_url_server))
 
 ########################################################################################################################
 
-def save_analysis_metadata(dummy):
-    for wf in _run_get_json('curl -X GET "http://localhost:8000/api/workflows/v1/query" -H "accept: application/json"')['results']:
-        mdata = _run_get_json('curl -X GET "http://localhost:8000/api/workflows/v1/{}/metadata?expandSubWorkflows=false" -H "accept: application/json"'.format(wf['id']))
+# * finalize_analysis_dir
+
+# ** CromwelServer
+
+class CromwellServer(object):
+
+    """Interactions with a running Cromwell server"""
+
+    def __init__(self, host):
+        self.host = host
+
+    def _api(self, url):
+        return _run_get_json('curl -X GET "http://{}/api/workflows/v1/{}" -H "accept: application/json"'.format(self.host, url))
+
+    def get_workflows(self):
+        return self._api('query')['results']
+    
+    def get_metadata(self, workflow_id):
+        return self._api('{}/metadata?expandSubWorkflows=false', workflow_id)
+
+# end: class CromwellServer(object)
+
+def _is_analysis_done(analysis_dir):
+    return os.path.exists(os.path.join(analysis_dir, 'output', 'logs'))
+
+# ** finalize_analysis_dir impl
+def finalize_analysis_dir(cromwell_host, analysis_dir):
+    """After a submitted cromwell analysis has finished, save results to the analysis dir.
+    Save metadata, mark final workflow result, make paths relative to analysis dir."""
+    cromwell_server = CromwellServer(host=cromwell_host)
+    for wf in cromwell_server._get_workflows():
+        mdata = cromwell_server.get_metadata(wf['id'])
         if os.path.isfile(mdata['workflowLog']):
             assert mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
             mdata_fname = mdata['workflowLog'][:-4]+'.metadata.json'
@@ -474,21 +515,34 @@ def save_analysis_metadata(dummy):
                 util.file.dump_file(mdata_fname, _pretty_print_json(mdata))
                 _log.info('Wrote metadata to %s', mdata_fname)
 
-def parser_save_analysis_metadata(parser=argparse.ArgumentParser()):
+def parser_finalize_analysis_dir(parser=argparse.ArgumentParser()):
     parser.add_argument('dummy', help='Ignored argument (running command with no args just prints help)')
-    util.cmd.attach_main(parser, save_analysis_metadata, split_args=True)
+    util.cmd.attach_main(parser, finalize_analysis_dir, split_args=True)
 
-__commands__.append(('save_analysis_metadata', parser_save_analysis_metadata))
+__commands__.append(('finalize_analysis_dir', parser_finalize_analysis_dir))
 
 
 
 ########################################################################################################################
+
+def _load_workflow_metadata(analysis_dir):
+    return json.loads(util.file.slurp_file(glob.glob(os.path.join(analysis_dir, 'output', 'logs', 'workflow.*.json'))[0]))
+
+def analysis_dir_to_json(analysis_dir):
+    """Gather data from one analysis dir into simple json"""
+    mdata = _load_workflow_metadata(analysis_dir)
+
+    
+    
+    
 
 def gather_analyses(dirs):
     """Gather analyses from various sources into one simple uniform format."""
     pass
 
 ########################################################################################################################
+
+# * analyze_workflows
 
 def analyze_workflows():
     bam2analyses = collections.defaultdict(list)
@@ -559,6 +613,8 @@ def analyze_workflows():
                     print('***************************************')
 
 #########################################################################################################################
+
+# * Epilog
 
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
