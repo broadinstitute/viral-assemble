@@ -55,6 +55,9 @@ def _is_str(obj):
     except NameError:
         return isinstance(obj, str)
 
+def _is_mapping(obj):
+    return isinstance(obj, collections.Mapping)
+
 def _pretty_print_json(json_dict):
     """Return a pretty-printed version of a dict converted to json, as a string."""
     return json.dumps(json_dict, indent=4, separators=(',', ': '))
@@ -79,7 +82,9 @@ def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy and git-annex."""
     _run('conda install cromwell dxpy git-annex')
 
-# * get_workflow_inputs
+
+# * submit_analysis_wdl
+# ** get_workflow_inputs
 
 
 #
@@ -99,7 +104,7 @@ def get_workflow_inputs(workflow_name, docker_img):
     return _run_get_json('womtool inputs ' + workflow_name + '.wdl')
     
 
-# * _get_dx_val
+# ** _get_dx_val
 def _get_dx_val(val, dx_files_dir):
     """Resolve a dx value: if it is a scalar, just return that;
     if it is a dx file, fetch the file, cache it locally, and return the path to the file."""
@@ -162,7 +167,7 @@ def _parse_cromwell_output_str(cromwell_output_str):
     json_end = cromwell_output_str.index('\n}\n', json_beg) + 2
     return json.loads(cromwell_output_str[json_beg:json_end])
 
-# * submit_analysis_wdl
+# ** submit_analysis_wdl
 
 def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img, analysis_dir, analysis_inputs_specified=None, 
                         analysis_descr='', analysis_labels=None,
@@ -494,32 +499,67 @@ class CromwellServer(object):
         return self._api('query')['results']
     
     def get_metadata(self, workflow_id):
-        return self._api('{}/metadata?expandSubWorkflows=false', workflow_id)
+        return self._api('{}/metadata?expandSubWorkflows=false'.format(workflow_id))
 
 # end: class CromwellServer(object)
 
 def _is_analysis_done(analysis_dir):
     return os.path.exists(os.path.join(analysis_dir, 'output', 'logs'))
 
-# ** finalize_analysis_dir impl
-def finalize_analysis_dir(cromwell_host, analysis_dir):
+def _record_file_metadata(val, analysis_dir, root_dir):
+    """If 'val' is a filename, return a dict representing the file and some metadata about it;
+    otherwise, return val as-is."""
+    if isinstance(val, list): return [_record_file_metadata(v, analysis_dir, root_dir) for v in val]
+    if _is_mapping(val): return collections.OrderedDict([(k, _record_file_metadata(v, analysis_dir, root_dir))
+                                                          for k, v in val.items()])
+    if not (_is_str(val) and (os.path.isfile(val) or os.path.isdir(val))): return val
+    file_info = collections.OrderedDict([('_is_file' if os.path.isfile(val) else '_is_dir', True)])
+    assert val.startswith(analysis_dir) or val.startswith(root_dir)
+    if val.startswith(analysis_dir):
+        relpath = os.path.relpath(val, analysis_dir)
+        abspath = os.path.join(analysis_dir, relpath)
+    else:
+        cromwell_executions_dir = os.path.dirname(os.path.dirname(root_dir))
+        relpath = os.path.relpath(val, cromwell_executions_dir)
+        abspath = os.path.join(analysis_dir, 'output',
+                               'call_logs' if os.path.basename(val) in ('stdout', 'stderr') else 'outputs', relpath)
+        if os.path.isfile(val) and not os.path.isfile(abspath):
+            os.link(val, abspath)
+
+    assert os.path.isabs(abspath) and abspath.startswith(analysis_dir), \
+        'bad abspath: {} analysis_dir: {}'.format(abspath, analysis_dir)
+    relpath = os.path.relpath(abspath, analysis_dir)
+    assert not os.path.isabs(relpath), 'should be relative: {}'.format(relpath)
+    assert os.path.isfile(abspath) or os.path.isdir(abspath), 'not file or dir: {}'.format(abspath)
+    assert os.path.isdir(abspath) or os.path.getsize(abspath) == os.path.getsize(val)
+    file_info['relpath'] = relpath
+    if os.path.isfile(abspath):
+        file_info['size'] = os.path.getsize(abspath)
+        file_info['md5'] = _run_get_output('md5sum ' + abspath).strip().split()[0]
+    return file_info
+
+# ** finalize_analysis_dirs impl
+def finalize_analysis_dirs(cromwell_host):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
-    for wf in cromwell_server._get_workflows():
+    for wf in cromwell_server.get_workflows():
         mdata = cromwell_server.get_metadata(wf['id'])
-        if os.path.isfile(mdata['workflowLog']):
-            assert mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
-            mdata_fname = mdata['workflowLog'][:-4]+'.metadata.json'
-            if not os.path.isfile(mdata_fname):
-                util.file.dump_file(mdata_fname, _pretty_print_json(mdata))
-                _log.info('Wrote metadata to %s', mdata_fname)
+        assert mdata['id'] == wf['id']
+        assert mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
+        analysis_dir = os.path.dirname(os.path.dirname(os.path.dirname(mdata['workflowLog'])))
+        mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
+        mdata_fname = os.path.join(analysis_dir, 'metadata_orig.json') # mdata['workflowLog'][:-4]+'.metadata.json'
+        mdata_rel_fname = os.path.join(analysis_dir, 'metadata.json') # mdata['workflowLog'][:-4]+'.metadata.json'
+        util.file.dump_file(mdata_fname, _pretty_print_json(mdata))
+        util.file.dump_file(mdata_rel_fname, _pretty_print_json(mdata_rel))
+        _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
 
-def parser_finalize_analysis_dir(parser=argparse.ArgumentParser()):
-    parser.add_argument('dummy', help='Ignored argument (running command with no args just prints help)')
-    util.cmd.attach_main(parser, finalize_analysis_dir, split_args=True)
+def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
+    parser.add_argument('cromwell_host', default='localhost:8000', help='cromwell server hostname')
+    util.cmd.attach_main(parser, finalize_analysis_dirs, split_args=True)
 
-__commands__.append(('finalize_analysis_dir', parser_finalize_analysis_dir))
+__commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
 
 
 
