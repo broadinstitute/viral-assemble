@@ -27,7 +27,7 @@ import time
 import getpass
 import uuid
 import functools
-import glob
+import builtins
 import SimpleHTTPServer
 import SocketServer
 
@@ -46,21 +46,25 @@ _log.setLevel(logging.DEBUG)
 
 # * Generic utils
 
+_str_type = getattr(builtins, 'basestring', 'str')
+_long_type = getattr(builtins, 'long', 'int')
+_scalar_types = (NoneType, _str_type, _long_type, int, bool, float)
+
 def _is_str(obj):
     """Test if obj is a string type, in a python2/3 compatible way.
     From https://stackoverflow.com/questions/4232111/stringtype-and-nonetype-in-python3-x
     """
-    try:
-        return isinstance(obj, basestring)
-    except NameError:
-        return isinstance(obj, str)
+    return isinstance(obj, _str_type)
 
 def _is_mapping(obj):
     return isinstance(obj, collections.Mapping)
 
-def _pretty_print_json(json_dict):
+def _is_scalar(val):
+    isinstance(val, _json_scalar_types)
+
+def _pretty_print_json(json_dict, **kw):
     """Return a pretty-printed version of a dict converted to json, as a string."""
-    return json.dumps(json_dict, indent=4, separators=(',', ': '))
+    return json.dumps(json_dict, indent=4, separators=(',', ': '), **kw)
 
 def _run(cmd):
     print('running command: ', cmd, 'cwd=', os.getcwd())
@@ -75,8 +79,14 @@ def _run_get_output(cmd):
     print('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
     return output
 
+def _json_loads(s):
+    return json.loads(s.strip(), object_pairs_hook=collections.OrderedDict)
+
+def _json_loadf(fname):
+    return _json_loads(util.file.slurp_file(fname))
+
 def _run_get_json(cmd):
-    return json.loads(_run_get_output(cmd).strip())
+    return _json_loads(_run_get_output(cmd))
 
 def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy and git-annex."""
@@ -165,7 +175,7 @@ def _parse_cromwell_output_str(cromwell_output_str):
     assert cromwell_output_str.count('Final Outputs:') == 1
     json_beg = cromwell_output_str.index('Final Outputs:') + len('Final Outputs:')
     json_end = cromwell_output_str.index('\n}\n', json_beg) + 2
-    return json.loads(cromwell_output_str[json_beg:json_end])
+    return _json_loads(cromwell_output_str[json_beg:json_end])
 
 # ** submit_analysis_wdl
 
@@ -189,7 +199,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
         analysis_inputs_specified = {}
     else:
         print('analysis_inputs_specified=', util.file.slurp_file(analysis_inputs_specified).strip())
-        analysis_inputs_specified = json.loads(util.file.slurp_file(analysis_inputs_specified).strip())
+        analysis_inputs_specified = _json_loadf(analysis_inputs_specified)
 
     analysis_id = create_analysis_id(workflow_name)
     print('ANALYSIS_ID is ', analysis_id)
@@ -201,7 +211,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
         dx_analysis = dxpy.DXAnalysis(dxid=analysis_inputs_from_dx_analysis)
         dx_analysis_descr = dx_analysis.describe()
     else:
-        dx_analysis_descr = dict(runInput={}, originalInput={})
+        dx_analysis_descr = collections.OrderedDict(runInput={}, originalInput={})
 
     assert os.path.exists('.git/annex')
     data_repo = data_repo or os.getcwd()
@@ -236,7 +246,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
         dx_wf_orig_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['originalInput'].items()}   # check for dups
         print('DX_WF_RUNINPUTS', '\n'.join(dx_wf_inputs.keys()))
         print('DX_WF_ORIGINPUTS', '\n'.join(dx_wf_orig_inputs.keys()))
-        new_wdl_wf_inputs = {}
+        new_wdl_wf_inputs = collections.OrderedDict()
         for wdl_wf_input, wdl_wf_input_descr in wdl_wf_inputs.items():
             wdl_wf_input_full = wdl_wf_input
             wdl_wf_input = wdl_wf_input.split('.')[-1]
@@ -282,7 +292,8 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
                          "final_call_logs_dir": os.path.join(output_dir, 'call_logs')
         }
         util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
-        util.file.dump_file('execution_env.json', _pretty_print_json(dict(ncpus=util.misc.available_cpu_count())))
+        util.file.dump_file('execution_env.json', _pretty_print_json(dict(ncpus=util.misc.available_cpu_count()),
+                                                                     sort_keys=True))
 
         util.file.dump_file('analysis_labels.json',
                             _pretty_print_json(dict(analysis_descr=analysis_descr,
@@ -290,7 +301,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
                                                     docker_img_hash=docker_img_hash,
                                                     inputs_from_dx_analysis=analysis_inputs_from_dx_analysis,
                                                     analysis_id=analysis_id,
-                                                    **dict(analysis_labels or {}))))
+                                                    **dict(analysis_labels or {})), sort_keys=True))
 
         # add cromwell labels: dx project, the docker tag we ran on, etc.
 
@@ -566,15 +577,11 @@ __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
 ########################################################################################################################
 
 def _load_workflow_metadata(analysis_dir):
-    return json.loads(util.file.slurp_file(glob.glob(os.path.join(analysis_dir, 'output', 'logs', 'workflow.*.json'))[0]))
+    return _json_loadf(glob.glob(os.path.join(analysis_dir, 'output', 'logs', 'workflow.*.json'))[0])
 
 def analysis_dir_to_json(analysis_dir):
     """Gather data from one analysis dir into simple json"""
     mdata = _load_workflow_metadata(analysis_dir)
-
-    
-    
-    
 
 def gather_analyses(dirs):
     """Gather analyses from various sources into one simple uniform format."""
@@ -582,9 +589,30 @@ def gather_analyses(dirs):
 
 ########################################################################################################################
 
-# * analyze_workflows
 
-def analyze_workflows():
+# * compare_analysis_pairs
+
+def _load_analysis_metadata(analysis_dir):
+    """Read the analysis metadata from an analysis dir"""
+    return _json_loadf(os.path.join(analysis_dir, 'metadata.json'))
+
+def _flatten_tree(val):
+    pass
+
+def compare_analysis_pairs(analysis_dirs, common_fields, filter_A, filter_B, metrics):
+    """Compare pairs of analyses from `analysis_dirs` where the two analyses of a pair have
+    identical values of `common_fields`, the first analysis of the pair matches the criteria in `filter_A` and
+    the second matches the criteria in `filter_B`.  For such pairs, show the distribution of output 
+    `metrics`.
+    """
+
+    # For each distinct combination of `common_fields` values, gather the analyses with that combination.
+    pass
+
+
+# ** analyze_workflows_orig
+
+def analyze_workflows_orig():
     bam2analyses = collections.defaultdict(list)
     stats = collections.Counter()
     for analysis in os.listdir('runs'):
@@ -592,7 +620,7 @@ def analyze_workflows():
         if not os.path.isfile(_file('cromwell_execution_metadata.json')):
             stats['no_metadata'] += 1
             continue
-        mdata = json.loads(util.file.slurp_file(_file('cromwell_execution_metadata.json')).strip())
+        mdata = _json_loadf(_file('cromwell_execution_metadata.json'))
         if not mdata['workflowName'].startswith('assemble_denovo'):
             stats['wrong_workflowName'] += 1
             continue
@@ -653,6 +681,9 @@ def analyze_workflows():
                     print('***************************************')
 
 #########################################################################################################################
+
+
+
 
 # * Epilog
 
