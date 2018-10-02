@@ -613,7 +613,7 @@ def _flatten(val, pfx=''):
         return functools.reduce(operator.concat, [_flatten(v, pfx+('.' if pfx else '')+k) for k, v in val.items()])
     return [(pfx, val)]
 
-def compare_analysis_pairs(analysis_dirs, filter_A, filter_B, metrics):
+def compare_analysis_pairs(workflow_name, analysis_dirs, filter_A, filter_B, metrics):
     """Compare pairs of analyses from `analysis_dirs` where the two analyses of a pair have
     identical values of `common_fields`, the first analysis of the pair matches the criteria in `filter_A` and
     the second matches the criteria in `filter_B`.  For such pairs, show the distribution of output 
@@ -621,6 +621,13 @@ def compare_analysis_pairs(analysis_dirs, filter_A, filter_B, metrics):
     """
 
     # For each distinct combination of `common_fields` values, gather the analyses with that combination.
+    analysis_dirs=[os.path.join(analysis_dirs, d) for d in os.listdir(analysis_dirs) \
+                   if os.path.isfile(os.path.join(analysis_dirs, d, 'metadata.json'))]
+    filter_A = dict(filter_A)
+    filter_B = dict(filter_B)
+    print('filter_A=', filter_A)
+    print('filter_B=', filter_B)
+    metrics = metrics or ()
 
     flat_analyses = [ _flatten(_load_analysis_metadata(analysis_dir)) for analysis_dir in analysis_dirs if
                       os.path.isfile(os.path.join(analysis_dir, 'metadata.json')) ]
@@ -639,20 +646,37 @@ def compare_analysis_pairs(analysis_dirs, filter_A, filter_B, metrics):
     analysis_groups = collections.defaultdict(list)
     for a in flat_analyses:
         analysis_groups[_get_common_fields(a)].append(a)
-    for ag, a in analysis_groups.items():
-        print('ag=', ag, 'a=', a)
 
     def _matches(a, filt):
         return all([k not in filt or filt[k] == v for k, v in a])
+
+    metric2diffs = collections.defaultdict(list)
 
     found_pairs = 0
     for ag, analyses in analysis_groups.items():
         ag_A = [a for a in analyses if _matches(a, filter_A)]
         ag_B = [a for a in analyses if _matches(a, filter_B)]
         if ag_A and ag_B:
-            print('\nag=', ag, '\nag_A=', ag_A[0], '\nag_B=', ag_B[0])
+            an_A = collections.OrderedDict(ag_A[0])
+            an_B = collections.OrderedDict(ag_B[0])
+            #print('\nag=', ag, '\nan_A=', an_A, '\nan_B=', an_B)
             found_pairs += 1
+            for metric in metrics:
+                metric2diffs[metric].append(an_B[metric] - an_A[metric])
     print('found_pairs=', found_pairs)
+    for metric in metrics:
+        print('metric=', metric, 'diffs=', sorted(metric2diffs[metric]))
+
+def parser_compare_analysis_pairs(parser=argparse.ArgumentParser()):
+    parser.add_argument('--workflowName', dest='workflow_name', required=True)
+    parser.add_argument('--filterA', dest='filter_A', nargs=2, action='append', required=True)
+    parser.add_argument('--filterB', dest='filter_B', nargs=2, action='append', required=True)
+    parser.add_argument('--metrics', action='append')
+    parser.add_argument('--analysisDirs', dest='analysis_dirs', default='pipelines', help='dir containing analysis dirs')
+    util.cmd.attach_main(parser, compare_analysis_pairs, split_args=True)
+
+__commands__.append(('compare_analysis_pairs', parser_compare_analysis_pairs))
+
 
 # ** analyze_workflows_orig
 
