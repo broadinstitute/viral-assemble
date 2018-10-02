@@ -743,11 +743,11 @@ if __name__ == '__main__':
         run_dx_locally(workflow_name='assemble_denovo', analysis_dxid='analysis-FJfqjg005Z3Vp5Q68jxzx5q1',
                        docker_img='quay.io/broadinstitute/viral-ngs')
     #print('\n'.join(map(str, _flatten(_json_loadf('/data/ilya-work/pipelines/an-analysis-180914-200549-b9a24c15-bb50-409e-9fa9-9996e5c5ff37-assemble_denovo/metadata.json')))))
-    if True:
+    if False:
         compare_analysis_pairs(analysis_dirs=[os.path.join('pipelines', d) for d in os.listdir('pipelines') \
                                               if os.path.isfile(os.path.join('pipelines', d, 'metadata.json'))],
                                filter_A={'inputs.assemble_denovo.assemble.assembler': 'trinity'},
                                filter_B={'inputs.assemble_denovo.assemble.assembler': 'spades'}, metrics=()
         )
-    #util.cmd.main_argparse(__commands__, __doc__)
+    util.cmd.main_argparse(__commands__, __doc__)
 
