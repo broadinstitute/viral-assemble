@@ -27,6 +27,7 @@ import time
 import getpass
 import uuid
 import functools
+import operator
 import builtins
 import SimpleHTTPServer
 import SocketServer
@@ -48,7 +49,9 @@ _log.setLevel(logging.DEBUG)
 
 _str_type = getattr(builtins, 'basestring', 'str')
 _long_type = getattr(builtins, 'long', 'int')
-_scalar_types = (NoneType, _str_type, _long_type, int, bool, float)
+_scalar_types = (type(None), _str_type, _long_type, int, bool, float)
+if hasattr(builtins, 'unicode'):
+    _scalar_types += (unicode,)
 
 def _is_str(obj):
     """Test if obj is a string type, in a python2/3 compatible way.
@@ -60,7 +63,7 @@ def _is_mapping(obj):
     return isinstance(obj, collections.Mapping)
 
 def _is_scalar(val):
-    isinstance(val, _json_scalar_types)
+    isinstance(val, _scalar_types)
 
 def _pretty_print_json(json_dict, **kw):
     """Return a pretty-printed version of a dict converted to json, as a string."""
@@ -562,9 +565,10 @@ def finalize_analysis_dirs(cromwell_host):
         mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
         mdata_fname = os.path.join(analysis_dir, 'metadata_orig.json') # mdata['workflowLog'][:-4]+'.metadata.json'
         mdata_rel_fname = os.path.join(analysis_dir, 'metadata.json') # mdata['workflowLog'][:-4]+'.metadata.json'
-        util.file.dump_file(mdata_fname, _pretty_print_json(mdata))
-        util.file.dump_file(mdata_rel_fname, _pretty_print_json(mdata_rel))
-        _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
+        if not os.path.exists(mdata_fname):
+            util.file.dump_file(mdata_fname, _pretty_print_json(mdata))
+            util.file.dump_file(mdata_rel_fname, _pretty_print_json(mdata_rel))
+            _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
 
 def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('cromwell_host', default='localhost:8000', help='cromwell server hostname')
@@ -596,10 +600,20 @@ def _load_analysis_metadata(analysis_dir):
     """Read the analysis metadata from an analysis dir"""
     return _json_loadf(os.path.join(analysis_dir, 'metadata.json'))
 
-def _flatten_tree(val):
-    pass
+def _flatten(val, pfx=''):
+    if isinstance(val, list): return functools.reduce(operator.concat,
+                                                       [_flatten(v, pfx+('.' if pfx else '')+str(i)) for i, v in enumerate(val)])
+    if _is_mapping(val):
+        if '_is_file' in val:
+            if 'md5' in val: return _flatten('md5:'+val['md5'], pfx)
+            # for now, assume that if the file is from a URL then its unique id e.g. dx file-xxxx is in filename
+            return _flatten(val['relpath'], pfx)
+        if '_is_dir' in val:
+            return _flatten(val['relpath'], pfx)
+        return functools.reduce(operator.concat, [_flatten(v, pfx+('.' if pfx else '')+k) for k, v in val.items()])
+    return [(pfx, val)]
 
-def compare_analysis_pairs(analysis_dirs, common_fields, filter_A, filter_B, metrics):
+def compare_analysis_pairs(analysis_dirs, filter_A, filter_B, metrics):
     """Compare pairs of analyses from `analysis_dirs` where the two analyses of a pair have
     identical values of `common_fields`, the first analysis of the pair matches the criteria in `filter_A` and
     the second matches the criteria in `filter_B`.  For such pairs, show the distribution of output 
@@ -607,8 +621,38 @@ def compare_analysis_pairs(analysis_dirs, common_fields, filter_A, filter_B, met
     """
 
     # For each distinct combination of `common_fields` values, gather the analyses with that combination.
-    pass
 
+    flat_analyses = [ _flatten(_load_analysis_metadata(analysis_dir)) for analysis_dir in analysis_dirs if
+                      os.path.isfile(os.path.join(analysis_dir, 'metadata.json')) ]
+    print('len(analysis_dirs)=', len(analysis_dirs))
+    print('len(flat_analyses)=', len(flat_analyses))
+
+    assert filter_A.keys() == filter_B.keys(), 'Atypical usage -- probably error?'
+    
+    filter_fields = set(set(filter_A.keys()) | set(filter_B.keys()))
+
+    def _get_common_fields(flat_analysis):
+        return tuple(sorted([(k, v) for k, v in flat_analysis \
+                             if k not in filter_fields and \
+                             (k.startswith('inputs.') or k.startswith('labels.docker_img_hash'))]))
+
+    analysis_groups = collections.defaultdict(list)
+    for a in flat_analyses:
+        analysis_groups[_get_common_fields(a)].append(a)
+    for ag, a in analysis_groups.items():
+        print('ag=', ag, 'a=', a)
+
+    def _matches(a, filt):
+        return all([k not in filt or filt[k] == v for k, v in a])
+
+    found_pairs = 0
+    for ag, analyses in analysis_groups.items():
+        ag_A = [a for a in analyses if _matches(a, filter_A)]
+        ag_B = [a for a in analyses if _matches(a, filter_B)]
+        if ag_A and ag_B:
+            print('\nag=', ag, '\nag_A=', ag_A[0], '\nag_B=', ag_B[0])
+            found_pairs += 1
+    print('found_pairs=', found_pairs)
 
 # ** analyze_workflows_orig
 
@@ -698,5 +742,12 @@ if __name__ == '__main__':
     if False:
         run_dx_locally(workflow_name='assemble_denovo', analysis_dxid='analysis-FJfqjg005Z3Vp5Q68jxzx5q1',
                        docker_img='quay.io/broadinstitute/viral-ngs')
-    util.cmd.main_argparse(__commands__, __doc__)
+    #print('\n'.join(map(str, _flatten(_json_loadf('/data/ilya-work/pipelines/an-analysis-180914-200549-b9a24c15-bb50-409e-9fa9-9996e5c5ff37-assemble_denovo/metadata.json')))))
+    if True:
+        compare_analysis_pairs(analysis_dirs=[os.path.join('pipelines', d) for d in os.listdir('pipelines') \
+                                              if os.path.isfile(os.path.join('pipelines', d, 'metadata.json'))],
+                               filter_A={'inputs.assemble_denovo.assemble.assembler': 'trinity'},
+                               filter_B={'inputs.assemble_denovo.assemble.assembler': 'spades'}, metrics=()
+        )
+    #util.cmd.main_argparse(__commands__, __doc__)
 
