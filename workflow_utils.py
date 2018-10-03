@@ -602,11 +602,14 @@ def gather_analyses(dirs):
 
 def _load_analysis_metadata(analysis_dir):
     """Read the analysis metadata from an analysis dir"""
-    return _json_loadf(os.path.join(analysis_dir, 'metadata.json'))
+    md = _json_loadf(os.path.join(analysis_dir, 'metadata.json'))
+    md['analysis_dir'] = analysis_dir
+    return md
 
 def _flatten(val, pfx=''):
     if isinstance(val, list): return functools.reduce(operator.concat,
-                                                       [_flatten(v, pfx+('.' if pfx else '')+str(i)) for i, v in enumerate(val)])
+                                                      [_flatten(v, pfx+('.' if pfx else '')+str(i)) for i, v in enumerate(val)],
+                                                      [])
     if _is_mapping(val):
         if '_is_file' in val:
             if 'md5' in val: return _flatten('md5:'+val['md5'], pfx)
@@ -614,7 +617,9 @@ def _flatten(val, pfx=''):
             return _flatten(val['relpath'], pfx)
         if '_is_dir' in val:
             return _flatten(val['relpath'], pfx)
-        return functools.reduce(operator.concat, [_flatten(v, pfx+('.' if pfx else '')+k) for k, v in val.items()])
+        return functools.reduce(operator.concat,
+                                [_flatten(v, pfx+('.' if pfx else '')+k) for k, v in val.items()],
+                                [])
     return [(pfx, val)]
 
 def compare_analysis_pairs(workflow_name, analysis_dirs, filter_A, filter_B, metrics):
@@ -635,6 +640,7 @@ def compare_analysis_pairs(workflow_name, analysis_dirs, filter_A, filter_B, met
 
     flat_analyses = [ _flatten(_load_analysis_metadata(analysis_dir)) for analysis_dir in analysis_dirs if
                       os.path.isfile(os.path.join(analysis_dir, 'metadata.json')) ]
+    flat_analyses = [ f for f in flat_analyses if dict(f)['status'] == 'Succeeded' ]
     print('len(analysis_dirs)=', len(analysis_dirs))
     print('len(flat_analyses)=', len(flat_analyses))
 
@@ -666,10 +672,11 @@ def compare_analysis_pairs(workflow_name, analysis_dirs, filter_A, filter_B, met
             #print('\nag=', ag, '\nan_A=', an_A, '\nan_B=', an_B)
             found_pairs += 1
             for metric in metrics:
-                metric2diffs[metric].append(an_B[metric] - an_A[metric])
+                metric2diffs[metric].append((an_B[metric] - an_A[metric], an_A['analysis_dir'], an_B['analysis_dir']))
     print('found_pairs=', found_pairs)
     for metric in metrics:
-        print('metric=', metric, 'diffs=', sorted(metric2diffs[metric]))
+        print('metric=', metric, 'diffs=\n')
+        print('\n'.join(map(str, sorted(metric2diffs[metric]))))
 
 def parser_compare_analysis_pairs(parser=argparse.ArgumentParser()):
     parser.add_argument('--workflowName', dest='workflow_name', required=True)
