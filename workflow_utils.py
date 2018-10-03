@@ -507,7 +507,7 @@ class CromwellServer(object):
         self.host = host
 
     def _api(self, url):
-        return _run_get_json('curl -X GET "http://{}/api/workflows/v1/{}" -H "accept: application/json"'.format(self.host, url))
+        return _run_get_json('curl -s -X GET "http://{}/api/workflows/v1/{}" -H "accept: application/json"'.format(self.host, url))
 
     def get_workflows(self):
         return self._api('query')['results']
@@ -538,7 +538,11 @@ def _record_file_metadata(val, analysis_dir, root_dir):
         abspath = os.path.join(analysis_dir, 'output',
                                'call_logs' if os.path.basename(val) in ('stdout', 'stderr') else 'outputs', relpath)
         if os.path.isfile(val) and not os.path.isfile(abspath):
-            os.link(val, abspath)
+            print('LINKING {} to {}'.format(val, abspath))
+            util.file.mkdir_p(os.path.dirname(abspath))
+            shutil.copy(val, abspath)
+        if os.path.isdir(val):
+            util.file.mkdir_p(abspath)
 
     assert os.path.isabs(abspath) and abspath.startswith(analysis_dir), \
         'bad abspath: {} analysis_dir: {}'.format(abspath, analysis_dir)
