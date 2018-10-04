@@ -566,11 +566,11 @@ def finalize_analysis_dirs(cromwell_host):
         assert mdata['id'] == wf['id']
         assert mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
         analysis_dir = os.path.dirname(os.path.dirname(os.path.dirname(mdata['workflowLog'])))
-        mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
         mdata_fname = os.path.join(analysis_dir, 'metadata_orig.json') # mdata['workflowLog'][:-4]+'.metadata.json'
         mdata_rel_fname = os.path.join(analysis_dir, 'metadata.json') # mdata['workflowLog'][:-4]+'.metadata.json'
         if not os.path.exists(mdata_fname):
             util.file.dump_file(mdata_fname, _pretty_print_json(mdata))
+            mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
             util.file.dump_file(mdata_rel_fname, _pretty_print_json(mdata_rel))
             _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
 
