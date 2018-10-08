@@ -166,6 +166,7 @@ def _get_dx_val(val, dx_files_dir):
                 # register a URL that can be used to re-fetch this file from DNAnexus;
                 # the URL is only valid if the 'run_dx_url_server' command is running.
                 _run('git annex registerurl ' + ga_key + ' ' + ' http://localhost:8080/dx/' + dxid)
+                
         else:
             raise RuntimeError('Cannot parse dx link {}'.format(link))
         return dx_file
@@ -233,7 +234,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
 
         output_dir = os.path.join(t_dir, 'output')
 
-        input_files_dir = os.path.join(t_dir, 'input_files')
+        input_files_dir = os.path.join(t_dir, 'input_files', analysis_id)
         util.file.mkdir_p(input_files_dir)
 
         get_dx_val = functools.partial(_get_dx_val, dx_files_dir=input_files_dir)
@@ -277,8 +278,24 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
 
         ################# put in the right docker ID!!  and find a place to keep the docker cache.
 
+        #
+        # for S3
+        #
+        _run('git annex add input_files')
+        input_files_sha1 = _run_get_output('git write-tree --prefix={}/'.format(os.path.relpath(os.path.join(t_dir, 'input_files'),
+                                                                                                data_repo))).strip()
+        _run('git annex export ' + input_files_sha1 + ' --to s3-ilya-cromwell')
+
+        def _rewrite_paths_to_s3(val):
+            if _is_mapping(val): return {k: _rewrite_paths_to_s3(v) for k, v in val.items()}
+            if isinstance(val, list): return list(map(_rewrite_paths_to_s3, val))
+            if _is_str(val) and os.path.isfile(val):
+                assert val.startswith(input_files_dir)
+                val = 's3://ilya-cromwell/cromwell-inputs/' + analysis_id + '/' + val[len(input_files_dir)+1:]
+            return val
+
         with open('inputs.json', 'wt') as wf_out:
-            json.dump(new_wdl_wf_inputs, wf_out, indent=4, separators=(',', ': '))
+            json.dump(_rewrite_paths_to_s3(new_wdl_wf_inputs), wf_out, indent=4, separators=(',', ': '))
 
         # TODO: option to update just some of the tasks.
         # actually, when compiling WDL, should have this option -- or, actually,
@@ -294,6 +311,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
                          "final_workflow_log_dir": os.path.join(output_dir, 'logs'),
                          "final_call_logs_dir": os.path.join(output_dir, 'call_logs')
         }
+        wf_opts_dict = { 'backend': 'AWSBATCH' }
         util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
         util.file.dump_file('execution_env.json', _pretty_print_json(dict(ncpus=util.misc.available_cpu_count()),
                                                                      sort_keys=True))
