@@ -347,6 +347,8 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
         #     util.file.make_empty('analysis_failed.txt')
 
         _run('rm imports.zip *.wdl')
+        if cromwell_returncode:
+            raise RuntimeError('Cromwell failed - ' + cromwell_output_str)
 
 #                 _run('sudo chown -R $USER . || true')
 #                 _run('git annex add')
