@@ -433,32 +433,67 @@ __commands__.append(('submit_analysis_wdl', parser_submit_analysis_wdl))
 
 ########################################################################################################################
 
-# * RedirectToDNAnexus
+# * RedirectToCloudObject
 
-class RedirectToDNAnexus(SimpleHTTPServer.SimpleHTTPRequestHandler):
+class RedirectToCloudObject(SimpleHTTPServer.SimpleHTTPRequestHandler):
+
+   def _get_dx(self):
+       try:
+           file_info = _run_get_json('dx describe --json ' + self._get_dx_id())
+       except subprocess.CalledProcessError as e:
+           print('CalledProcessError:', e)
+           raise
+       print('got file_info', file_info)
+       assert file_info['id'] == self._get_dx_id()
+
+       self.send_response(307)
+       if False and 'media' in file_info:
+           self.send_header('Content-Type', file_info['media'])
+       if False and 'size' in file_info:
+           self.send_header('Content-Length', str(file_info['size']))
+       #self.send_header('Content-Disposition', 'attachment; filename="{}"'.format(file_info['name']))
+
+       new_path = _run_get_output('dx make_download_url --duration 2h ' + self._get_dx_id())
+       print('new_path=', new_path)
+       self.send_header('Location', new_path)
+       self.end_headers()
+
+
+   def _get_gs(self):
+       _log.info('IN_gs_gs')
+       try:
+           _log.info('gs_url is %s', self._get_gs_uri())
+           signed_url = _run_get_output('gsutil signurl -d 10m ' + self.server.gs_key + ' ' + self._get_gs_uri()).strip().split()[-1]
+           _log.info('signed url is %s', signed_url)
+       except subprocess.CalledProcessError as e:
+           _log.error('CalledProcessError: %s', e)
+           raise
+
+       self.send_response(307)
+       if False and 'media' in file_info:
+           self.send_header('Content-Type', file_info['media'])
+       if False and 'size' in file_info:
+           self.send_header('Content-Length', str(file_info['size']))
+       #self.send_header('Content-Disposition', 'attachment; filename="{}"'.format(file_info['name']))
+
+       self.send_header('Location', signed_url)
+       self.end_headers()
 
    def do_GET(self):
        try:
-           print('path=', self.path)
-           try:
-               file_info = _run_get_json('dx describe --json ' + self._get_dx_id())
-           except subprocess.CalledProcessError as e:
-               print('CalledProcessError:', e)
-               raise
-           print('got file_info', file_info)
-           assert file_info['id'] == self._get_dx_id()
-
-           self.send_response(307)
-           if False and 'media' in file_info:
-               self.send_header('Content-Type', file_info['media'])
-           if False and 'size' in file_info:
-               self.send_header('Content-Length', str(file_info['size']))
-           #self.send_header('Content-Disposition', 'attachment; filename="{}"'.format(file_info['name']))
-
-           new_path = _run_get_output('dx make_download_url --duration 2h ' + self._get_dx_id())
-           print('new_path=', new_path)
-           self.send_header('Location', new_path)
-           self.end_headers()
+           _log.info('path is %s', self.path)
+           _log.info('is gs path? %s', self.path.startswith('/gs/'))
+           if not any(self.path.startswith('/' + p) for p in self.server.valid_paths):
+               raise IOError('not a valid path')
+           if self.path.startswith('/dx/'):
+               self._get_dx()
+           elif self.path.startswith('/gs/') and self.server.gs_key:
+               _log.info('CALLING get_gs')
+               self._get_gs()
+               _log.info('RETURNED FROM get_gs')
+           else:
+               print('UNKNOWN PATH!!', self.path)
+               raise IOError('Unknown URL')
        except (IOError, subprocess.CalledProcessError):
            self.send_error(404, 'file not found')
 
@@ -468,14 +503,23 @@ class RedirectToDNAnexus(SimpleHTTPServer.SimpleHTTPRequestHandler):
    def _get_dx_id(self):
        return self.path[len('/dx/'):]
 
-def run_dx_url_server(dummy, port=8080):
-    """Start a webserver that will redirect URL requests of the form http://localhost/dx/file-xxxxxx to DNAnexus.
-    This gives each dx file a stable URL, permitting such files to be added to git-annex with the addurl command."""
+   def _get_gs_uri(self):
+       return 'gs://' + self.path[len('/gs/'):]
 
+def run_cloud_object_url_server(port, gs_key, valid_paths):
+    """Start a webserver that will redirect URL requests of the form http://localhost/dx/file-xxxxxx to DNAnexus,
+    requests of the form http://localhost/gs/gsbucket/gsobjectpath to Google Cloud Storage, and requests
+    of the form http://localhost/s3/s3bucket/gsobjectpath to AWS S3.
+    This gives each cloud object a stable http URL, permitting such files to be added to git-annex with the addurl command.
+    """
+
+    assert valid_paths, 'Some valid paths must be specified'
     server = None
     try:           
         SocketServer.TCPServer.allow_reuse_address = True
-        server = SocketServer.TCPServer(("", port), RedirectToDNAnexus)
+        server = SocketServer.TCPServer(("", port), RedirectToCloudObject)
+        server.gs_key = gs_key
+        server.valid_paths = valid_paths
         server.serve_forever()
     except Exception as e:
         if server is None:
@@ -488,12 +532,14 @@ def run_dx_url_server(dummy, port=8080):
             print('re-raising exception', e)
             raise
 
-def parser_run_dx_url_server(parser=argparse.ArgumentParser()):
-    parser.add_argument('dummy', help='Ignored argument (running command with no args just prints help)')
+def parser_run_cloud_object_url_server(parser=argparse.ArgumentParser()):
     parser.add_argument('--port', default=8080, help='Port on which to run the webserver')
-    util.cmd.attach_main(parser, run_dx_url_server, split_args=True)
+    parser.add_argument('--gsKey', dest='gs_key', help='Key for signing gs urls')
+    parser.add_argument('--validPaths', dest='valid_paths', required=True, help='paths that may be accessed',
+                        nargs='+')
+    util.cmd.attach_main(parser, run_cloud_object_url_server, split_args=True)
 
-__commands__.append(('run_dx_url_server', parser_run_dx_url_server))
+__commands__.append(('run_cloud_object_url_server', parser_run_cloud_object_url_server))
 
 ########################################################################################################################
 
