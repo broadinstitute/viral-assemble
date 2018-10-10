@@ -42,7 +42,7 @@ import util.misc
 
 _log = logging.getLogger(__name__)
 
-logging.basicConfig(format="%(asctime)s - %(module)s:%(lineno)d:%(funcName)s - %(levelname)s - %(message)s")
+#logging.basicConfig(format="%(asctime)s - %(module)s:%(lineno)d:%(funcName)s - %(levelname)s - %(message)s")
 _log.setLevel(logging.DEBUG)
 
 # * Generic utils
@@ -277,8 +277,17 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
 
         ################# put in the right docker ID!!  and find a place to keep the docker cache.
 
+        def _rewrite_paths_to_gs(val):
+            if _is_mapping(val): return {k: _rewrite_paths_to_gs(v) for k, v in val.items()}
+            if isinstance(val, list): return list(map(_rewrite_paths_to_gs, val))
+            if _is_str(val) and os.path.isfile(val):
+                assert val.startswith(input_files_dir)
+                val = 'gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/' + val[len(input_files_dir)+1:]
+            return val
+        _run('gsutil cp -r ' + input_files_dir + '/* gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/')
+
         with open('inputs.json', 'wt') as wf_out:
-            json.dump(new_wdl_wf_inputs, wf_out, indent=4, separators=(',', ': '))
+            json.dump(_rewrite_paths_to_gs(new_wdl_wf_inputs), wf_out, indent=4, separators=(',', ': '))
 
         # TODO: option to update just some of the tasks.
         # actually, when compiling WDL, should have this option -- or, actually,
@@ -294,6 +303,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
                          "final_workflow_log_dir": os.path.join(output_dir, 'logs'),
                          "final_call_logs_dir": os.path.join(output_dir, 'call_logs')
         }
+        wf_opts_dict = {}
         util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
         util.file.dump_file('execution_env.json', _pretty_print_json(dict(ncpus=util.misc.available_cpu_count()),
                                                                      sort_keys=True))
@@ -304,6 +314,8 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
                                                     docker_img_hash=docker_img_hash,
                                                     inputs_from_dx_analysis=analysis_inputs_from_dx_analysis,
                                                     analysis_id=analysis_id,
+                                                    analysis_dir=t_dir,
+                                                    submitter=getpass.getuser(),
                                                     **dict(analysis_labels or {})), sort_keys=True))
 
         # add cromwell labels: dx project, the docker tag we ran on, etc.
@@ -604,26 +616,59 @@ def _record_file_metadata(val, analysis_dir, root_dir):
         file_info['md5'] = _run_get_output('md5sum ' + abspath).strip().split()[0]
     return file_info
 
+def is_analysis_dir(d):
+    """Test whether a given directory is an analysis dir"""
+    return all(os.path.isfile(os.path.join(d, f)) for f in ('analysis_labels.json', 'inputs.json', 'cromwell_opts.json'))
+
+def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
+    def _get_analysis_dirs(d):
+        if not os.path.isdir(d): return []
+        if not os.access(d, os.R_OK | os.X_OK):
+            processing_stats['dir_skipped_no_access'] += 1
+            return []
+        if is_analysis_dir(d):
+            return [d]
+        return functools.reduce(operator.concat, [_get_analysis_dirs(os.path.join(d, subd))
+                                                  for subd in os.listdir(d)], [])
+    return functools.reduce(operator.concat, map(_get_analysis_dirs, util.misc.make_seq(analysis_dirs_roots)), [])
+
 # ** finalize_analysis_dirs impl
-def finalize_analysis_dirs(cromwell_host):
+def finalize_analysis_dirs(cromwell_host, analysis_dirs_roots):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
+    processing_stats = collections.Counter()
+    _log.info('Gathering analysis dirs...')
+    all_analysis_dirs = _gather_analysis_dirs(analysis_dirs_roots, processing_stats)
+    processing_stats['all_analysis_dirs'] = len(all_analysis_dirs)
+    _log.info('Got %d analysis dirs', len(all_analysis_dirs))
     for wf in cromwell_server.get_workflows():
+        processing_stats['workflowsFromCromwell'] += 1
         mdata = cromwell_server.get_metadata(wf['id'])
         assert mdata['id'] == wf['id']
-        assert mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
-        analysis_dir = os.path.dirname(os.path.dirname(os.path.dirname(mdata['workflowLog'])))
+        assert 'workflowLog' not in mdata or mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
+        analysis_dirs = [d for d in all_analysis_dirs if wf['id'] in d]
+        if not analysis_dirs:
+            processing_stats['noAnalysisDirForWorkflow'] += 1
+            continue
+        assert len(analysis_dirs) == 1
+        analysis_dir = analysis_dirs[0]
+
         mdata_fname = os.path.join(analysis_dir, 'metadata_orig.json') # mdata['workflowLog'][:-4]+'.metadata.json'
         mdata_rel_fname = os.path.join(analysis_dir, 'metadata.json') # mdata['workflowLog'][:-4]+'.metadata.json'
-        if not os.path.exists(mdata_fname):
+        if os.path.exists(mdata_fname):
+            processing_stats['metadata_already_saved'] += 1
+        else:
             util.file.dump_file(mdata_fname, _pretty_print_json(mdata))
             mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
             util.file.dump_file(mdata_rel_fname, _pretty_print_json(mdata_rel))
             _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
+            processing_stats['saved_metata'] += 1
+    _log.info('Processing stats: %s', str(processing_stats))
 
 def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
-    parser.add_argument('cromwell_host', default='localhost:8000', help='cromwell server hostname')
+    parser.add_argument('analysis_dirs_roots', nargs='+', help='where are analysis dirs found')
+    parser.add_argument('--cromwellHost', dest='cromwell_host', default='localhost:8000', help='cromwell server hostname')
     util.cmd.attach_main(parser, finalize_analysis_dirs, split_args=True)
 
 __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
