@@ -303,7 +303,9 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
                          "final_workflow_log_dir": os.path.join(output_dir, 'logs'),
                          "final_call_logs_dir": os.path.join(output_dir, 'call_logs')
         }
-        wf_opts_dict = {}
+        wf_opts_dict = {
+            "final_workflow_log_dir": os.path.join(output_dir, 'logs')
+        }
         util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
         util.file.dump_file('execution_env.json', _pretty_print_json(dict(ncpus=util.misc.available_cpu_count()),
                                                                      sort_keys=True))
@@ -335,6 +337,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
             cromwell_returncode = called_process_error.returncode
 
         _log.info('Cromwell returned with return code %d', cromwell_returncode)
+        util.file.dump_file('cromwell_submit_output.txt', cromwell_output_str)
         print('cromwell output is ', cromwell_output_str)
 #        import sys
 #        sys.exit(0)
@@ -647,12 +650,11 @@ def finalize_analysis_dirs(cromwell_host, analysis_dirs_roots):
         mdata = cromwell_server.get_metadata(wf['id'])
         assert mdata['id'] == wf['id']
         assert 'workflowLog' not in mdata or mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
-        analysis_dirs = [d for d in all_analysis_dirs if wf['id'] in d]
-        if not analysis_dirs:
+        if 'analysis_dir' in mdata['labels']:
+            analysis_dir = mdata['labels']['analysis_dir']
+        else:
             processing_stats['noAnalysisDirForWorkflow'] += 1
             continue
-        assert len(analysis_dirs) == 1
-        analysis_dir = analysis_dirs[0]
 
         mdata_fname = os.path.join(analysis_dir, 'metadata_orig.json') # mdata['workflowLog'][:-4]+'.metadata.json'
         mdata_rel_fname = os.path.join(analysis_dir, 'metadata.json') # mdata['workflowLog'][:-4]+'.metadata.json'
