@@ -8,7 +8,6 @@ import logging
 import os
 import os.path
 import subprocess
-import shutil
 import concurrent.futures
 
 import tools
@@ -162,6 +161,7 @@ class Bwa(tools.Tool):
             one_rg_inBam = inBam
             tools.samtools.SamtoolsTool().dumpHeader(one_rg_inBam, headerFile)
         else:
+            removeInput = True
             # strip inBam to one read group
             with util.file.tempfname('.onebam.bam') as tmp_bam:
                 samtools.view(['-b', '-r', rgid], inBam, tmp_bam)
@@ -171,8 +171,7 @@ class Bwa(tools.Tool):
                     return
                 # simplify BAM header otherwise Novoalign gets confused
                 one_rg_inBam = util.file.mkstempfname('.{}.in.bam'.format(rgid))
-                removeInput = True
-                
+
                 with open(headerFile, 'wt') as outf:
                     for row in samtools.getHeader(inBam):
                         if len(row) > 0 and row[0] == '@RG':
@@ -200,12 +199,14 @@ class Bwa(tools.Tool):
                  readgroup_line.rstrip("\r\n").replace('\t','\\t')],
                  min_score_to_filter=min_score_to_filter, threads=threads, invert_filter=invert_filter, should_index=should_index)
 
-        return (rgid, outBam)
-        # if there was more than one RG in the input, we had to create a temporary file with the one RG specified
-        # and we can safely delete it this file
+        
+        # if there was more than one RG in the input, we had to create a temporary file with one RG specified
+        # and we can safely delete this temp file
         # if there was only one RG in the input, we used it directly and should not delete it
         if removeInput:
             os.unlink(one_rg_inBam)
+
+        return (rgid, outBam)
 
     def mem(self, inReads, refDb, outAlign, options=None, min_score_to_filter=None,
             threads=None, invert_filter=False, should_index=True):
@@ -311,3 +312,6 @@ class Bwa(tools.Tool):
                         (qname_alignment_scores[qname] < min_score_to_filter and invert_filter)):
                         # Write this query name
                         out_sam_f.write(line + '\n')
+
+class InvalidBamHeaderError(ValueError):
+    pass

@@ -241,7 +241,7 @@ class SamtoolsTool(tools.Tool):
         if probability < 1:
             self.downsample(inBam, outBam, probability)
         else:
-            _log.info("Requested downsample count exceeds number of reads. Including all reads in output.")
+            log.info("Requested downsample count exceeds number of reads. Including all reads in output.")
             shutil.copyfile(inBam, outBam)
 
     def getHeader(self, inBam):

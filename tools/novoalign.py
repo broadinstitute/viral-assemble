@@ -18,7 +18,6 @@ import os
 import os.path
 import subprocess
 import stat
-import sys
 
 _log = logging.getLogger(__name__)
 
@@ -91,7 +90,6 @@ class NovoalignTool(tools.Tool):
         # fetch list of RGs
         rgs = samtools.getReadGroups(inBam)
 
-        rgs_list = list(samtools.getReadGroups(inBam).keys())
         if len(rgs) == 0:
             # Can't do this
             raise InvalidBamHeaderError("{} lacks read groups".format(inBam))

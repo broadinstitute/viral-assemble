@@ -103,7 +103,7 @@ class CheckIlluminaDirectoryTool(PicardTools):
                  opts += ['TILE_NUMBERS=' + str(tile_number)]
 
         if data_types is not None:
-            if isinstance(arg, str):
+            if isinstance(data_types, str):
                 data_types = [data_types]
             for data_type in set(data_types):
                 opts += ['DATA_TYPES=' + data_type]
@@ -299,7 +299,7 @@ class DownsampleSamTool(PicardTools):
     def downsample_to_approx_count(
         self, inBam, outBam, read_count, picardOptions=None,
         JVMmemory=None
-    ):    # pylint: disable=W0221):
+    ):    # pylint: disable=W0221
 
         samtools = tools.samtools.SamtoolsTool()
         total_read_count = samtools.count(inBam)
