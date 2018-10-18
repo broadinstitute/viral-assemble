@@ -5,7 +5,23 @@
 """
 Utilities for dealing with workflows, including cloud workflows.
 
-Commands to help jointly version code and data using tools such as git-annex and DataLad.
+Commands in this module help with the following:
+   - jointly version code and data using git-annex ( https://git-annex.branchable.com/ ) and DataLad ( https://www.datalad.org/ )
+   - keep track of data located in various places (dnanexus, AWS, GCS) in a unified and uniform way
+   - keep track of analyses that have been run, storing each analysis' details in a single self-contained 'analysis directory'
+     within a git/git-annex repository.
+   - re-running an analysis, or a group of analyses, on any cloud (regardless of where they were originally run),
+     while applying specified modifications to the parameters.  In particular, this enables curating sets of benchmark
+     analyses, represented as a git subdir containing a group of analyses, and re-running them with a given parameter
+     modification.
+
+In combination, these utilities enable much of what DNAnexus enables, but:
+   - without forcing all analyses and data to reside in one vendor
+   - providing a uniform interface that works the same across vendors and clouds, as well as analyses run on
+     UGER or Odyssey or locally
+   - allowing the use of spot/preemptible instances (which DNAnexus disallows)
+   - allowing easy archiving/unarchiving of data, using git-annex commands
+   - using all of git's normal mechanisms, such as branches and submodules, to organize things
 """
 
 __author__ = "ilya@broadinstitute.org"
