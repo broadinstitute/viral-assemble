@@ -96,7 +96,7 @@ def _run_get_output(cmd):
     beg_time = time.time()
     output = subprocess.check_output(cmd, shell=True)
     print('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
-    return output
+    return output.strip()
 
 def _json_loads(s):
     return json.loads(s.strip(), object_pairs_hook=collections.OrderedDict)
@@ -189,6 +189,176 @@ def _get_dx_val(val, dx_files_dir):
         return val
 # end: def _get_dx_val(val, dx_files_dir = 'input_files')
 
+# ** proper implementation
+
+class GitAnnexTool(object):
+    pass
+
+class GitAnnexRepo(object):
+
+    """A local git-annex repository, together with its configured cloud remotes.
+    """
+
+    def from_key(ga_key, repo_rel_path):
+        """Set the file at `repo_rel_path` to point to the git-annex key `ga_key`."""
+        pass
+
+    def record_file_uri(file_uri):
+        """Ensures that the given URI is recorded in this repo.
+
+        Returns:
+           A git-annex key for the contents of file_uri.  
+        """
+        pass
+
+    pass
+
+class GitAnnexRemote(object):
+
+    def has_key(key):
+        """Test whether the remote contains a given key"""
+        raise NotImplementedError()
+
+    def put_key(key):
+        """Ensure the remote has content with given key."""
+        raise NotImplementedError()
+
+
+# ** _resolve_file_values
+
+class FileResolver(object):
+    """Abstract base class for recognizing and resolving values that point to files."""
+
+    def __init__(self, input_files_dir):
+        self.input_files_dir = input_files_dir
+    
+    def is_file_value(self, val): 
+        """Test whether `val` represents a file that this FileResolver can handle"""
+        raise NotImplementedError()
+
+    def create_git_annex_symlink(self, file_val, git_file_path):
+        """Given a value representing a file, create a git-annex link to the file under the relative path `git_file_path`.
+        Returns the git-annex key representing the contents of `file_val`.
+        """
+        raise NotImplementedError()
+
+class DxFileResolver(FileResolver):
+
+    """FileResolver for DNAnexus links"""
+
+    def is_file_value(self, val):
+        """Test whether `val` represents a DNAnexus file"""
+        return _is_mapping(val) and '$dnanexus_link' in val
+
+    def _get_dx_id(self, file_val):
+        """Given a `val` that represents a DNAnexus file (possibly indirectly), get the dx ID (file-xxxxxxx) for the file."""
+        link = file_val['$dnanexus_link']
+        if isinstance(link, collections.Mapping) and 'analysis' in link:
+            # a link to the output of a particular stage of a particular DNAnexus analysis
+            return self._get_dx_file_id(dxpy.DXAnalysis(link['analysis']).describe()['output'][link['stage']+'.'+link['field']])
+        elif (_is_str(link) and link.startswith('file-')) or \
+             (isinstance(link, collections.Mapping) and 'id' in link and \
+              _is_str(link['id']) and link['id'].startswith('file-')):
+            if _is_str(link) and link.startswith('file-'):
+                return link
+            else:
+                return link['id']
+
+    def create_git_annex_symlink(self, file_val, git_file_path):
+        """Given a value representing a file, create a git-annex link to the file under the relative path `git_file_path`.
+        Returns the git-annex key representing the contents of `file_val`.
+        """
+        dxid = self._get_dx_id(file_val)
+
+
+        dx_descr = dxpy.describe(dxid)
+        dx_uri = 'dx://' + dxid + '/' + descr['name']
+
+        _run("git annex addurl --fast '{}' --file '{}' ".format(dx_uri, git_file_path))
+        ga_key = _run_get_output("git annex lookupkey '{}'".format(git_file_path))
+
+        def get_md5e_key(uri_key):
+            uri_key_mdata = _run_get_json("git annex metadata --json --key='{}'".format(uri_key))
+            if uri_key_mdata['fields']:
+                md5e_keys = [k for k in ga_uri_key_mdata['fields'].get('altKeys', ()) if k.startswith('MD5E-')]
+                if md5e_keys:
+                    assert len(md5e_keys) == 1
+                    return md5e_keys[0]
+            return None
+        md5e_key = get_md5e_key(ga_key)
+        if md5e_key:
+            _run('git rm ' + git_file_path)
+            _run("git annex fromkey --force '{}' '{}'".format(md5e_key, git_file_path))
+            ga_key = md5e_key
+        return ga_key
+    # end: def create_git_annex_symlink(self, file_val, git_file_path):
+# end: class DxFileResolver(FileResolver)
+
+def _resolve_file_values(input_name, val, input_files_dir):
+    """For workflow inputs that point to a file, ensure that the file is present in the filesystem in which the 
+    analysis will be run.
+
+    Args:
+      input_name: the name of an input to a workflow
+      val: the value of the input.  May be a scalar, or a composite value such as a list or a map.
+           May be a value representing a file.
+    """
+
+    #Resolve a dx value: if it is a scalar, just return that;
+    #if it is a dx file, fetch the file, cache it locally, and return the path to the file.
+
+    print('parsing val: ', val)
+    util.file.mkdir_p(dx_files_dir)
+    if isinstance(val, collections.Mapping) and '$dnanexus_link' in val:
+        link = val['$dnanexus_link']
+        if isinstance(link, collections.Mapping) and 'analysis' in link:
+            print('link is ', link)
+            return _get_dx_val(dxpy.DXAnalysis(link['analysis']).describe()['output'][link['stage']+'.'+link['field']],
+                               dx_files_dir)
+        elif (_is_str(link) and link.startswith('file-')) or (isinstance(link, collections.Mapping) and 'id' in link and _is_str(link['id']) and link['id'].startswith('file-')):
+            if _is_str(link) and link.startswith('file-'):
+                dxid = link
+            else:
+                dxid = link['id']
+            descr = dxpy.describe(dxid)
+            dx_file = os.path.join(dx_files_dir, dxid) + '-' + descr['name']
+            file_size = int(descr['size'])
+
+            # see if the file is cached in git-annex
+            ga_mdata = _run_get_json('git annex metadata --json --key=WORM-s0-m0--dx-' + dxid)
+            if ga_mdata['fields']:
+                ga_key = ga_mdata['fields']['ga_key'][0]
+                _run('git annex get --key ' + ga_key)
+                _run('git annex fromkey ' + ga_key + ' ' + dx_file)
+
+            if not os.path.isfile(dx_file) or os.path.getsize(dx_file) != file_size:
+                print('fetching', dxid, 'to', dx_file)
+                # TODO: check that there is enough free space (with some to spare)
+                if os.path.isfile(dx_file):
+                    os.unlink(dx_file)
+                fs_info = os.statvfs(dx_files_dir)
+                assert file_size < fs_info.f_bsize * fs_info.f_bavail
+                dxpy.bindings.dxfile_functions.download_dxfile(dxid=dxid, filename=dx_file+'.fetching', show_progress=True)
+                assert os.path.getsize(dx_file+'.fetching') == file_size
+                os.rename(dx_file+'.fetching', dx_file)
+                print('fetched', dxid, 'to', dx_file)
+                print('curdir is ', os.getcwd())
+                _run('git annex add ' + dx_file)
+                ga_key = _run_get_output('git annex lookupkey ' + dx_file).strip()
+                _run('git annex metadata -s dxid+=' + dxid + ' ' + dx_file)
+                # record a mapping from the dxid to the git-annex key
+                _run('git annex metadata --key=WORM-s0-m0--{} -s ga_key={}'.format('dx-'+dxid, ga_key))
+                # register a URL that can be used to re-fetch this file from DNAnexus;
+                # the URL is only valid if the 'run_dx_url_server' command is running.
+                _run('git annex registerurl ' + ga_key + ' ' + ' http://localhost:8080/dx/' + dxid)
+        else:
+            raise RuntimeError('Cannot parse dx link {}'.format(link))
+        return dx_file
+    else:
+        return val
+# end: def _resolve_file_values(val, dx_files_dir = 'input_files')
+
+
 def _parse_cromwell_output_str(cromwell_output_str):
     """Parse cromwell output"""
     assert cromwell_output_str.count('Final Outputs:') == 1
@@ -261,6 +431,8 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
         # described at https://git-annex.branchable.com/tips/local_caching_of_annexed_files/
 
         # TODO: diff stages may have same-name inputs
+        # note that dx runInput and originalInput mean the reverse of what one would think:
+        # https://wiki.dnanexus.com/api-specification-v1.0.0/workflows-and-analyses
         dx_wf_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['runInput'].items()}   # check for dups
         dx_wf_orig_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['originalInput'].items()}   # check for dups
         print('DX_WF_RUNINPUTS', '\n'.join(dx_wf_inputs.keys()))
