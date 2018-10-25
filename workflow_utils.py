@@ -140,6 +140,8 @@ def _get_dx_val(val, dx_files_dir):
 
     print('parsing val: ', val)
     util.file.mkdir_p(dx_files_dir)
+    if isinstance(val, list):
+        return [_get_dx_val(val=v, dx_files_dir=dx_files_dir) for v in val]
     if isinstance(val, collections.Mapping) and '$dnanexus_link' in val:
         link = val['$dnanexus_link']
         if isinstance(link, collections.Mapping) and 'analysis' in link:
@@ -443,16 +445,15 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
             wdl_wf_input = wdl_wf_input.split('.')[-1]
 
             def _set_input(dx_wf_input):
-                new_wdl_wf_inputs[wdl_wf_input_full] = map(get_dx_val, dx_wf_input) \
-                                                       if isinstance(dx_wf_input, list) \
-                                                          else get_dx_val(dx_wf_input)
+                print('AAAAAAAAAAAAA wdl_wf_input=', wdl_wf_input, ' descr=', wdl_wf_input_descr, ' dx_wf_input=', dx_wf_input)
+                new_wdl_wf_inputs[wdl_wf_input_full] = get_dx_val(dx_wf_input)
 
             if wdl_wf_input in analysis_inputs_specified:
                 _set_input(analysis_inputs_specified[wdl_wf_input])
             elif wdl_wf_input in dx_wf_inputs:
                 print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_inputs[wdl_wf_input])
                 _set_input(dx_wf_inputs[wdl_wf_input])
-            elif '(optional' not in wdl_wf_input_descr and wdl_wf_input in dx_wf_orig_inputs:
+            elif (True or '(optional' not in wdl_wf_input_descr) and wdl_wf_input in dx_wf_orig_inputs:
                 print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_orig_inputs[wdl_wf_input])
                 _set_input(dx_wf_orig_inputs[wdl_wf_input])
             else:
@@ -472,10 +473,10 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
                 assert val.startswith(input_files_dir)
                 val = 'gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/' + val[len(input_files_dir)+1:]
             return val
-        _run('gsutil cp -r ' + input_files_dir + '/* gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/')
+        #_run('gsutil cp -r ' + input_files_dir + '/* gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/')
 
-        with open('inputs.json', 'wt') as wf_out:
-            json.dump(_rewrite_paths_to_gs(new_wdl_wf_inputs), wf_out, indent=4, separators=(',', ': '))
+        util.file.dump_file('inputs.json', _pretty_print_json(new_wdl_wf_inputs, sort_keys=True))
+#            json.dump(_rewrite_paths_to_gs(new_wdl_wf_inputs), wf_out, indent=4, separators=(',', ': '))
 
         # TODO: option to update just some of the tasks.
         # actually, when compiling WDL, should have this option -- or, actually,
@@ -489,11 +490,12 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
         #util.file.mkdir_p(os.path.join(output_dir, 'metadata'))
         wf_opts_dict = { "final_workflow_outputs_dir": os.path.join(output_dir, 'outputs'),
                          "final_workflow_log_dir": os.path.join(output_dir, 'logs'),
-                         "final_call_logs_dir": os.path.join(output_dir, 'call_logs')
+                         "final_call_logs_dir": os.path.join(output_dir, 'call_logs'),
+                         "backend": "Local"
         }
-        wf_opts_dict = {
-            "final_workflow_log_dir": os.path.join(output_dir, 'logs')
-        }
+#        wf_opts_dict = {
+#            "final_workflow_log_dir": os.path.join(output_dir, 'logs')
+#        }
         util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
         util.file.dump_file('execution_env.json', _pretty_print_json(dict(ncpus=util.misc.available_cpu_count()),
                                                                      sort_keys=True))
@@ -575,9 +577,12 @@ def create_analysis_id(workflow_name):
 def get_docker_hash(docker_img):
     if docker_img.startswith('sha256:'):
         return docker_img
-    digest_line = _run_get_output('docker images ' + docker_img + ' --digests --no-trunc --format '
-                                  '"{{.Repository}}:{{.Tag}} {{.Digest}}"')
-    assert digest_line.count('\n') == 1
+    digest_lines = _run_get_output("docker images --digests --no-trunc --format "
+                                   "'{{.Repository}}:{{.Tag}} {{.Digest}}'")
+    digest_lines = [line for line in digest_lines.strip().split('\n') if docker_img in line]
+    assert len(digest_lines) == 1
+    digest_line = digest_lines[0]
+    print('digest_line is |||{}|||'.format(digest_line))
     img, digest = digest_line.strip().split()
     assert img == docker_img + (':latest' if ':' not in docker_img else '')
     assert digest.startswith('sha256:') and len(digest) == 71
@@ -848,6 +853,8 @@ def finalize_analysis_dirs(cromwell_host, analysis_dirs_roots):
         mdata_rel_fname = os.path.join(analysis_dir, 'metadata.json') # mdata['workflowLog'][:-4]+'.metadata.json'
         if os.path.exists(mdata_fname):
             processing_stats['metadata_already_saved'] += 1
+        elif 'workflowRoot' not in mdata:
+            processing_stats['workflow_root_not_in_mdata'] += 1
         else:
             util.file.dump_file(mdata_fname, _pretty_print_json(mdata))
             mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
