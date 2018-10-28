@@ -370,7 +370,8 @@ def _parse_cromwell_output_str(cromwell_output_str):
 
 # ** submit_analysis_wdl
 
-def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img, analysis_dir, analysis_inputs_specified=None, 
+def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img, analysis_dir_pfx,
+                        analysis_inputs_specified=None, 
                         analysis_descr='', analysis_labels=None,
                         data_repo=None, data_remote=None, cromwell_opts=''):
     """Submit a WDL analysis to a Cromwell server.
@@ -382,7 +383,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
         analysis_inputs_specified: json file specifying analysis inputs directly; overrides any given by
          analysis_inputs_from_dx_analysis
         analysis_labels: json file specifying any analysis labels
-        analysis_dir: relative path where analysis results will be put.  a unique analysis ID will be appended.
+        analysis_dir_pfx: prefix for the analysis dir
     """
     assert not os.path.isabs(analysis_dir)
 
@@ -407,14 +408,11 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
     assert os.path.exists('.git/annex')
     data_repo = data_repo or os.getcwd()
 
-    cromwell_tmp_dir = '/data/ilya-work/pipelines'
-    util.file.mkdir_p(cromwell_tmp_dir)
-
-    _run('git config annex.security.allowed-http-addresses "127.0.0.1 ::1 localhost"')
+    #_run('git config annex.security.allowed-http-addresses "127.0.0.1 ::1 localhost"')
                 # if data_remote:
                 #     _run('git annex enableremote ' + data_remote)
 
-    t_dir = os.path.join(cromwell_tmp_dir, analysis_dir + '-' + analysis_id)
+    t_dir = os.path.abspath(os.path.join(analysis_dir_pfx + '-' + analysis_id))
     util.file.mkdir_p(t_dir)
     with util.file.pushd_popd(t_dir):
         print('TTTTTTTTTTT t_dir=', t_dir)
@@ -616,7 +614,7 @@ def gather_run_results(docker_img, cromwell_output):
 
 def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('workflow_name', help='Workflow name')
-    parser.add_argument('--analysisDir', dest='analysis_dir', default='an',
+    parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/an',
                         help='directory where analysis will be stored; a unique suffix will be added')
     parser.add_argument('--analysisInputsFromDxAnalysis', dest='analysis_inputs_from_dx_analysis',
                         help='DNAnexus analysis ID to take analysis inputs from; specific ones can be overridden by '
