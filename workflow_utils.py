@@ -194,7 +194,12 @@ def _get_dx_val(val, dx_files_dir):
 # ** proper implementation
 
 class GitAnnexTool(object):
-    pass
+
+    def get_metadata(self, key):
+        """Return metadata associated with key, as a tuple of values.  If no metadata is associated
+        with key, return empty tuple."""
+        key_metadata = _run_get_json("git annex metadata --json --key='{}'".format(key))
+        return tuple(key_metadata.get('fields', {}).get(key, ()))
 
 class GitAnnexRepo(object):
 
@@ -224,7 +229,6 @@ class GitAnnexRemote(object):
     def put_key(key):
         """Ensure the remote has content with given key."""
         raise NotImplementedError()
-
 
 # ** _resolve_file_values
 
@@ -282,7 +286,7 @@ class DxFileResolver(FileResolver):
         def get_md5e_key(uri_key):
             uri_key_mdata = _run_get_json("git annex metadata --json --key='{}'".format(uri_key))
             if uri_key_mdata['fields']:
-                md5e_keys = [k for k in ga_uri_key_mdata['fields'].get('altKeys', ()) if k.startswith('MD5E-')]
+                md5e_keys = [k for k in uri_key_mdata['fields'].get('altKeys', ()) if k.startswith('MD5E-')]
                 if md5e_keys:
                     assert len(md5e_keys) == 1
                     return md5e_keys[0]
@@ -868,7 +872,40 @@ def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
 
 __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
 
+########################################################################################################################
 
+# * import_from_url
+
+DX_URI_PFX='dx://'
+
+def _url_to_dxid(url):
+    return os.path.splitext(url[len(DX_URI_PFX):].split('/')[0])[0]
+
+def _standardize_dx_url(url):
+    dxid = _url_to_dxid(url)
+    dx_descr = _run_get_json('dx describe --json ' + _url_to_dxid(url))
+    return DX_URI_PFX + dxid + '/' + dx_descr['name']
+
+def _standardize_url(url):
+    if url.startswith(DX_URI_PFX):
+        return _standardize_dx_url(url)
+    return url
+
+def import_from_url(url, git_file_path):
+    """Imports a URL into the git-annex repository."""
+
+    url = _standardize_url(url)
+    if os.path.isdir(git_file_path):
+        git_file_path = os.path.join(git_file_path, os.path.basename(url))
+
+    _run('git annex addurl --fast --file {} {}'.format(git_file_path, url))
+
+def parser_import_from_url(parser=argparse.ArgumentParser()):
+    parser.add_argument('url', help='the URL of the file to add.')
+    parser.add_argument('--gitFilePath', dest='git_file_path', help='filename in the git-annex repository', default='.')
+    util.cmd.attach_main(parser, import_from_url, split_args=True)
+
+__commands__.append(('import_from_url', parser_import_from_url))
 
 ########################################################################################################################
 
