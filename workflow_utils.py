@@ -45,6 +45,10 @@ import uuid
 import functools
 import operator
 import builtins
+import hashlib
+import pipes
+import shlex
+import sys
 import SimpleHTTPServer
 import SocketServer
 
@@ -85,18 +89,35 @@ def _pretty_print_json(json_dict, **kw):
     """Return a pretty-printed version of a dict converted to json, as a string."""
     return json.dumps(json_dict, indent=4, separators=(',', ': '), **kw)
 
-def _run(cmd):
+def _quote(s):
+    return pipes.quote(s) if hasattr(pipes, 'quote') else shlex.quote(s)
+
+def _make_cmd(cmd, *args):
+    print('ARGS=', args)
+    return ' '.join([cmd] + [_quote(str(arg)) for arg in args if arg is not None])
+
+def _run(cmd, *args):
+    cmd = _make_cmd(cmd, *args)
     print('running command: ', cmd, 'cwd=', os.getcwd())
     beg_time = time.time()
     subprocess.check_call(cmd, shell=True)
     print('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
 
-def _run_get_output(cmd):
+def _run_succeeds(cmd, *args):
+    try:
+        _run(cmd, *args)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+def _run_get_output(cmd, *args):
+    cmd = _make_cmd(cmd, *args)
     print('running command: ', cmd)
     beg_time = time.time()
     output = subprocess.check_output(cmd, shell=True)
     print('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
     return output.strip()
+
 
 def _json_loads(s):
     return json.loads(s.strip(), object_pairs_hook=collections.OrderedDict)
@@ -104,8 +125,8 @@ def _json_loads(s):
 def _json_loadf(fname):
     return _json_loads(util.file.slurp_file(fname))
 
-def _run_get_json(cmd):
-    return _json_loads(_run_get_output(cmd))
+def _run_get_json(cmd, *args):
+    return _json_loads(_run_get_output(cmd, *args))
 
 def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy and git-annex."""
@@ -161,8 +182,8 @@ def _get_dx_val(val, dx_files_dir):
             ga_mdata = _run_get_json('git annex metadata --json --key=WORM-s0-m0--dx-' + dxid)
             if ga_mdata['fields']:
                 ga_key = ga_mdata['fields']['ga_key'][0]
-                _run('git annex get --key ' + ga_key)
-                _run('git annex fromkey ' + ga_key + ' ' + dx_file)
+                _run('git annex get --key', ga_key)
+                _run('git annex fromkey', ga_key, dx_file)
 
             if not os.path.isfile(dx_file) or os.path.getsize(dx_file) != file_size:
                 print('fetching', dxid, 'to', dx_file)
@@ -176,14 +197,14 @@ def _get_dx_val(val, dx_files_dir):
                 os.rename(dx_file+'.fetching', dx_file)
                 print('fetched', dxid, 'to', dx_file)
                 print('curdir is ', os.getcwd())
-                _run('git annex add ' + dx_file)
+                _run('git annex add', dx_file)
                 ga_key = _run_get_output('git annex lookupkey ' + dx_file).strip()
-                _run('git annex metadata -s dxid+=' + dxid + ' ' + dx_file)
+                _run('git annex metadata -s', 'dxid+=' + dxid, dx_file)
                 # record a mapping from the dxid to the git-annex key
-                _run('git annex metadata --key=WORM-s0-m0--{} -s ga_key={}'.format('dx-'+dxid, ga_key))
+                _run('git annex metadata', '--key=WORM-s0-m0-dx-'+dxid, '-s', 'ga_key='+ga_key)
                 # register a URL that can be used to re-fetch this file from DNAnexus;
                 # the URL is only valid if the 'run_dx_url_server' command is running.
-                _run('git annex registerurl ' + ga_key + ' ' + ' http://localhost:8080/dx/' + dxid)
+                #_run('git annex registerurl ' + ga_key + ' ' + ' http://localhost:8080/dx/' + dxid)
         else:
             raise RuntimeError('Cannot parse dx link {}'.format(link))
         return dx_file
@@ -649,7 +670,7 @@ class RedirectToCloudObject(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
    def _get_dx(self):
        try:
-           file_info = _run_get_json('dx describe --json ' + self._get_dx_id())
+           file_info = _run_get_json('dx describe --json', self._get_dx_id())
        except subprocess.CalledProcessError as e:
            print('CalledProcessError:', e)
            raise
@@ -883,7 +904,7 @@ def _url_to_dxid(url):
 
 def _standardize_dx_url(url):
     dxid = _url_to_dxid(url)
-    dx_descr = _run_get_json('dx describe --json ' + _url_to_dxid(url))
+    dx_descr = _run_get_json('dx describe --json', _url_to_dxid(url))
     return DX_URI_PFX + dxid + '/' + dx_descr['name']
 
 def _standardize_url(url):
@@ -891,21 +912,64 @@ def _standardize_url(url):
         return _standardize_dx_url(url)
     return url
 
-def import_from_url(url, git_file_path):
+def import_from_url(url, git_file_path, fast):
     """Imports a URL into the git-annex repository."""
 
     url = _standardize_url(url)
     if os.path.isdir(git_file_path):
         git_file_path = os.path.join(git_file_path, os.path.basename(url))
 
-    _run('git annex addurl --fast --file {} {}'.format(git_file_path, url))
+    _run('git annex addurl', '--fast' if fast else None, '--file', git_file_path, url)
+    # check that the state of a dx object is closed.
+    # (have option to) still compute md5.  if we don't write to disk, it'll be fast?
 
 def parser_import_from_url(parser=argparse.ArgumentParser()):
     parser.add_argument('url', help='the URL of the file to add.')
     parser.add_argument('--gitFilePath', dest='git_file_path', help='filename in the git-annex repository', default='.')
+    parser.add_argument('--fast', default=False, action='store_true', help='do not immediately download the file')
     util.cmd.attach_main(parser, import_from_url, split_args=True)
 
 __commands__.append(('import_from_url', parser_import_from_url))
+
+########################################################################################################################
+
+def _gs_stat(gs_url):
+    return _run_succeeds('gsutil stat -q', gs_url)
+
+def _git_annex_checkpresentkey(key, remote):
+    return _run_succeeds('git annex checkpresentkey', key, remote)
+
+def _md5_base64(s):
+    hashlib.md5(s).digest().encode('base64').strip()
+
+def _get_gs_remote_uuid():
+    return '0b42380a-45f8-4b9d-82b3-e10aaf7bab6c'  # TODO determine this from git and git-annex config
+
+def _copy_to_gs(git_file_path, gs_prefix):
+    """Ensure the given file exists in gs."""
+
+    whereis = _run_get_json('git annex whereis --json ' + git_file_path)
+    locs = []
+    assert whereis['success']
+    urls = [url for w in whereis['whereis'] for url in w.get('urls', ()) if url.startswith(gs_prefix) and _gs_stat(url)]
+    fname = os.path.basename(git_file_path)
+    urls_with_right_fname = [url for url in urls if url.endswith(fname)]
+
+    key = _run_get_output('git annex lookupkey', git_file_path)
+    gs_remote_uuid = _get_gs_remote_uuid()
+    if not urls_with_right_fname:
+        gs_url = gs_prefix+'/inp/' + _md5_base64(whereis['key']) + '/' + fname
+        _run('git annex registerurl', key, gs_url)
+        if urls:
+            _run('gsutil cp', urls[0], gs_url)
+        else:
+            _run('git annex get', git_file_path)
+            _run('gsutil cp', git_file_path, gs_url)
+            _run('git annex setpresentkey', key, _gs_gs_remote_uuid(), 1)
+        urls_with_right_fname.append(gs_url)
+    assert _gs_stat(urls_with_right_fname[0])
+    assert _git_annex_checkpresentkey(key, gs_remote_uuid)
+
 
 ########################################################################################################################
 
@@ -1099,6 +1163,10 @@ if __name__ == '__main__':
     #print(_pretty_print_json(_parse_cromwell_output_str(util.file.slurp_file('/dev/shm/cromwell_out/wdl_output.txt'))))
     #print(get_docker_hash('quay.io/broadinstitute/viral-ngs'))
     #record_run_results(0,0)
+    if False:
+        _copy_to_gs(git_file_path='A4.scaffolding_chosen_ref.fasta', gs_prefix=)
+        sys.exit(0)
+
     if False:
         run_dx_locally(workflow_name='assemble_denovo', analysis_dxid='analysis-FJfqjg005Z3Vp5Q68jxzx5q1',
                        docker_img='quay.io/broadinstitute/viral-ngs')
