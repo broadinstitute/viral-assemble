@@ -1148,7 +1148,9 @@ def _git_annex_get_url_key(url, git_dir=None):
     with util.file.tmp_dir(dir=git_dir or os.getcwd()) as tmp_d:
         f = os.path.join(tmp_d, 'f')
         _run('git', 'annex', 'fromkey', '--force', url, f)
-        return _git_annex_lookupkey(f)
+        key = _git_annex_lookupkey(f)
+        shutil.rmtree(tmp_d, ignore_errors=True)
+        return key
 
 def _git_annex_get_metadata(key, field):
     ga_mdata = _run_get_json('git', 'annex', 'metadata', '--json', '--key='+_git_annex_get_url_key(key))
