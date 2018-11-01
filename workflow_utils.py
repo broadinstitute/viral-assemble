@@ -49,6 +49,7 @@ import hashlib
 import pipes
 import shlex
 import sys
+import urllib
 import SimpleHTTPServer
 import SocketServer
 
@@ -85,16 +86,22 @@ def _is_mapping(obj):
 def _is_scalar(val):
     isinstance(val, _scalar_types)
 
-def _pretty_print_json(json_dict, **kw):
+def _ord_dict(*args):
+    return collections.OrderedDict(args)
+
+def _pretty_print_json(json_dict, sort_keys=True):
     """Return a pretty-printed version of a dict converted to json, as a string."""
-    return json.dumps(json_dict, indent=4, separators=(',', ': '), **kw)
+    return json.dumps(json_dict, indent=4, separators=(',', ': '), sort_keys=sort_keys)
+
+def _write_json(fname, **json_dict):
+    util.file.dump_file(fname=fname, value=_pretty_print_json(json_dict))
 
 def _quote(s):
     return pipes.quote(s) if hasattr(pipes, 'quote') else shlex.quote(s)
 
 def _make_cmd(cmd, *args):
     print('ARGS=', args)
-    return ' '.join([cmd] + [_quote(str(arg)) for arg in args if arg is not None])
+    return ' '.join([cmd] + [_quote(str(arg)) for arg in args if arg not in (None, '')])
 
 def _run(cmd, *args):
     cmd = _make_cmd(cmd, *args)
@@ -128,6 +135,11 @@ def _json_loadf(fname):
 def _run_get_json(cmd, *args):
     return _json_loads(_run_get_output(cmd, *args))
 
+
+@util.misc.memoize
+def _dx_describe(dxid):
+    return _run_get_json('dx', 'describe', '--verbose', '--details', '--json', dxid)
+
 def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy and git-annex."""
     _run('conda install cromwell dxpy git-annex')
@@ -159,7 +171,7 @@ def _get_dx_val(val, dx_files_dir):
     """Resolve a dx value: if it is a scalar, just return that;
     if it is a dx file, fetch the file, cache it locally, and return the path to the file."""
 
-    print('parsing val: ', val)
+    #print('parsing val: ', val)
     util.file.mkdir_p(dx_files_dir)
     if isinstance(val, list):
         return [_get_dx_val(val=v, dx_files_dir=dx_files_dir) for v in val]
@@ -334,7 +346,7 @@ def _resolve_file_values(input_name, val, input_files_dir):
     #Resolve a dx value: if it is a scalar, just return that;
     #if it is a dx file, fetch the file, cache it locally, and return the path to the file.
 
-    print('parsing val: ', val)
+    #print('parsing val: ', val)
     util.file.mkdir_p(dx_files_dir)
     if isinstance(val, collections.Mapping) and '$dnanexus_link' in val:
         link = val['$dnanexus_link']
@@ -393,12 +405,219 @@ def _parse_cromwell_output_str(cromwell_output_str):
     json_end = cromwell_output_str.index('\n}\n', json_beg) + 2
     return _json_loads(cromwell_output_str[json_beg:json_end])
 
+# ** import_dx_analysis
+
+
+def _resolve_dx_link_to_dx_file_id(val, dx_analysis_id):
+    """If val represents a DNAnexus link to a file, return the file-xxxxx id of the file; else, return None."""
+
+    #print('parsing val: ', val)
+    recurse = functools.partial(_resolve_dx_link_to_dx_file_id, dx_analysis_id=dx_analysis_id)
+    if not (_is_mapping(val) and '$dnanexus_link' in val):
+        return None
+
+    link = val['$dnanexus_link']
+    if isinstance(link, collections.Mapping) and 'stage' in link and ('field' in link or 'outputField' in link):
+        print('link is ', link)
+        linked_analysis_descr = _dx_describe(link.get('analysis', dx_analysis_id))
+        linked_field = link['field'] if 'field' in link else link['outputField']
+        return recurse(val=linked_analysis_descr['output'][link['stage']+'.'+linked_field])
+    elif (_is_str(link) and link.startswith('file-')) or \
+         (isinstance(link, collections.Mapping) and 'id' in link \
+          and _is_str(link['id']) and link['id'].startswith('file-')):
+        if _is_str(link) and link.startswith('file-'):
+            dxid = link
+        else:
+            dxid = link['id']
+        return dxid
+    raise RuntimeError('Unknown $dnanexus_link: {}'.format(val))
+
+def _resolve_link_dx(val, git_file_dir, dx_analysis_id):
+    dx_file_id = _resolve_dx_link_to_dx_file_id(val=val, dx_analysis_id=dx_analysis_id)
+    if not dx_file_id: return None
+    util.file.mkdir_p(git_file_dir)
+    return import_from_url(url='dx://' + dx_file_id, git_file_path=git_file_dir, fast=False)
+
+def _resolve_link_oneof(val, git_file_dir, methods):
+    for method in methods:
+        result = method(val=val, git_file_dir=git_file_dir)
+        if result: return result
+    return None
+
+def _resolve_links_in_json(val, analysis_dir, methods, relpath='files'):
+    recurse = functools.partial(_resolve_links_in_json, analysis_dir=analysis_dir, methods=methods)
+    git_file_dir = os.path.join(analysis_dir, relpath)
+    maybe_resolve_link = _resolve_link_oneof(val=val, git_file_dir=git_file_dir, methods=methods)
+    if maybe_resolve_link:
+        return _ord_dict(('$git_link', maybe_resolve_link))
+    if isinstance(val, list):
+        return [recurse(val=v, relpath=os.path.join(relpath, str(i))) for i, v in enumerate(val)]
+    if isinstance(val, collections.Mapping):
+        return _ord_dict(*[(k, recurse(val=v, relpath=os.path.join(relpath, util.file.string_to_file_name(k))))
+                           for k, v in val.items()])
+    return val
+
+
+def _resolve_links_in_dx_analysis(dx_analysis_id, analysis_dir):
+    analysis_descr = _dx_describe(dx_analysis_id)
+    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id)]
+    resolved = _resolve_links_in_json(val=analysis_descr, analysis_dir=analysis_dir, methods=methods)
+    _write_json(os.path.join(analysis_dir, 'dx_resolved.json'), **resolved)
+
+# def _resolve_link_dx_old(val, dx_analysis_id):
+#     """Resolve a dx value: if it is a scalar, just return that;
+#     if it is a dx link, resolve the link to a file-xxxx identifier."""
+
+#     print('parsing val: ', val)
+#     if not (_is_mapping(val) and '$dnanexus_link' in val):
+#         return None
+
+#     recurs = functools.partial(_resolve_dx_ids_in_val, analysis_descr=analysis_descr)
+#     if isinstance(val, list):
+#         return [recurs(val=v, git_path = os.path.join(git_path, str(i))) for i, v in enumerate(val)]
+#     if isinstance(val, collections.Mapping):
+#         if  '$dnanexus_link' not in val:
+#             return collections.OrderedDict([(k, recurs(val=v, git_path=os.path.join(git_path, util.file.string_to_file_name(k))))
+#                                             for k, v in val.items()])
+#         link = val['$dnanexus_link']
+#         if isinstance(link, collections.Mapping) and 'stage' in link and ('field' in link or 'outputField' in link):
+#             print('link is ', link)
+#             linked_analysis_descr = dxpy.DXAnalysis(link['analysis']).describe() if 'analysis' in link else analysis_descr
+#             linked_field = link['field'] if 'field' in link else link['outputField']
+#             return recurs(val=linked_analysis_descr['output'][link['stage']+'.'+linked_field],
+#                           analysis_descr=analysis_descr, git_path=git_path)
+#         elif (_is_str(link) and link.startswith('file-')) or (isinstance(link, collections.Mapping) and 'id' in link and _is_str(link['id']) and link['id'].startswith('file-')):
+#             if _is_str(link) and link.startswith('file-'):
+#                 dxid = link
+#             else:
+#                 dxid = link['id']
+
+
+
+
+#     def _resolve_dx_ids_in_val(val, analysis_descr, git_path):
+#         """Resolve a dx value: if it is a scalar, just return that;
+#         if it is a dx link, resolve the link to a file-xxxx identifier."""
+
+#         print('parsing val: ', val)
+
+#         recurs = functools.partial(_resolve_dx_ids_in_val, analysis_descr=analysis_descr)
+#         if isinstance(val, list):
+#             return [recurs(val=v, git_path = os.path.join(git_path, str(i))) for i, v in enumerate(val)]
+#         if isinstance(val, collections.Mapping):
+#             if  '$dnanexus_link' not in val:
+#                 return collections.OrderedDict([(k, recurs(val=v, git_path=os.path.join(git_path, util.file.string_to_file_name(k))))
+#                                                 for k, v in val.items()])
+#             link = val['$dnanexus_link']
+#             if isinstance(link, collections.Mapping) and 'stage' in link and ('field' in link or 'outputField' in link):
+#                 print('link is ', link)
+#                 linked_analysis_descr = dxpy.DXAnalysis(link['analysis']).describe() if 'analysis' in link else analysis_descr
+#                 linked_field = link['field'] if 'field' in link else link['outputField']
+#                 return recurs(val=linked_analysis_descr['output'][link['stage']+'.'+linked_field],
+#                               analysis_descr=analysis_descr, git_path=git_path)
+#             elif (_is_str(link) and link.startswith('file-')) or (isinstance(link, collections.Mapping) and 'id' in link and _is_str(link['id']) and link['id'].startswith('file-')):
+#                 if _is_str(link) and link.startswith('file-'):
+#                     dxid = link
+#                 else:
+#                     dxid = link['id']
+#                 util.file.mkdir_p(git_path)
+#                 git_file_path = import_from_url(url='dx://' + dxid, git_file_path = git_path)
+#                 return _ord_dict(('$git_relpath', os.path.relpath(git_file_path, )) # return { $git_link: }
+#                 descr = dxpy.describe(dxid)
+#                 dx_file = os.path.join(dx_files_dir, dxid) + '-' + descr['name']
+#                 file_size = int(descr['size'])
+
+#                 # see if the file is cached in git-annex
+#                 ga_mdata = _run_get_json('git annex metadata --json --key=WORM-s0-m0--dx-' + dxid)
+#                 if ga_mdata['fields']:
+#                     ga_key = ga_mdata['fields']['ga_key'][0]
+#                     _run('git annex get --key', ga_key)
+#                     _run('git annex fromkey', ga_key, dx_file)
+
+#                 if not os.path.isfile(dx_file) or os.path.getsize(dx_file) != file_size:
+#                     print('fetching', dxid, 'to', dx_file)
+#                     # TODO: check that there is enough free space (with some to spare)
+#                     if os.path.isfile(dx_file):
+#                         os.unlink(dx_file)
+#                     fs_info = os.statvfs(dx_files_dir)
+#                     assert file_size < fs_info.f_bsize * fs_info.f_bavail
+#                     dxpy.bindings.dxfile_functions.download_dxfile(dxid=dxid, filename=dx_file+'.fetching', show_progress=True)
+#                     assert os.path.getsize(dx_file+'.fetching') == file_size
+#                     os.rename(dx_file+'.fetching', dx_file)
+#                     print('fetched', dxid, 'to', dx_file)
+#                     print('curdir is ', os.getcwd())
+#                     _run('git annex add', dx_file)
+#                     ga_key = _run_get_output('git annex lookupkey ' + dx_file).strip()
+#                     _run('git annex metadata -s', 'dxid+=' + dxid, dx_file)
+#                     # record a mapping from the dxid to the git-annex key
+#                     _run('git annex metadata', '--key=WORM-s0-m0-dx-'+dxid, '-s', 'ga_key='+ga_key)
+#                     # register a URL that can be used to re-fetch this file from DNAnexus;
+#                     # the URL is only valid if the 'run_dx_url_server' command is running.
+#                     #_run('git annex registerurl ' + ga_key + ' ' + ' http://localhost:8080/dx/' + dxid)
+#             else:
+#                 raise RuntimeError('Cannot parse dx link {}'.format(link))
+#             return dx_file
+#         else:
+#             return val
+# # end: def _resolve_dx_val(val, analysis_descr, dx_files_dir = 'input_files')
+
+
+
+
+def _record_dx_metadata(val, analysis_dir, root_dir):
+    """If 'val' is a filename, return a dict representing the file and some metadata about it;
+    otherwise, return val as-is."""
+    if isinstance(val, list): return [_record_file_metadata(v, analysis_dir, root_dir) for v in val]
+    if _is_mapping(val): return collections.OrderedDict([(k, _record_file_metadata(v, analysis_dir, root_dir))
+                                                          for k, v in val.items()])
+    if not (_is_str(val) and (os.path.isfile(val) or os.path.isdir(val))): return val
+    file_info = collections.OrderedDict([('_is_file' if os.path.isfile(val) else '_is_dir', True)])
+    assert val.startswith(analysis_dir) or val.startswith(root_dir)
+    if val.startswith(analysis_dir):
+        relpath = os.path.relpath(val, analysis_dir)
+        abspath = os.path.join(analysis_dir, relpath)
+    else:
+        cromwell_executions_dir = os.path.dirname(os.path.dirname(root_dir))
+        relpath = os.path.relpath(val, cromwell_executions_dir)
+        abspath = os.path.join(analysis_dir, 'output',
+                               'call_logs' if os.path.basename(val) in ('stdout', 'stderr') else 'outputs', relpath)
+        if os.path.isfile(val) and not os.path.isfile(abspath):
+            print('LINKING {} to {}'.format(val, abspath))
+            util.file.mkdir_p(os.path.dirname(abspath))
+            shutil.copy(val, abspath)
+        if os.path.isdir(val):
+            util.file.mkdir_p(abspath)
+
+    assert os.path.isabs(abspath) and abspath.startswith(analysis_dir), \
+        'bad abspath: {} analysis_dir: {}'.format(abspath, analysis_dir)
+    relpath = os.path.relpath(abspath, analysis_dir)
+    assert not os.path.isabs(relpath), 'should be relative: {}'.format(relpath)
+    assert os.path.isfile(abspath) or os.path.isdir(abspath), 'not file or dir: {}'.format(abspath)
+    assert os.path.isdir(abspath) or os.path.getsize(abspath) == os.path.getsize(val)
+    file_info['relpath'] = relpath
+    if os.path.isfile(abspath):
+        file_info['size'] = os.path.getsize(abspath)
+        file_info['md5'] = _run_get_output('md5sum ' + abspath).strip().split()[0]
+    return file_info
+
+
+def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
+    """Import a dnanexus analysis into git, in our format."""
+
+    analysis_dir = analysis_dir_pfx + 'dx-' + dx_analysis_id
+    util.file.mkdir_p(analysis_dir)
+    descr = _run('dx', 'describe', '--details', '--verbose', '--json', dx_analysis_id)
+    
+    
+
 # ** submit_analysis_wdl
 
 def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img, analysis_dir_pfx,
                         analysis_inputs_specified=None, 
                         analysis_descr='', analysis_labels=None,
-                        data_repo=None, data_remote=None, cromwell_opts=''):
+                        data_repo=None, data_remote=None,
+                        cromwell_server_url='http://localhost:8000',
+                        backend='Local'):
     """Submit a WDL analysis to a Cromwell server.
 
     Args:
@@ -498,7 +717,7 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
             return val
         #_run('gsutil cp -r ' + input_files_dir + '/* gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/')
 
-        util.file.dump_file('inputs.json', _pretty_print_json(new_wdl_wf_inputs, sort_keys=True))
+        _write_json('inputs.json', **new_wdl_wf_inputs)
 #            json.dump(_rewrite_paths_to_gs(new_wdl_wf_inputs), wf_out, indent=4, separators=(',', ': '))
 
         # TODO: option to update just some of the tasks.
@@ -511,39 +730,43 @@ def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_
         util.file.mkdir_p(os.path.join(output_dir, 'logs'))
         util.file.mkdir_p(os.path.join(output_dir, 'call_logs'))
         #util.file.mkdir_p(os.path.join(output_dir, 'metadata'))
-        wf_opts_dict = { "final_workflow_outputs_dir": os.path.join(output_dir, 'outputs'),
-                         "final_workflow_log_dir": os.path.join(output_dir, 'logs'),
-                         "final_call_logs_dir": os.path.join(output_dir, 'call_logs'),
-                         "backend": "Local"
-        }
-#        wf_opts_dict = {
-#            "final_workflow_log_dir": os.path.join(output_dir, 'logs')
-#        }
-        util.file.dump_file('cromwell_opts.json', _pretty_print_json(wf_opts_dict))
-        util.file.dump_file('execution_env.json', _pretty_print_json(dict(ncpus=util.misc.available_cpu_count()),
-                                                                     sort_keys=True))
+        if backend == 'Local':
+            wf_opts_dict = { "final_workflow_outputs_dir": os.path.join(output_dir, 'outputs'),
+                             "final_workflow_log_dir": os.path.join(output_dir, 'logs'),
+                             "final_call_logs_dir": os.path.join(output_dir, 'call_logs'),
+                             "backend": "Local"
+            }
+        elif backend == 'JES':
+            wf_opts_dict = {
+                "final_workflow_log_dir": os.path.join(output_dir, 'logs'),
+                "backend": "JES"
+            }
+        else:
+            raise RuntimeError('Unknown backend - ' + backend)
+        _write_json('cromwell_opts.json', **wf_opts_dict)
+        _write_json('execution_env.json', ncpus=util.misc.available_cpu_count())
 
-        util.file.dump_file('analysis_labels.json',
-                            _pretty_print_json(dict(analysis_descr=analysis_descr,
-                                                    docker_img=docker_img,
-                                                    docker_img_hash=docker_img_hash,
-                                                    inputs_from_dx_analysis=analysis_inputs_from_dx_analysis,
-                                                    analysis_id=analysis_id,
-                                                    analysis_dir=t_dir,
-                                                    submitter=getpass.getuser(),
-                                                    **dict(analysis_labels or {})), sort_keys=True))
+        _write_json('analysis_labels.json',
+                    analysis_descr=analysis_descr,
+                    docker_img=docker_img,
+                    docker_img_hash=docker_img_hash,
+                    inputs_from_dx_analysis=analysis_inputs_from_dx_analysis,
+                    analysis_id=analysis_id,
+                    analysis_dir=t_dir,
+                    submitter=getpass.getuser(),
+                    **dict(analysis_labels or {}))
 
         # add cromwell labels: dx project, the docker tag we ran on, etc.
 
         _log.info('Validating workflow')
-        _run('womtool validate -i inputs.json ' + workflow_name + '.wdl')
+        _run('womtool', 'validate',  '-i',  'inputs.json', workflow_name + '.wdl')
         _log.info('Validated workflow; calling cromwell')
         _run('zip imports.zip *.wdl')
         try:
-            cromwell_output_str = _run_get_output('cromwell ' + cromwell_opts + ' submit ' + workflow_name + \
-                                                  '.wdl -t wdl -i inputs.json -l analysis_labels.json ' + \
-                                                  ' -o cromwell_opts.json' + \
-                                                  ' -p imports.zip -h http://localhost:8000')
+            cromwell_output_str = _run_get_output('cromwell', 'submit', workflow_name+'.wdl',
+                                                  '-t', 'wdl', '-i', 'inputs.json', '-l', 'analysis_labels.json',
+                                                  '-o', 'cromwell_opts.json',
+                                                  '-p', 'imports.zip', '-h', cromwell_server_url)
             cromwell_returncode = 0
         except subprocess.CalledProcessError as called_process_error:
             cromwell_output_str = called_process_error.output
@@ -652,8 +875,7 @@ def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('--dataRemote', dest='data_remote', help='git-annex data remote')
     parser.add_argument('--analysisLabels', dest='analysis_labels', nargs=2, action='append',
                         help='labels to attach to the analysis')
-    parser.add_argument('--cromwellOpts', dest='cromwell_opts', default='', help='command-line flags to pass to cromwell')
-
+    parser.add_argument('--backend', default='Locall', help='backend on which to run')
     util.cmd.attach_main(parser, submit_analysis_wdl, split_args=True)
 
 __commands__.append(('submit_analysis_wdl', parser_submit_analysis_wdl))
@@ -670,7 +892,7 @@ class RedirectToCloudObject(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
    def _get_dx(self):
        try:
-           file_info = _run_get_json('dx describe --json', self._get_dx_id())
+           file_info = _run_get_json('dx', 'describe', '--json', self._get_dx_id())
        except subprocess.CalledProcessError as e:
            print('CalledProcessError:', e)
            raise
@@ -879,9 +1101,9 @@ def finalize_analysis_dirs(cromwell_host, analysis_dirs_roots):
         elif 'workflowRoot' not in mdata:
             processing_stats['workflow_root_not_in_mdata'] += 1
         else:
-            util.file.dump_file(mdata_fname, _pretty_print_json(mdata))
+            _write_json(mdata_fname, **mdata)
             mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
-            util.file.dump_file(mdata_rel_fname, _pretty_print_json(mdata_rel))
+            _write_json(mdata_rel_fname, **mdata_rel)
             _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
             processing_stats['saved_metata'] += 1
     _log.info('Processing stats: %s', str(processing_stats))
@@ -904,22 +1126,61 @@ def _url_to_dxid(url):
 
 def _standardize_dx_url(url):
     dxid = _url_to_dxid(url)
-    dx_descr = _run_get_json('dx describe --json', _url_to_dxid(url))
-    return DX_URI_PFX + dxid + '/' + dx_descr['name']
+    dx_descr = _dx_describe(_url_to_dxid(url))
+    return DX_URI_PFX + dxid + '/' + urllib.pathname2url(dx_descr['name'])
 
 def _standardize_url(url):
     if url.startswith(DX_URI_PFX):
         return _standardize_dx_url(url)
     return url
 
-def import_from_url(url, git_file_path, fast):
+def _minimize_url(url):
+    if url.startswith(DX_URI_PFX):
+        url = DX_URI_PFX+_url_to_dxid(url)
+    return url
+
+def _git_annex_lookupkey(f):
+    return _run_get_output('git', 'annex', 'lookupkey', f)
+
+def _git_annex_get_url_key(url, git_dir=None):
+    """Return the git-annex key for a url"""
+    url = _minimize_url(url)
+    with util.file.tmp_dir(dir=git_dir or os.getcwd()) as tmp_d:
+        f = os.path.join(tmp_d, 'f')
+        _run('git', 'annex', 'fromkey', '--force', url, f)
+        return _git_annex_lookupkey(f)
+
+def _git_annex_get_metadata(key, field):
+    ga_mdata = _run_get_json('git', 'annex', 'metadata', '--json', '--key='+_git_annex_get_url_key(key))
+    return ga_mdata.get('fields', {}).get('field', [])
+
+def _git_annex_set_metadata(key, field, val):
+    _run('git', 'annex', 'metadata', '--key='+key, '-s', field + '=' + val)
+
+def import_from_url(url, git_file_path, fast=False):
     """Imports a URL into the git-annex repository."""
 
     url = _standardize_url(url)
     if os.path.isdir(git_file_path):
         git_file_path = os.path.join(git_file_path, os.path.basename(url))
 
-    _run('git annex addurl', '--fast' if fast else None, '--file', git_file_path, url)
+    assert not os.path.exists(git_file_path)
+
+    # check if we have an md5 key for the url.
+    url_key = _git_annex_get_url_key(url)
+    alt_keys = [k for k in _git_annex_get_metadata(key=url_key, field='alt_keys')
+                if k.startswith('MD5')]
+    if alt_keys:
+        _run('git', 'annex', 'fromkey', '--force', alt_keys[0], git_file_path)
+        if not fast:
+            _run('git', 'annex', 'get', git_file_path)
+        return
+
+    _run('git', 'annex', 'addurl', '--fast' if fast else None, '--file', git_file_path, url)
+    if not fast:
+        _git_annex_set_metadata(key=url_key, field='alt_keys', val=_git_annex_lookupkey(git_file_path))
+
+    return git_file_path
     # check that the state of a dx object is closed.
     # (have option to) still compute md5.  if we don't write to disk, it'll be fast?
 
@@ -934,20 +1195,22 @@ __commands__.append(('import_from_url', parser_import_from_url))
 ########################################################################################################################
 
 def _gs_stat(gs_url):
-    return _run_succeeds('gsutil stat -q', gs_url)
+    return _run_succeeds('gsutil stat', gs_url)
 
 def _git_annex_checkpresentkey(key, remote):
     return _run_succeeds('git annex checkpresentkey', key, remote)
 
 def _md5_base64(s):
-    hashlib.md5(s).digest().encode('base64').strip()
+    return hashlib.md5(s).digest().encode('base64').strip()
 
 def _get_gs_remote_uuid():
     return '0b42380a-45f8-4b9d-82b3-e10aaf7bab6c'  # TODO determine this from git and git-annex config
 
-def _copy_to_gs(git_file_path, gs_prefix):
+def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TODO make gs prefix configurable
     """Ensure the given file exists in gs."""
 
+    if gs_prefix.endswith('/'):
+        gs_prefix = gs_prefix[:-1]
     whereis = _run_get_json('git annex whereis --json ' + git_file_path)
     locs = []
     assert whereis['success']
@@ -958,17 +1221,35 @@ def _copy_to_gs(git_file_path, gs_prefix):
     key = _run_get_output('git annex lookupkey', git_file_path)
     gs_remote_uuid = _get_gs_remote_uuid()
     if not urls_with_right_fname:
-        gs_url = gs_prefix+'/inp/' + _md5_base64(whereis['key']) + '/' + fname
+        gs_url = '/'.join((gs_prefix, 'inp', _md5_base64(whereis['key']), fname))
         _run('git annex registerurl', key, gs_url)
+        headers = None
+        # TODO: set Content-Type based on extension
+        # TODO: maybe use -z to compress if large text file.
+
+        # TODO: if have a dx URL, use the Storage Transfer Service to download directly from 
+        # dx and avoid transfer charges, if we're not running on google here.
+        # or, run a wdl workflow with the temp url as parameter.
+
         if urls:
             _run('gsutil cp', urls[0], gs_url)
         else:
             _run('git annex get', git_file_path)
             _run('gsutil cp', git_file_path, gs_url)
-            _run('git annex setpresentkey', key, _gs_gs_remote_uuid(), 1)
+            _run('git annex setpresentkey', key, gs_remote_uuid, 1)
         urls_with_right_fname.append(gs_url)
     assert _gs_stat(urls_with_right_fname[0])
     assert _git_annex_checkpresentkey(key, gs_remote_uuid)
+    return urls_with_right_fname[0]
+
+def _stage_file_for_backend(git_file_path, backend):
+    """Ensure file exists in given backend"""
+    if backend == 'Local':
+        _run('git annex get ' + git_file_path)
+        return git_file_path
+    elif backend == 'JES':
+        return _copy_to_gs(git_file_path)
+
 
 
 ########################################################################################################################
@@ -1164,7 +1445,8 @@ if __name__ == '__main__':
     #print(get_docker_hash('quay.io/broadinstitute/viral-ngs'))
     #record_run_results(0,0)
     if False:
-        _copy_to_gs(git_file_path='A4.scaffolding_chosen_ref.fasta', gs_prefix=)
+        #_copy_to_gs(git_file_path='A4.scaffolding_chosen_ref.fasta', gs_prefix='gs://sabeti-ilya-cromwell')
+        _resolve_links_in_dx_analysis(dx_analysis_id='analysis-FK7BQ580761VgPb22550gfJv', analysis_dir='dxan')
         sys.exit(0)
 
     if False:
