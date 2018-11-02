@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 # * Preamble
+# ** module comment
 
 """
 Utilities for dealing with workflows, including cloud workflows.
@@ -27,6 +28,10 @@ In combination, these utilities enable much of what DNAnexus enables, but:
 __author__ = "ilya@broadinstitute.org"
 __commands__ = []
 
+# ** imports
+
+# *** built-ins
+
 import platform
 assert platform.python_version().startswith('2.7')  # dxpy requirement; should drop and use command-line
 
@@ -52,11 +57,15 @@ import sys
 import urllib
 import SimpleHTTPServer
 import SocketServer
+import traceback
 
+# *** 3rd-party
 import dxpy
 import dxpy.bindings.dxfile_functions
 import boto3
+import uritools
 
+# *** intra-module
 import util.cmd
 import util.file
 import util.misc
@@ -66,7 +75,9 @@ _log = logging.getLogger(__name__)
 #logging.basicConfig(format="%(asctime)s - %(module)s:%(lineno)d:%(funcName)s - %(levelname)s - %(message)s")
 _log.setLevel(logging.DEBUG)
 
-# * Generic utils
+
+# * Utils
+# ** Generic utils
 
 _str_type = getattr(builtins, 'basestring', 'str')
 _long_type = getattr(builtins, 'long', 'int')
@@ -135,15 +146,60 @@ def _json_loadf(fname):
 def _run_get_json(cmd, *args):
     return _json_loads(_run_get_output(cmd, *args))
 
+def workflow_utils_init():
+    """Install the dependencies: cromwell and dxpy and git-annex."""
+    _run('conda install cromwell dxpy git-annex')
+
+# ** DNAnexus-related utils
 
 @util.misc.memoize
 def _dx_describe(dxid):
     return _run_get_json('dx', 'describe', '--verbose', '--details', '--json', dxid)
 
-def workflow_utils_init():
-    """Install the dependencies: cromwell and dxpy and git-annex."""
-    _run('conda install cromwell dxpy git-annex')
+DX_URI_PFX='dx://'
 
+def _url_to_dxid(url):
+    return os.path.splitext(url[len(DX_URI_PFX):].split('/')[0])[0]
+
+def _standardize_dx_url(url):
+    dxid = _url_to_dxid(url)
+    dx_descr = _dx_describe(_url_to_dxid(url))
+    return DX_URI_PFX + dxid + '/' + urllib.pathname2url(dx_descr['name'])
+
+# ** git-annex-related utils
+
+def _git_annex_lookupkey(f):
+    return _run_get_output('git', 'annex', 'lookupkey', f)
+
+def _git_annex_get_metadata(key, field):
+    ga_mdata = _run_get_json('git', 'annex', 'metadata', '--json', '--key='+key)
+    return ga_mdata.get('fields', {}).get(field, [])
+
+def _git_annex_set_metadata(key, field, val):
+    _run('git', 'annex', 'metadata', '--key='+key, '-s', field + '=' + val)
+
+def _git_annex_get_url_key(url):
+    """Return the git-annex key for a url"""
+    print('get-url-key', url)
+    traceback.print_stack()
+    assert uritools.isuri(url)
+    url = _minimize_url(url)
+    assert uritools.isuri(url)
+
+    url_parts = uritools.urisplit(url)
+    url_parts = url_parts._replace(path=uritools.uriencode(url_parts.path, safe='/'))
+    url = uritools.uriunsplit(url_parts)
+
+    assert uritools.isuri(url)
+    return 'URL--' + url
+
+    # old way, maybe less abstraction-breaking but slower -- let git-annex compute the key:
+    # with util.file.tmp_dir(dir=os.getcwd()) as tmp_d:
+    #     f = os.path.join(tmp_d, 'f')
+    #     _run('git', 'annex', 'fromkey', '--force', url, f)
+    #     key = _git_annex_lookupkey(f)
+    #     shutil.rmtree(tmp_d, ignore_errors=True)
+    #     return key
 
 # * submit_analysis_wdl
 # ** get_workflow_inputs
@@ -1119,15 +1175,6 @@ __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
 
 # * import_from_url
 
-DX_URI_PFX='dx://'
-
-def _url_to_dxid(url):
-    return os.path.splitext(url[len(DX_URI_PFX):].split('/')[0])[0]
-
-def _standardize_dx_url(url):
-    dxid = _url_to_dxid(url)
-    dx_descr = _dx_describe(_url_to_dxid(url))
-    return DX_URI_PFX + dxid + '/' + urllib.pathname2url(dx_descr['name'])
 
 def _standardize_url(url):
     if url.startswith(DX_URI_PFX):
@@ -1139,25 +1186,20 @@ def _minimize_url(url):
         url = DX_URI_PFX+_url_to_dxid(url)
     return url
 
-def _git_annex_lookupkey(f):
-    return _run_get_output('git', 'annex', 'lookupkey', f)
 
-def _git_annex_get_url_key(url, git_dir=None):
-    """Return the git-annex key for a url"""
-    url = _minimize_url(url)
-    with util.file.tmp_dir(dir=git_dir or os.getcwd()) as tmp_d:
-        f = os.path.join(tmp_d, 'f')
-        _run('git', 'annex', 'fromkey', '--force', url, f)
-        key = _git_annex_lookupkey(f)
-        shutil.rmtree(tmp_d, ignore_errors=True)
-        return key
+_url2md5key = {}
 
-def _git_annex_get_metadata(key, field):
-    ga_mdata = _run_get_json('git', 'annex', 'metadata', '--json', '--key='+_git_annex_get_url_key(key))
-    return ga_mdata.get('fields', {}).get('field', [])
+def _get_url_md5_key(url):
+    if url not in _url2md5key:
+        url_key = _git_annex_get_url_key(url)
+        alt_keys = [k for k in _git_annex_get_metadata(key=url_key, field='alt_keys')
+                    if k.startswith('MD5')]
+        if alt_keys:
+            _url2md5key[url] = alt_keys[0]
+    return _url2md5key.get(url, None)
 
-def _git_annex_set_metadata(key, field, val):
-    _run('git', 'annex', 'metadata', '--key='+key, '-s', field + '=' + val)
+#def _set_url_md5_key(url, key):
+    
 
 def import_from_url(url, git_file_path, fast=False):
     """Imports a URL into the git-annex repository."""
@@ -1172,6 +1214,7 @@ def import_from_url(url, git_file_path, fast=False):
     url_key = _git_annex_get_url_key(url)
     alt_keys = [k for k in _git_annex_get_metadata(key=url_key, field='alt_keys')
                 if k.startswith('MD5')]
+    print('ALT_KEYS=', alt_keys)
     if alt_keys:
         _run('git', 'annex', 'fromkey', '--force', alt_keys[0], git_file_path)
         if not fast:
