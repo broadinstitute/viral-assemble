@@ -146,6 +146,46 @@ def _json_loadf(fname):
 def _run_get_json(cmd, *args):
     return _json_loads(_run_get_output(cmd, *args))
 
+def _transform_parsed_json(val, leaf_handler, path_arg=None, path=()):
+    """Transform a parsed json structure, by replacing nodes for which `leaf_handler` returns
+    non-None with the return value.  `leaf_handler` is called with the node as the first argument,
+    and, if `path_arg` is given, passed the path from the root (as a tuple) through the keyword
+    argument given in `path_arg`.
+    """
+    recurse = functools.partial(_transform_parsed_json, leaf_handler=leaf_handler, path_arg=path_arg)
+    maybe_handle_leaf = leaf_handler(val, path_arg=path) if path_arg else leaf_handler(val)
+    if maybe_handle_leaf is not None:
+        return maybe_handle_leaf
+    if isinstance(val, list):
+        return [recurse(val=v, path=path+(i,)) for i, v in enumerate(val)]
+    if isinstance(val, collections.Mapping):
+        return _ord_dict(*[(k, recurse(val=v, path=path+(k,)))
+                           for k, v in val.items()])
+    return val
+
+
+def _json_to_org(val, org_file, depth=1, heading='root'):
+    """Transform a parsed json structure to org.
+    """
+    with open(org_file, 'w') as out:
+        def _recurse(val, heading, depth):
+            def _header(s): out.write('*'*depth + ' ' + str(s) + '\n')
+            def _line(s): out.write(' '*depth + str(s) + '\n')
+            out.write('*'*depth + ' ' + heading)
+            if isinstance(val, list):
+                out.write(' - list of ' + str(len(val)) + '\n')
+                if len(val):
+                    for i, v in enumerate(val):
+                        _recurse(v, heading=str(i), depth=depth+2)
+            elif isinstance(val, collections.Mapping):
+                out.write(' - map of ' + str(len(val)) + '\n')
+                if len(val):
+                    for k, v in val.items():
+                        _recurse(v, heading='_'+k+'_', depth=depth+2)
+            else:
+                out.write(' - ' + str(val) + '\n')
+        _recurse(val=val, heading=heading, depth=depth)
+
 def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy and git-annex."""
     _run('conda install cromwell dxpy git-annex')
@@ -181,7 +221,6 @@ def _git_annex_set_metadata(key, field, val):
 def _git_annex_get_url_key(url):
     """Return the git-annex key for a url"""
     print('get-url-key', url)
-    traceback.print_stack()
     assert uritools.isuri(url)
     url = _minimize_url(url)
     assert uritools.isuri(url)
@@ -200,6 +239,24 @@ def _git_annex_get_url_key(url):
     #     key = _git_annex_lookupkey(f)
     #     shutil.rmtree(tmp_d, ignore_errors=True)
     #     return key
+
+
+# * json_to_org
+
+
+def json_to_org(json_fname, org_fname=None):
+    """Convert json to org"""
+    if not org_fname:
+        org_fname = os.path.splitext(json_fname)[0]+'.org'
+    _json_to_org(val=_json_loadf(json_fname), org_file=org_fname)
+
+def parser_json_to_org(parser=argparse.ArgumentParser()):
+    parser.add_argument('json_fname', help='json file to import')
+    parser.add_argument('org_fname', help='org file to output', nargs='?')
+    util.cmd.attach_main(parser, json_to_org, split_args=True)
+
+__commands__.append(('json_to_org', parser_json_to_org))
+
 
 # * submit_analysis_wdl
 # ** get_workflow_inputs
@@ -383,7 +440,7 @@ class DxFileResolver(FileResolver):
         md5e_key = get_md5e_key(ga_key)
         if md5e_key:
             _run('git rm ' + git_file_path)
-            _run("git annex fromkey --force '{}' '{}'".format(md5e_key, git_file_path))
+            _run("git annex fromkey '{}' '{}'".format(md5e_key, git_file_path))
             ga_key = md5e_key
         return ga_key
     # end: def create_git_annex_symlink(self, file_val, git_file_path):
@@ -494,30 +551,28 @@ def _resolve_link_dx(val, git_file_dir, dx_analysis_id):
     util.file.mkdir_p(git_file_dir)
     return import_from_url(url='dx://' + dx_file_id, git_file_path=git_file_dir, fast=False)
 
-def _resolve_link_oneof(val, git_file_dir, methods):
+def _resolve_link(val, git_file_dir, methods):
     for method in methods:
         result = method(val=val, git_file_dir=git_file_dir)
         if result: return result
     return None
 
-def _resolve_links_in_json(val, analysis_dir, methods, relpath='files'):
-    recurse = functools.partial(_resolve_links_in_json, analysis_dir=analysis_dir, methods=methods)
-    git_file_dir = os.path.join(analysis_dir, relpath)
-    maybe_resolve_link = _resolve_link_oneof(val=val, git_file_dir=git_file_dir, methods=methods)
-    if maybe_resolve_link:
-        return _ord_dict(('$git_link', maybe_resolve_link))
-    if isinstance(val, list):
-        return [recurse(val=v, relpath=os.path.join(relpath, str(i))) for i, v in enumerate(val)]
-    if isinstance(val, collections.Mapping):
-        return _ord_dict(*[(k, recurse(val=v, relpath=os.path.join(relpath, util.file.string_to_file_name(k))))
-                           for k, v in val.items()])
-    return val
-
+def _resolve_links_in_parsed_json(val, rel_to_dir, methods, relpath='files'):
+    """Given a parsed json structure, replace in it references to files (in various forms) with one uniform
+    representation, a 'git link'.  A git link contains a relative path (relative to `analysis_dir`)
+    pointing to a git file, typically a git-annex file.
+    """
+    def handle_leaf(val, path):
+        maybe_resolve_link = _resolve_link(val=val, git_file_dir=git_file_dir, methods=methods)
+        if maybe_resolve_link:
+            return _ord_dict(('$git_link', os.path.relpath(maybe_resolve_link, rel_to_dir)))
+    return _transform_parsed_json(val, leaf_handler=handle_leaf, path_arg='path')
 
 def _resolve_links_in_dx_analysis(dx_analysis_id, analysis_dir):
     analysis_descr = _dx_describe(dx_analysis_id)
+    del analysis_descr['originalInput']
     methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id)]
-    resolved = _resolve_links_in_json(val=analysis_descr, analysis_dir=analysis_dir, methods=methods)
+    resolved = _resolve_links_in_parsed_json(val=analysis_descr, rel_to_dir=analysis_dir, methods=methods)
     _write_json(os.path.join(analysis_dir, 'dx_resolved.json'), **resolved)
 
 # def _resolve_link_dx_old(val, dx_analysis_id):
@@ -1189,16 +1244,20 @@ def _minimize_url(url):
 
 _url2md5key = {}
 
-def _get_url_md5_key(url):
-    if url not in _url2md5key:
-        url_key = _git_annex_get_url_key(url)
+def _get_url_md5_key(url_key):
+    if url_key not in _url2md5key:
         alt_keys = [k for k in _git_annex_get_metadata(key=url_key, field='alt_keys')
                     if k.startswith('MD5')]
         if alt_keys:
-            _url2md5key[url] = alt_keys[0]
-    return _url2md5key.get(url, None)
+            _url2md5key[url_key] = alt_keys[0]
+    return _url2md5key.get(url_key, None)
 
-#def _set_url_md5_key(url, key):
+def _set_url_md5_key(url_key, md5_key):
+    if url_key in _url2md5key:
+        assert _url2md5key[url_key] == md5_key
+        return
+    _url2md5key[url_key] = md5_key
+    _git_annex_set_metadata(key=url_key, field='alt_keys', val=md5_key)
     
 
 def import_from_url(url, git_file_path, fast=False):
@@ -1212,18 +1271,16 @@ def import_from_url(url, git_file_path, fast=False):
 
     # check if we have an md5 key for the url.
     url_key = _git_annex_get_url_key(url)
-    alt_keys = [k for k in _git_annex_get_metadata(key=url_key, field='alt_keys')
-                if k.startswith('MD5')]
-    print('ALT_KEYS=', alt_keys)
-    if alt_keys:
-        _run('git', 'annex', 'fromkey', '--force', alt_keys[0], git_file_path)
+    md5_key = _get_url_md5_key(url_key)
+    if md5_key:
+        _run('git', 'annex', 'fromkey', md5_key, git_file_path)
         if not fast:
             _run('git', 'annex', 'get', git_file_path)
-        return
+        return git_file_path
 
     _run('git', 'annex', 'addurl', '--fast' if fast else None, '--file', git_file_path, url)
     if not fast:
-        _git_annex_set_metadata(key=url_key, field='alt_keys', val=_git_annex_lookupkey(git_file_path))
+        _set_url_md5_key(url_key=url_key, md5_key=_git_annex_lookupkey(git_file_path))
 
     return git_file_path
     # check that the state of a dx object is closed.
@@ -1477,6 +1534,7 @@ def analyze_workflows_orig():
 #########################################################################################################################
 
 
+#########################################################################################################################
 
 
 # * Epilog
@@ -1491,7 +1549,8 @@ if __name__ == '__main__':
     #record_run_results(0,0)
     if False:
         #_copy_to_gs(git_file_path='A4.scaffolding_chosen_ref.fasta', gs_prefix='gs://sabeti-ilya-cromwell')
-        _resolve_links_in_dx_analysis(dx_analysis_id='analysis-FK7BQ580761VgPb22550gfJv', analysis_dir='dxan')
+        _json_to_org(_dx_describe('analysis-FK7BQ580761VgPb22550gfJv'), org_file='tmp/t.org')
+        #_resolve_links_in_dx_analysis(dx_analysis_id='analysis-FK7BQ580761VgPb22550gfJv', analysis_dir='exper/dxan4')
         sys.exit(0)
 
     if False:
