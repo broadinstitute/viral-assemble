@@ -50,6 +50,7 @@ import uuid
 import functools
 import operator
 import builtins
+import datetime
 import hashlib
 import pipes
 import shlex
@@ -64,6 +65,7 @@ import dxpy
 import dxpy.bindings.dxfile_functions
 import boto3
 import uritools
+import pytz
 
 # *** intra-module
 import util.cmd
@@ -94,11 +96,21 @@ def _is_str(obj):
 def _is_mapping(obj):
     return isinstance(obj, collections.Mapping)
 
+def _maps(obj, *keys):
+    return _is_mapping(obj) and all(k in obj for k in keys)
+
 def _is_scalar(val):
     isinstance(val, _scalar_types)
 
 def _ord_dict(*args):
     return collections.OrderedDict(args)
+
+def _dict_rename_key(d, old_key, new_key):
+    print('d.keys=', d.keys())
+    assert new_key not in d
+    d[new_key] = d[old_key]
+    del d[old_key]
+    return d
 
 def _pretty_print_json(json_dict, sort_keys=True):
     """Return a pretty-printed version of a dict converted to json, as a string."""
@@ -146,16 +158,20 @@ def _json_loadf(fname):
 def _run_get_json(cmd, *args):
     return _json_loads(_run_get_output(cmd, *args))
 
-def _transform_parsed_json(val, leaf_handler, path_arg=None, path=()):
-    """Transform a parsed json structure, by replacing nodes for which `leaf_handler` returns
-    non-None with the return value.  `leaf_handler` is called with the node as the first argument,
-    and, if `path_arg` is given, passed the path from the root (as a tuple) through the keyword
-    argument given in `path_arg`.
+def _transform_parsed_json(val, node_handler, path=()):
+    """Transform a parsed json structure, by replacing nodes for which `node_handler` returns
+    an object different from `val`, with that object.  If `node_handler` has a named arg `path`,
+    the path from the root will be passed as that arg.
     """
-    recurse = functools.partial(_transform_parsed_json, leaf_handler=leaf_handler, path_arg=path_arg)
-    maybe_handle_leaf = leaf_handler(val, path_arg=path) if path_arg else leaf_handler(val)
-    if maybe_handle_leaf is not None:
-        return maybe_handle_leaf
+    recurse = functools.partial(_transform_parsed_json, node_handler=node_handler)
+    node_handler_named_args = util.misc.getnamedargs(node_handler)
+    node_handler_args = {}
+    if 'path' in node_handler_named_args:
+        node_handler_args['path'] = path
+    handled_val = node_handler(val, **node_handler_args)
+    if handled_val is not val:
+        print('resolved', val, 'to', handled_val)
+        return handled_val
     if isinstance(val, list):
         return [recurse(val=v, path=path+(i,)) for i, v in enumerate(val)]
     if isinstance(val, collections.Mapping):
@@ -189,6 +205,28 @@ def _json_to_org(val, org_file, depth=1, heading='root'):
 def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy and git-annex."""
     _run('conda install cromwell dxpy git-annex')
+
+
+# ** AnalysisDir
+
+class AnalysisDir(object):
+
+    """A directory representing an analysis.   Typically a directory in a git-annex repository,
+    with analysis metadata in standard format, and analysis files as git-annex files under the 
+    analysis directory.
+
+    An analysis directory can represent an analysis in various states: being prepared, submitted,
+    finished; succeeded or failed.
+
+    """
+    
+    METADATA_VERSION = "1.0"
+
+    def __init__(self, path):
+        self.path = path
+
+    def is_analysis_dir(self):
+        return os.path.isfile(os.path.join(self.path, 'metadata.json'))
 
 # ** DNAnexus-related utils
 
@@ -521,16 +559,20 @@ def _parse_cromwell_output_str(cromwell_output_str):
 # ** import_dx_analysis
 
 
-def _resolve_dx_link_to_dx_file_id(val, dx_analysis_id):
-    """If val represents a DNAnexus link to a file, return the file-xxxxx id of the file; else, return None."""
+def _resolve_dx_link_to_dx_file_id_or_value(val, dx_analysis_id):
+    """If `val` represents a DNAnexus link to a file, return {$dnanexus_link: file-xxxx}.
+    If `val` represents a DNAnexus link to a value, return {$dnanexus_val: value}.
+    Else, return None.
+    """
 
     #print('parsing val: ', val)
-    recurse = functools.partial(_resolve_dx_link_to_dx_file_id, dx_analysis_id=dx_analysis_id)
-    if not (_is_mapping(val) and '$dnanexus_link' in val):
-        return None
+    recurse = functools.partial(_resolve_dx_link_to_dx_file_id_or_value,
+                                dx_analysis_id=dx_analysis_id)
+    if not _maps(val, '$dnanexus_link'):
+        return val
 
     link = val['$dnanexus_link']
-    if isinstance(link, collections.Mapping) and 'stage' in link and ('field' in link or 'outputField' in link):
+    if _maps(link, 'stage') and ('field' in link or 'outputField' in link):
         print('link is ', link)
         linked_analysis_descr = _dx_describe(link.get('analysis', dx_analysis_id))
         linked_field = link['field'] if 'field' in link else link['outputField']
@@ -542,31 +584,38 @@ def _resolve_dx_link_to_dx_file_id(val, dx_analysis_id):
             dxid = link
         else:
             dxid = link['id']
-        return dxid
+        return {'$dnanexus_link': dxid}
     raise RuntimeError('Unknown $dnanexus_link: {}'.format(val))
 
 def _resolve_link_dx(val, git_file_dir, dx_analysis_id):
-    dx_file_id = _resolve_dx_link_to_dx_file_id(val=val, dx_analysis_id=dx_analysis_id)
-    if not dx_file_id: return None
-    util.file.mkdir_p(git_file_dir)
-    return import_from_url(url='dx://' + dx_file_id, git_file_path=git_file_dir, fast=False)
+    val_resolved = _resolve_dx_link_to_dx_file_id_or_value(val=val, dx_analysis_id=dx_analysis_id)
+    if _maps(val_resolved, '$dnanexus_link'):
+        dx_file_id = val_resolved['$dnanexus_link']
+        assert dx_file_id.startswith('file-')
+        util.file.mkdir_p(git_file_dir)
+        val_resolved = {'$git_link': import_from_url(url='dx://' + dx_file_id, git_file_path=git_file_dir, fast=False)}
+    return val_resolved
 
 def _resolve_link(val, git_file_dir, methods):
     for method in methods:
         result = method(val=val, git_file_dir=git_file_dir)
-        if result: return result
-    return None
+        if result is not val: return result
+    return val
 
 def _resolve_links_in_parsed_json(val, rel_to_dir, methods, relpath='files'):
     """Given a parsed json structure, replace in it references to files (in various forms) with one uniform
     representation, a 'git link'.  A git link contains a relative path (relative to `analysis_dir`)
     pointing to a git file, typically a git-annex file.
     """
-    def handle_leaf(val, path):
-        maybe_resolve_link = _resolve_link(val=val, git_file_dir=git_file_dir, methods=methods)
-        if maybe_resolve_link:
-            return _ord_dict(('$git_link', os.path.relpath(maybe_resolve_link, rel_to_dir)))
-    return _transform_parsed_json(val, leaf_handler=handle_leaf, path_arg='path')
+    def handle_node(val, path):
+        maybe_resolve_link = _resolve_link(val=val,
+                                           git_file_dir=os.path.join(rel_to_dir, relpath,
+                                                                     *map(str, path)), methods=methods)
+        if _maps(maybe_resolve_link, '$git_link'):
+            maybe_resolve_link = {'$git_link': os.path.relpath(maybe_resolve_link['$git_link'], rel_to_dir)}
+        return maybe_resolve_link
+        
+    return _transform_parsed_json(val, node_handler=handle_node)
 
 def _resolve_links_in_dx_analysis(dx_analysis_id, analysis_dir):
     analysis_descr = _dx_describe(dx_analysis_id)
@@ -717,9 +766,39 @@ def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
 
     analysis_dir = analysis_dir_pfx + 'dx-' + dx_analysis_id
     util.file.mkdir_p(analysis_dir)
-    descr = _run('dx', 'describe', '--details', '--verbose', '--json', dx_analysis_id)
-    
-    
+    mdata = _dx_describe(dx_analysis_id)
+
+    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id)]
+    mdata = _resolve_links_in_parsed_json(val=mdata, rel_to_dir=analysis_dir, methods=methods)
+
+    # convert to Cromwell's metadata format:
+    # https://cromwell.readthedocs.io/en/develop/api/RESTAPI/#workflowmetadataresponse
+
+    mdata['_metadata_version'] = AnalysisDir.METADATA_VERSION
+    mdata['labels'] = _ord_dict(('platform', 'dnanexus'))
+
+    _dict_rename_key(mdata, 'input', 'inputs')
+    _dict_rename_key(mdata, 'output', 'outputs')
+    _dict_rename_key(mdata, 'state', 'status')
+    del mdata['originalInput']  # same as 'input'
+
+    if mdata['status'] == 'done':
+        mdata['status'] == 'Succeeded'
+    elif mdata['status'] == 'failed':
+        mdata['status'] == 'Failed'
+
+    submission_datetime = datetime.datetime.fromtimestamp(float(mdata['created']) / 1000.0)
+    tz_eastern = pytz.timezone('US/Eastern')
+    mdata['submission'] = tz_eastern.localize(submission_datetime).isoformat('T')
+
+    _write_json(os.path.join(analysis_dir, 'metadata.json'), **mdata)
+
+def parser_import_dx_analysis(parser=argparse.ArgumentParser()):
+    parser.add_argument('dx_analysis_id', help='dnanexus analysis id')
+    parser.add_argument('analysis_dir_pfx', help='analysis dir prefix; analysis id will be added to it.')
+    util.cmd.attach_main(parser, import_dx_analysis, split_args=True)
+
+__commands__.append(('import_dx_analysis', parser_import_dx_analysis))
 
 # ** submit_analysis_wdl
 
