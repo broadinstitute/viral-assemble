@@ -783,9 +783,9 @@ def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
     del mdata['originalInput']  # same as 'input'
 
     if mdata['status'] == 'done':
-        mdata['status'] == 'Succeeded'
+        mdata['status'] = 'Succeeded'
     elif mdata['status'] == 'failed':
-        mdata['status'] == 'Failed'
+        mdata['status'] = 'Failed'
 
     submission_datetime = datetime.datetime.fromtimestamp(float(mdata['created']) / 1000.0)
     tz_eastern = pytz.timezone('US/Eastern')
