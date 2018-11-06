@@ -12,6 +12,7 @@ import multiprocessing
 import sys
 import copy
 import yaml, json
+import inspect
 
 import util.file
 
@@ -594,3 +595,22 @@ def load_config(cfg, include_directive='include', std_includes=(), param_renamin
             log.warning('Config param {} has been renamed to {}; old name accepted for now'.format(old_param, new_param))
 
     return result
+
+def flatten(d, types_to_flatten=(tuple, list)):
+    """Flatten a data structure `d` into a flat list.  Any elements of `d` that are instances of one of the iterable types in 
+    `types_to_flatten` will be recursively flattened."""
+    return [d] if not isinstance(d, types_to_flatten) else \
+        functools.reduce(operator.concat, list(map(functools.partial(flatten, types_to_flatten=types_to_flatten), d)), [])
+
+FullArgSpec = collections.namedtuple('FullArgSpec',
+                                     'args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations')
+def getfullargspec(func):
+    """Backport of inspect.getfullargspec() from Python 3 to Python 2"""
+    if hasattr(inspect, 'getfullargspec'): return inspect.getfullargspec(func)
+    argspec = inspect.getargspec(func)
+    return FullArgSpec(argspec[0], argspec[1], argspec[2], argspec[3], kwonlyargs=[], kwonlydefaults={}, annotations={})
+
+def getnamedargs(func):
+    """Return a list of named args -- both positional and keyword-only -- of the given function."""
+    argspec = getfullargspec(func)
+    return flatten(argspec.args + argspec.kwonlyargs)
