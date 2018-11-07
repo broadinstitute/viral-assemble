@@ -107,7 +107,6 @@ def _ord_dict(*args):
     return collections.OrderedDict(args)
 
 def _dict_rename_key(d, old_key, new_key):
-    print('d.keys=', d.keys())
     assert new_key not in d
     d[new_key] = d[old_key]
     del d[old_key]
@@ -602,7 +601,6 @@ def _resolve_link_dx(val, git_file_dir, dx_analysis_id, _cache=None):
             print('RESOLVED', val, ' TO ', val_resolved)
             if _cache is not None:
                 _cache[dx_file_id] = val_resolved
-                print('CACHE IS\n', '\n'.join(map(str, _cache.items())), '\n')
     return val_resolved
 
 def _resolve_link(val, git_file_dir, methods):
@@ -798,7 +796,8 @@ def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
         for k in mdata[mdata_rec]:
             stage_id = k.split('.')[0]
             if stage_id in stage2name:
-                _dict_rename_key(mdata[mdata_rec], k, stage2name[stage_id]+k[len(stage_id):])
+                _dict_rename_key(mdata[mdata_rec], k,
+                                 mdata['workflowName']+'.'+stage2name[stage_id]+k[len(stage_id):])
 
     _dict_rename_key(mdata, 'input', 'inputs')
     _dict_rename_key(mdata, 'output', 'outputs')
