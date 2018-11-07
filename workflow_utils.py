@@ -59,6 +59,7 @@ import urllib
 import SimpleHTTPServer
 import SocketServer
 import traceback
+import copy
 
 # *** 3rd-party
 import dxpy
@@ -556,13 +557,13 @@ def _parse_cromwell_output_str(cromwell_output_str):
     json_end = cromwell_output_str.index('\n}\n', json_beg) + 2
     return _json_loads(cromwell_output_str[json_beg:json_end])
 
-# ** import_dx_analysis
+# * import_dx_analysis
 
-
+# ** import_dx_analysis utils
 def _resolve_dx_link_to_dx_file_id_or_value(val, dx_analysis_id):
     """If `val` represents a DNAnexus link to a file, return {$dnanexus_link: file-xxxx}.
-    If `val` represents a DNAnexus link to a value, return {$dnanexus_val: value}.
-    Else, return None.
+    If `val` represents a DNAnexus link to a value, return that value.
+    Else, return `val` unchanged.
     """
 
     #print('parsing val: ', val)
@@ -587,13 +588,21 @@ def _resolve_dx_link_to_dx_file_id_or_value(val, dx_analysis_id):
         return {'$dnanexus_link': dxid}
     raise RuntimeError('Unknown $dnanexus_link: {}'.format(val))
 
-def _resolve_link_dx(val, git_file_dir, dx_analysis_id):
+def _resolve_link_dx(val, git_file_dir, dx_analysis_id, _cache=None):
     val_resolved = _resolve_dx_link_to_dx_file_id_or_value(val=val, dx_analysis_id=dx_analysis_id)
     if _maps(val_resolved, '$dnanexus_link'):
         dx_file_id = val_resolved['$dnanexus_link']
         assert dx_file_id.startswith('file-')
-        util.file.mkdir_p(git_file_dir)
-        val_resolved = {'$git_link': import_from_url(url='dx://' + dx_file_id, git_file_path=git_file_dir, fast=False)}
+        if _maps(_cache, dx_file_id):
+            val_resolved = copy.deepcopy(_cache[dx_file_id])
+            print('RESOLVED', val, ' TO ', val_resolved, ' FROM CACHE')
+        else:
+            util.file.mkdir_p(git_file_dir)
+            val_resolved = {'$git_link': import_from_url(url='dx://' + dx_file_id, git_file_path=git_file_dir, fast=False)}
+            print('RESOLVED', val, ' TO ', val_resolved)
+            if _cache is not None:
+                _cache[dx_file_id] = val_resolved
+                print('CACHE IS\n', '\n'.join(map(str, _cache.items())), '\n')
     return val_resolved
 
 def _resolve_link(val, git_file_dir, methods):
@@ -617,12 +626,14 @@ def _resolve_links_in_parsed_json(val, rel_to_dir, methods, relpath='files'):
         
     return _transform_parsed_json(val, node_handler=handle_node)
 
-def _resolve_links_in_dx_analysis(dx_analysis_id, analysis_dir):
-    analysis_descr = _dx_describe(dx_analysis_id)
-    del analysis_descr['originalInput']
-    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id)]
-    resolved = _resolve_links_in_parsed_json(val=analysis_descr, rel_to_dir=analysis_dir, methods=methods)
-    _write_json(os.path.join(analysis_dir, 'dx_resolved.json'), **resolved)
+# ** deleted code
+
+# def _resolve_links_in_dx_analysis(dx_analysis_id, analysis_dir):
+#     analysis_descr = _dx_describe(dx_analysis_id)
+#     del analysis_descr['originalInput']
+#     methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id)]
+#     resolved = _resolve_links_in_parsed_json(val=analysis_descr, rel_to_dir=analysis_dir, methods=methods)
+#     _write_json(os.path.join(analysis_dir, 'dx_resolved.json'), **resolved)
 
 # def _resolve_link_dx_old(val, dx_analysis_id):
 #     """Resolve a dx value: if it is a scalar, just return that;
@@ -724,51 +735,51 @@ def _resolve_links_in_dx_analysis(dx_analysis_id, analysis_dir):
 
 
 
-def _record_dx_metadata(val, analysis_dir, root_dir):
-    """If 'val' is a filename, return a dict representing the file and some metadata about it;
-    otherwise, return val as-is."""
-    if isinstance(val, list): return [_record_file_metadata(v, analysis_dir, root_dir) for v in val]
-    if _is_mapping(val): return collections.OrderedDict([(k, _record_file_metadata(v, analysis_dir, root_dir))
-                                                          for k, v in val.items()])
-    if not (_is_str(val) and (os.path.isfile(val) or os.path.isdir(val))): return val
-    file_info = collections.OrderedDict([('_is_file' if os.path.isfile(val) else '_is_dir', True)])
-    assert val.startswith(analysis_dir) or val.startswith(root_dir)
-    if val.startswith(analysis_dir):
-        relpath = os.path.relpath(val, analysis_dir)
-        abspath = os.path.join(analysis_dir, relpath)
-    else:
-        cromwell_executions_dir = os.path.dirname(os.path.dirname(root_dir))
-        relpath = os.path.relpath(val, cromwell_executions_dir)
-        abspath = os.path.join(analysis_dir, 'output',
-                               'call_logs' if os.path.basename(val) in ('stdout', 'stderr') else 'outputs', relpath)
-        if os.path.isfile(val) and not os.path.isfile(abspath):
-            print('LINKING {} to {}'.format(val, abspath))
-            util.file.mkdir_p(os.path.dirname(abspath))
-            shutil.copy(val, abspath)
-        if os.path.isdir(val):
-            util.file.mkdir_p(abspath)
+# def _record_dx_metadata(val, analysis_dir, root_dir):
+#     """If 'val' is a filename, return a dict representing the file and some metadata about it;
+#     otherwise, return val as-is."""
+#     if isinstance(val, list): return [_record_file_metadata(v, analysis_dir, root_dir) for v in val]
+#     if _is_mapping(val): return collections.OrderedDict([(k, _record_file_metadata(v, analysis_dir, root_dir))
+#                                                           for k, v in val.items()])
+#     if not (_is_str(val) and (os.path.isfile(val) or os.path.isdir(val))): return val
+#     file_info = collections.OrderedDict([('_is_file' if os.path.isfile(val) else '_is_dir', True)])
+#     assert val.startswith(analysis_dir) or val.startswith(root_dir)
+#     if val.startswith(analysis_dir):
+#         relpath = os.path.relpath(val, analysis_dir)
+#         abspath = os.path.join(analysis_dir, relpath)
+#     else:
+#         cromwell_executions_dir = os.path.dirname(os.path.dirname(root_dir))
+#         relpath = os.path.relpath(val, cromwell_executions_dir)
+#         abspath = os.path.join(analysis_dir, 'output',
+#                                'call_logs' if os.path.basename(val) in ('stdout', 'stderr') else 'outputs', relpath)
+#         if os.path.isfile(val) and not os.path.isfile(abspath):
+#             print('LINKING {} to {}'.format(val, abspath))
+#             util.file.mkdir_p(os.path.dirname(abspath))
+#             shutil.copy(val, abspath)
+#         if os.path.isdir(val):
+#             util.file.mkdir_p(abspath)
 
-    assert os.path.isabs(abspath) and abspath.startswith(analysis_dir), \
-        'bad abspath: {} analysis_dir: {}'.format(abspath, analysis_dir)
-    relpath = os.path.relpath(abspath, analysis_dir)
-    assert not os.path.isabs(relpath), 'should be relative: {}'.format(relpath)
-    assert os.path.isfile(abspath) or os.path.isdir(abspath), 'not file or dir: {}'.format(abspath)
-    assert os.path.isdir(abspath) or os.path.getsize(abspath) == os.path.getsize(val)
-    file_info['relpath'] = relpath
-    if os.path.isfile(abspath):
-        file_info['size'] = os.path.getsize(abspath)
-        file_info['md5'] = _run_get_output('md5sum ' + abspath).strip().split()[0]
-    return file_info
+#     assert os.path.isabs(abspath) and abspath.startswith(analysis_dir), \
+#         'bad abspath: {} analysis_dir: {}'.format(abspath, analysis_dir)
+#     relpath = os.path.relpath(abspath, analysis_dir)
+#     assert not os.path.isabs(relpath), 'should be relative: {}'.format(relpath)
+#     assert os.path.isfile(abspath) or os.path.isdir(abspath), 'not file or dir: {}'.format(abspath)
+#     assert os.path.isdir(abspath) or os.path.getsize(abspath) == os.path.getsize(val)
+#     file_info['relpath'] = relpath
+#     if os.path.isfile(abspath):
+#         file_info['size'] = os.path.getsize(abspath)
+#         file_info['md5'] = _run_get_output('md5sum ' + abspath).strip().split()[0]
+#     return file_info
 
-
+# ** import_dx_analysis impl
 def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
-    """Import a dnanexus analysis into git, in our format."""
+    """Import a DNAnexus analysis into git, in our analysis dir format."""
 
     analysis_dir = analysis_dir_pfx + 'dx-' + dx_analysis_id
     util.file.mkdir_p(analysis_dir)
     mdata = _dx_describe(dx_analysis_id)
 
-    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id)]
+    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id, _cache={})]
     mdata = _resolve_links_in_parsed_json(val=mdata, rel_to_dir=analysis_dir, methods=methods)
 
     # convert to Cromwell's metadata format:
@@ -776,6 +787,18 @@ def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
 
     mdata['_metadata_version'] = AnalysisDir.METADATA_VERSION
     mdata['labels'] = _ord_dict(('platform', 'dnanexus'))
+    mdata['workflowName'] = mdata['executableName']
+
+    stage2name = {}
+    for stage in mdata['stages']:
+        if _maps(stage, 'id', 'execution'):
+            stage2name[stage['id']] = stage['execution']['name']
+
+    for mdata_rec in ('input', 'output', 'runInput'):
+        for k in mdata[mdata_rec]:
+            stage_id = k.split('.')[0]
+            if stage_id in stage2name:
+                _dict_rename_key(mdata[mdata_rec], k, stage2name[stage_id]+k[len(stage_id):])
 
     _dict_rename_key(mdata, 'input', 'inputs')
     _dict_rename_key(mdata, 'output', 'outputs')
@@ -791,6 +814,7 @@ def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
     tz_eastern = pytz.timezone('US/Eastern')
     mdata['submission'] = tz_eastern.localize(submission_datetime).isoformat('T')
 
+
     _write_json(os.path.join(analysis_dir, 'metadata.json'), **mdata)
 
 def parser_import_dx_analysis(parser=argparse.ArgumentParser()):
@@ -800,19 +824,24 @@ def parser_import_dx_analysis(parser=argparse.ArgumentParser()):
 
 __commands__.append(('import_dx_analysis', parser_import_dx_analysis))
 
-# ** submit_analysis_wdl
+# *** submit_analysis_wdl
 
-def submit_analysis_wdl(workflow_name, analysis_inputs_from_dx_analysis, docker_img, analysis_dir_pfx,
+def submit_analysis_wdl(workflow_name, analysis_inputs,
+                        analysis_inputs_from_dx_analysis, docker_img, analysis_dir_pfx,
                         analysis_inputs_specified=None, 
                         analysis_descr='', analysis_labels=None,
-                        data_repo=None, data_remote=None,
                         cromwell_server_url='http://localhost:8000',
                         backend='Local'):
     """Submit a WDL analysis to a Cromwell server.
 
+    Inputs to the analysis.
+    The analysis can be executed on either a local or a cloud Cromwell backend.  This routine will, if needed,
+    copy the inputs to the filesystem needed by the backend.
+
     Args:
         workflow_name: name of the workflow, from pipes/WDL/workflows
         docker_img: docker image from which all viral-ngs and WDL code is taken.
+            (later, we'll add the ability to use different docker images for different parts)
         analysis_inputs_from_dx_analysis: id of a DNAnexus analysis from which to take analysis inputs
         analysis_inputs_specified: json file specifying analysis inputs directly; overrides any given by
          analysis_inputs_from_dx_analysis
@@ -1061,8 +1090,6 @@ def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('--analysisInputsSpecified', dest='analysis_inputs_specified',
                         help='explicitly specified analysis inputs')
     parser.add_argument('--analysisDescr', dest='analysis_descr', default='an analysis', help='description of the run')
-    parser.add_argument('--dataRepo', dest='data_repo', help='git data repository')
-    parser.add_argument('--dataRemote', dest='data_remote', help='git-annex data remote')
     parser.add_argument('--analysisLabels', dest='analysis_labels', nargs=2, action='append',
                         help='labels to attach to the analysis')
     parser.add_argument('--backend', default='Locall', help='backend on which to run')
