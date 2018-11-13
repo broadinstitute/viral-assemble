@@ -23,6 +23,9 @@ In combination, these utilities enable much of what DNAnexus enables, but:
    - allowing the use of spot/preemptible instances (which DNAnexus disallows)
    - allowing easy archiving/unarchiving of data, using git-annex commands
    - using all of git's normal mechanisms, such as branches and submodules, to organize things
+
+TODO:
+  - make things work with v7 git-annex repos
 """
 
 __author__ = "ilya@broadinstitute.org"
@@ -112,6 +115,9 @@ def _dict_rename_key(d, old_key, new_key):
     del d[old_key]
     return d
 
+def _md5_base64(s):
+    return hashlib.md5(s).digest().encode('base64').strip()
+
 def _pretty_print_json(json_dict, sort_keys=True):
     """Return a pretty-printed version of a dict converted to json, as a string."""
     return json.dumps(json_dict, indent=4, separators=(',', ': '), sort_keys=sort_keys)
@@ -119,19 +125,24 @@ def _pretty_print_json(json_dict, sort_keys=True):
 def _write_json(fname, **json_dict):
     util.file.dump_file(fname=fname, value=_pretty_print_json(json_dict))
 
+def _noquote(s):
+    return '_noquote:' + str(s)
+
 def _quote(s):
+    s = str(s)
+    if s.startswith('_noquote:'): return s[len('_noquote:'):]
     return pipes.quote(s) if hasattr(pipes, 'quote') else shlex.quote(s)
 
 def _make_cmd(cmd, *args):
-    print('ARGS=', args)
+    _log.debug('ARGS=%s', args)
     return ' '.join([cmd] + [_quote(str(arg)) for arg in args if arg not in (None, '')])
 
 def _run(cmd, *args):
     cmd = _make_cmd(cmd, *args)
-    print('running command: ', cmd, 'cwd=', os.getcwd())
+    _log.info('running command: %s cwd=%s', cmd, os.getcwd())
     beg_time = time.time()
     subprocess.check_call(cmd, shell=True)
-    print('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
+    _log.info('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
 
 def _run_succeeds(cmd, *args):
     try:
@@ -249,6 +260,21 @@ def _standardize_dx_url(url):
 
 # ** git-annex-related utils
 
+def _git_annex_get(f):
+    """Ensure the file exists in the local annex.  Unlike git-annex-get, follows symlinks and 
+    will get the file regardless of what the current dir is."""
+    while os.path.islink(f):
+        trg = os.readlink(f)
+        if '.git/annex/objects/' in trg:
+            break
+        if os.path.isabs(trg):
+            f = trg
+        else:
+            f = os.path.join(os.path.dirname(f), trg)
+
+    with util.file.pushd_popd(os.path.dirname(f)):
+        _run('git', 'annex', 'get', os.path.basename(f))
+
 def _git_annex_lookupkey(f):
     return _run_get_output('git', 'annex', 'lookupkey', f)
 
@@ -258,6 +284,9 @@ def _git_annex_get_metadata(key, field):
 
 def _git_annex_set_metadata(key, field, val):
     _run('git', 'annex', 'metadata', '--key='+key, '-s', field + '=' + val)
+
+def _git_annex_checkpresentkey(key, remote):
+    return _run_succeeds('git annex checkpresentkey', key, remote)
 
 def _git_annex_get_url_key(url):
     """Return the git-annex key for a url"""
@@ -594,7 +623,9 @@ def _get_workflow_inputs_spec(workflow_name, docker_img):
         return dict(optional=optional, default=default, spec=spec)
 
     input_spec_parsed = _run_get_json('womtool inputs ' + workflow_name + '.wdl')
-    return _ord_dict((input_name, _parse_input_spec(input_spec_str)), for input_name, input_spec_str in input_spec_parsed.items())
+    print('input_spec_parsed=', input_spec_parsed.items())
+    return _ord_dict(*[(input_name, _parse_input_spec(input_spec_str))
+                       for input_name, input_spec_str in input_spec_parsed.items()])
 
 # ** _construct_analysis_inputs
 
@@ -622,9 +653,9 @@ def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, a
             return workflow_defaults
 
         key = None
-        if ':' in input_source:
-            input_source, key = input_source.split(':')
-        inps = json_loadf(input_source)
+        if ':' in inputs_source:
+            inputs_source, key = inputs_source.split(':')
+        inps = _json_loadf(inputs_source)
         if key is not None:
             inps = inps[key]
 
@@ -637,7 +668,7 @@ def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, a
                                                  analysis_dir)}
         return _transform_parsed_json(inps, reroute_git_link)
 
-    inp_srcs = list(map(_load_inputs, input_sources))
+    inp_srcs = list(map(_load_inputs, inputs_sources))
 
     for inp_name, inp_spec in workflow_inputs_spec.items():
         for inp_src in inp_srcs:
@@ -645,7 +676,18 @@ def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, a
                 run_inputs[inp_name] = inp_src[inp_name]
                 break
 
+    print('CONSTRUCTED', run_inputs)
     return run_inputs
+
+# ** _stage_inputs_for_backend
+
+def _stage_inputs_for_backend(inputs, backend):
+    """Stage inputs with git links for backend"""
+    def _stage_git_link(inp):
+        if not _maps(inp, '$git_link'):
+            return inp
+        return _stage_file_for_backend(git_file_path=inp['$git_link'], backend=backend)
+    return _transform_parsed_json(inputs, _stage_git_link)
 
 # ** _get_dx_val
 def _get_dx_val(val, dx_files_dir):
@@ -906,9 +948,10 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
             (later, we'll add the ability to use different docker images for different parts)
         analysis_labels: json file specifying any analysis labels
         analysis_dir_pfx: prefix for the analysis dir
-    """
-    assert not os.path.isabs(analysis_dir)  # needed?
 
+    TODO:
+        - option to ignore input workflow name, use only stage name
+    """
     analysis_id = _create_analysis_id(workflow_name)
     _log.info('ANALYSIS_ID is %s', analysis_id)
 
@@ -927,7 +970,8 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
         _extract_wdl_from_docker_img(docker_img)
         workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
         run_inputs = _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, analysis_dir)
-        
+        run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
+        _write_json('inputs.json', **run_inputs_staged)
 
         # TODO: use git annex batch mode to determine the keys for all the file-xxxx files, then
         # use batch mode to get the keys.  use -J to parallelize.  also option to use a cache remote, as
@@ -936,47 +980,19 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
         # TODO: diff stages may have same-name inputs
         # note that dx runInput and originalInput mean the reverse of what one would think:
         # https://wiki.dnanexus.com/api-specification-v1.0.0/workflows-and-analyses
-        dx_wf_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['runInput'].items()}   # check for dups
-        dx_wf_orig_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['originalInput'].items()}   # check for dups
-        print('DX_WF_RUNINPUTS', '\n'.join(dx_wf_inputs.keys()))
-        print('DX_WF_ORIGINPUTS', '\n'.join(dx_wf_orig_inputs.keys()))
-        new_wdl_wf_inputs = collections.OrderedDict()
-        for wdl_wf_input, wdl_wf_input_descr in wdl_wf_inputs.items():
-            wdl_wf_input_full = wdl_wf_input
-            wdl_wf_input = wdl_wf_input.split('.')[-1]
-
-            def _set_input(dx_wf_input):
-                print('AAAAAAAAAAAAA wdl_wf_input=', wdl_wf_input, ' descr=', wdl_wf_input_descr, ' dx_wf_input=', dx_wf_input)
-                new_wdl_wf_inputs[wdl_wf_input_full] = get_dx_val(dx_wf_input)
-
-            if wdl_wf_input in analysis_inputs_specified:
-                _set_input(analysis_inputs_specified[wdl_wf_input])
-            elif wdl_wf_input in dx_wf_inputs:
-                print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_inputs[wdl_wf_input])
-                _set_input(dx_wf_inputs[wdl_wf_input])
-            elif (True or '(optional' not in wdl_wf_input_descr) and wdl_wf_input in dx_wf_orig_inputs:
-                print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_orig_inputs[wdl_wf_input])
-                _set_input(dx_wf_orig_inputs[wdl_wf_input])
-            else:
-                print('MISSING', wdl_wf_input, wdl_wf_input_descr)
-                assert '(optional' in wdl_wf_input_descr, \
-                    'Missing required argument: {} {}'.format(wdl_wf_input, wdl_wf_input_descr)
-
-
-        print(_pretty_print_json(new_wdl_wf_inputs))
 
         ################# put in the right docker ID!!  and find a place to keep the docker cache.
 
-        def _rewrite_paths_to_gs(val):
-            if _is_mapping(val): return {k: _rewrite_paths_to_gs(v) for k, v in val.items()}
-            if isinstance(val, list): return list(map(_rewrite_paths_to_gs, val))
-            if _is_str(val) and os.path.isfile(val):
-                assert val.startswith(input_files_dir)
-                val = 'gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/' + val[len(input_files_dir)+1:]
-            return val
-        #_run('gsutil cp -r ' + input_files_dir + '/* gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/')
+        # def _rewrite_paths_to_gs(val):
+        #     if _is_mapping(val): return {k: _rewrite_paths_to_gs(v) for k, v in val.items()}
+        #     if isinstance(val, list): return list(map(_rewrite_paths_to_gs, val))
+        #     if _is_str(val) and os.path.isfile(val):
+        #         assert val.startswith(input_files_dir)
+        #         val = 'gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/' + val[len(input_files_dir)+1:]
+        #     return val
+        # #_run('gsutil cp -r ' + input_files_dir + '/* gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/')
 
-        _write_json('inputs.json', **new_wdl_wf_inputs)
+        # _write_json('inputs.json', **new_wdl_wf_inputs)
 #            json.dump(_rewrite_paths_to_gs(new_wdl_wf_inputs), wf_out, indent=4, separators=(',', ': '))
 
         # TODO: option to update just some of the tasks.
@@ -1009,7 +1025,7 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
                     analysis_descr=analysis_descr,
                     docker_img=docker_img,
                     docker_img_hash=docker_img_hash,
-                    inputs_from_dx_analysis=analysis_inputs_from_dx_analysis,
+                    inputs_sources=str(inputs_sources),
                     analysis_id=analysis_id,
                     analysis_dir=analysis_dir,
                     submitter=getpass.getuser(),
@@ -1021,6 +1037,8 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
         _run('womtool', 'validate',  '-i',  'inputs.json', workflow_name + '.wdl')
         _log.info('Validated workflow; calling cromwell')
         _run('zip imports.zip *.wdl')
+        _run('rm *.wdl')
+
         try:
             cromwell_output_str = _run_get_output('cromwell', 'submit', workflow_name+'.wdl',
                                                   '-t', 'wdl', '-i', 'inputs.json', '-l', 'analysis_labels.json',
@@ -1056,7 +1074,6 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
         # else:
         #     util.file.make_empty('analysis_failed.txt')
 
-        _run('rm imports.zip *.wdl')
         if cromwell_returncode:
             raise RuntimeError('Cromwell failed - ' + cromwell_output_str)
 
@@ -1083,8 +1100,8 @@ def _get_docker_hash(docker_img):
     _run('docker pull ' + docker_img)
     if docker_img.startswith('sha256:'):
         return docker_img
-    digest_lines = _run_get_output("docker images --digests --no-trunc --format "
-                                   "'{{.Repository}}:{{.Tag}} {{.Digest}}'")
+    digest_lines = _run_get_output('docker', 'images', '--digests', '--no-trunc', '--format',
+                                   '{{.Repository}}:{{.Tag}} {{.Digest}}', _noquote('|'), 'grep', docker_img+':')
     digest_lines = [line for line in digest_lines.strip().split('\n') if docker_img in line]
     assert len(digest_lines) == 1
     digest_line = digest_lines[0]
@@ -1122,18 +1139,14 @@ def gather_run_results(docker_img, cromwell_output):
 
 def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('workflow_name', help='Workflow name')
+    parser.add_argument('inputs_sources', help='analysis inputs', nargs='+')
     parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/an',
                         help='directory where analysis will be stored; a unique suffix will be added')
-    parser.add_argument('--analysisInputsFromDxAnalysis', dest='analysis_inputs_from_dx_analysis',
-                        help='DNAnexus analysis ID to take analysis inputs from; specific ones can be overridden by '
-                        '--analysisInputsSpecified')
     parser.add_argument('--dockerImg', dest='docker_img', default='quay.io/broadinstitute/viral-ngs')
-    parser.add_argument('--analysisInputsSpecified', dest='analysis_inputs_specified',
-                        help='explicitly specified analysis inputs')
     parser.add_argument('--analysisDescr', dest='analysis_descr', default='an analysis', help='description of the run')
     parser.add_argument('--analysisLabels', dest='analysis_labels', nargs=2, action='append',
                         help='labels to attach to the analysis')
-    parser.add_argument('--backend', default='Locall', help='backend on which to run')
+    parser.add_argument('--backend', default='Local', help='backend on which to run')
     util.cmd.attach_main(parser, submit_analysis_wdl, split_args=True)
 
 __commands__.append(('submit_analysis_wdl', parser_submit_analysis_wdl))
@@ -1446,12 +1459,6 @@ __commands__.append(('import_from_url', parser_import_from_url))
 def _gs_stat(gs_url):
     return _run_succeeds('gsutil stat', gs_url)
 
-def _git_annex_checkpresentkey(key, remote):
-    return _run_succeeds('git annex checkpresentkey', key, remote)
-
-def _md5_base64(s):
-    return hashlib.md5(s).digest().encode('base64').strip()
-
 def _get_gs_remote_uuid():
     return '0b42380a-45f8-4b9d-82b3-e10aaf7bab6c'  # TODO determine this from git and git-annex config
 
@@ -1467,7 +1474,7 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
     fname = os.path.basename(git_file_path)
     urls_with_right_fname = [url for url in urls if url.endswith(fname)]
 
-    key = _run_get_output('git annex lookupkey', git_file_path)
+    key = _git_annex_lookupkey(git_file_path)
     gs_remote_uuid = _get_gs_remote_uuid()
     if not urls_with_right_fname:
         gs_url = '/'.join((gs_prefix, 'inp', _md5_base64(whereis['key']), fname))
@@ -1483,7 +1490,7 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
         if urls:
             _run('gsutil cp', urls[0], gs_url)
         else:
-            _run('git annex get', git_file_path)
+            _git_annex_get(git_file_path)
             _run('gsutil cp', git_file_path, gs_url)
             _run('git annex setpresentkey', key, gs_remote_uuid, 1)
         urls_with_right_fname.append(gs_url)
@@ -1492,14 +1499,13 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
     return urls_with_right_fname[0]
 
 def _stage_file_for_backend(git_file_path, backend):
-    """Ensure file exists in given backend"""
+    """Ensure file exists in filesystem of the given Cromwell backend, and return the path to the file
+    (local or cloud, depending on the backend)."""
     if backend == 'Local':
-        _run('git annex get ' + git_file_path)
-        return git_file_path
+        _git_annex_get(git_file_path)
+        return os.path.abspath(git_file_path)
     elif backend == 'JES':
         return _copy_to_gs(git_file_path)
-
-
 
 ########################################################################################################################
 
