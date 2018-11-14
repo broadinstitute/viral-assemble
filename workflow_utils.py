@@ -656,8 +656,17 @@ def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, a
         if ':' in inputs_source:
             inputs_source, key = inputs_source.split(':')
         inps = _json_loadf(inputs_source)
+        inps_orig = inps
         if key is not None:
             inps = inps[key]
+
+        # change the workflow name to ours, if needed
+        for k in set(inps):
+            if not k.startswith(workflow_name+'.'):
+                assert k.startswith(inps_orig['workflowName']+'.')
+                k_renamed=workflow_name+k[k.index('.'):]
+                print('RENAMING INPUT KEY', k, k_renamed)
+                _dict_rename_key(inps, k, k_renamed)
 
         # change the paths in any git_links to be relative to the analysis dir
         inputs_source_dir = os.path.dirname(inputs_source)
@@ -675,6 +684,21 @@ def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, a
             if inp_name in inp_src:
                 run_inputs[inp_name] = inp_src[inp_name]
                 break
+        if inp_name not in run_inputs and not inp_spec['optional']:
+            def _get_input_name_bare(inp_name):
+                return inp_name[inp_name.rindex('.')+1:]
+            inp_name_bare = _get_input_name_bare(inp_name)
+            for inp_src in inp_srcs:
+                for k in inp_src:
+                    k_bare = _get_input_name_bare(k)
+                    if k_bare == inp_name_bare:
+                        run_inputs[inp_name] = inp_src[k]
+                        break
+                if inp_name in run_inputs:
+                    break
+
+        if inp_name not in run_inputs and not inp_spec['optional']:
+            raise RuntimeError('Required input {} not specified'.format(inp_name))
 
     print('CONSTRUCTED', run_inputs)
     return run_inputs
