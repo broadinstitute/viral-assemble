@@ -1037,8 +1037,9 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
         _run('womtool', 'validate',  '-i',  'inputs.json', workflow_name + '.wdl')
         _log.info('Validated workflow; calling cromwell')
         _run('zip imports.zip *.wdl')
-        _run('rm *.wdl')
-
+        for wdl_f in os.listdir('.'):
+            if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and wdl_f != workflow_name+'.wdl':
+                os.unlink(wdl_f)
         try:
             cromwell_output_str = _run_get_output('cromwell', 'submit', workflow_name+'.wdl',
                                                   '-t', 'wdl', '-i', 'inputs.json', '-l', 'analysis_labels.json',
