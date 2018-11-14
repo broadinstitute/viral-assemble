@@ -629,7 +629,7 @@ def _get_workflow_inputs_spec(workflow_name, docker_img):
 
 # ** _construct_analysis_inputs
 
-def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, analysis_dir):
+def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir):
     """Construct the inputs for the given workflow.
 
     Args:
@@ -660,6 +660,12 @@ def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, a
         if key is not None:
             inps = inps[key]
 
+        # rename inputs, if needed
+        for k in set(inps):
+            for orig, repl in (input_name_subst or ()):
+                if orig in k:
+                    _dict_rename_key(inps, k, k.replace(orig, repl))
+
         # change the workflow name to ours, if needed
         for k in set(inps):
             if not k.startswith(workflow_name+'.'):
@@ -684,24 +690,14 @@ def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, a
             if inp_name in inp_src:
                 run_inputs[inp_name] = inp_src[inp_name]
                 break
-        if inp_name not in run_inputs and not inp_spec['optional']:
-            def _get_input_name_bare(inp_name):
-                return inp_name[inp_name.rindex('.')+1:]
-            inp_name_bare = _get_input_name_bare(inp_name)
-            for inp_src in inp_srcs:
-                for k in inp_src:
-                    k_bare = _get_input_name_bare(k)
-                    if k_bare == inp_name_bare:
-                        run_inputs[inp_name] = inp_src[k]
-                        break
-                if inp_name in run_inputs:
-                    break
 
         if inp_name not in run_inputs and not inp_spec['optional']:
             raise RuntimeError('Required input {} not specified'.format(inp_name))
 
     print('CONSTRUCTED', run_inputs)
     return run_inputs
+# end: def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir)
+
 
 # ** _stage_inputs_for_backend
 
@@ -956,6 +952,7 @@ def _parse_cromwell_output_str(cromwell_output_str):
 
 def submit_analysis_wdl(workflow_name, inputs_sources,
                         docker_img, analysis_dir_pfx,
+                        input_name_subst=(),
                         analysis_descr='', analysis_labels=None,
                         cromwell_server_url='http://localhost:8000',
                         backend='Local'):
@@ -993,7 +990,8 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
 
         _extract_wdl_from_docker_img(docker_img)
         workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
-        run_inputs = _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, analysis_dir)
+        run_inputs = _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir)
+        _write_json('inputs-git-links.json', **run_inputs)
         run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
         _write_json('inputs.json', **run_inputs_staged)
 
@@ -1165,6 +1163,7 @@ def gather_run_results(docker_img, cromwell_output):
 def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('workflow_name', help='Workflow name')
     parser.add_argument('inputs_sources', help='analysis inputs', nargs='+')
+    parser.add_argument('--inputNameSubst', dest='input_name_subst', nargs=2, action='append')
     parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/an',
                         help='directory where analysis will be stored; a unique suffix will be added')
     parser.add_argument('--dockerImg', dest='docker_img', default='quay.io/broadinstitute/viral-ngs')
