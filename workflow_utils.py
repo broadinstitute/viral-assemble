@@ -125,6 +125,13 @@ def _pretty_print_json(json_dict, sort_keys=True):
 def _write_json(fname, **json_dict):
     util.file.dump_file(fname=fname, value=_pretty_print_json(json_dict))
 
+_tz_eastern = pytz.timezone('US/Eastern')
+def _isoformat_datetime(dt):
+    return _tz_eastern.localize(dt).isoformat('T')
+
+def _isoformat_ago(**timedelta_args):
+    return (datetime.datetime.now(_tz_eastern) - datetime.timedelta(**timedelta_args)).isoformat('T')
+
 def _noquote(s):
     return '_noquote:' + str(s)
 
@@ -604,9 +611,7 @@ def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
         mdata['status'] = 'Failed'
 
     submission_datetime = datetime.datetime.fromtimestamp(float(mdata['created']) / 1000.0)
-    tz_eastern = pytz.timezone('US/Eastern')
-    mdata['submission'] = tz_eastern.localize(submission_datetime).isoformat('T')
-
+    mdata['submission'] = _isoformat_datetime(submission_datetime)
 
     _write_json(os.path.join(analysis_dir, 'metadata.json'), **mdata)
 
@@ -650,7 +655,7 @@ def _get_workflow_inputs_spec(workflow_name, docker_img):
 
 # ** _construct_analysis_inputs
 
-def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir):
+def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir, orig_cwd):
     """Construct the inputs for the given workflow.
 
     Args:
@@ -660,6 +665,7 @@ def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, i
         each source can be:
           - a json file
       analysis_dir: the analysis dir in which we are constructing the input spec
+      orig_cwd: the current working directory from which the top-level command was run
 
     Returns:
       a map from input name to a value.  values may include git_links to files under the analysis dir.
@@ -676,6 +682,12 @@ def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, i
         key = None
         if ':' in inputs_source:
             inputs_source, key = inputs_source.split(':')
+        if not os.path.isabs(inputs_source):
+            inputs_source = os.path.join(orig_cwd, inputs_source)
+        if os.path.isdir(inputs_source) and os.path.isfile(os.path.join(inputs_source, 'metadata.json')):
+            inputs_source = os.path.join(inputs_source, 'metadata.json')
+        if key is None and os.path.basename(inputs_source) == 'metadata.json':
+            key = 'inputs'
         inps = _json_loadf(inputs_source)
         inps_orig = inps
         if key is not None:
@@ -1001,6 +1013,7 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
 
     analysis_dir = os.path.abspath(os.path.join(analysis_dir_pfx + '-' + analysis_id))
     util.file.mkdir_p(analysis_dir)
+    orig_cwd = os.getcwd()
     with util.file.pushd_popd(analysis_dir):
         _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
 
@@ -1011,7 +1024,8 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
 
         _extract_wdl_from_docker_img(docker_img)
         workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
-        run_inputs = _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir)
+        run_inputs = _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir,
+                                           orig_cwd)
         _write_json('inputs-git-links.json', **run_inputs)
         run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
         _write_json('inputs.json', **run_inputs_staged)
@@ -1323,11 +1337,13 @@ class CromwellServer(object):
     def __init__(self, host):
         self.host = host
 
-    def _api(self, url):
-        return _run_get_json('curl -s -X GET "http://{}/api/workflows/v1/{}" -H "accept: application/json"'.format(self.host, url))
+    def _api(self, endpoint, query=()):
+        query_str = ('?' + urllib.urlencode(query)) if query else ''
+        return _run_get_json('curl', '-s', '-X', 'GET', 'http://{}/api/workflows/v1/{}{}'.format(self.host, endpoint, query_str),
+                             '-H', 'accept: application/json')
 
-    def get_workflows(self):
-        return self._api('query')['results']
+    def get_workflows(self, query=()):
+        return self._api(endpoint='query', query=query)['results']
     
     def get_metadata(self, workflow_id):
         return self._api('{}/metadata?expandSubWorkflows=false'.format(workflow_id))
@@ -1391,16 +1407,14 @@ def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
     return functools.reduce(operator.concat, map(_get_analysis_dirs, util.misc.make_seq(analysis_dirs_roots)), [])
 
 # ** finalize_analysis_dirs impl
-def finalize_analysis_dirs(cromwell_host, analysis_dirs_roots):
+def finalize_analysis_dirs(cromwell_host, hours_ago=24):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
     processing_stats = collections.Counter()
-    _log.info('Gathering analysis dirs...')
-    all_analysis_dirs = _gather_analysis_dirs(analysis_dirs_roots, processing_stats)
-    processing_stats['all_analysis_dirs'] = len(all_analysis_dirs)
-    _log.info('Got %d analysis dirs', len(all_analysis_dirs))
-    for wf in cromwell_server.get_workflows():
+
+    for wf in cromwell_server.get_workflows(query=[('submission', _isoformat_ago(hours=hours_ago)),
+                                                   ('status', 'Succeeded'), ('status', 'Failed')]):
         processing_stats['workflowsFromCromwell'] += 1
         mdata = cromwell_server.get_metadata(wf['id'])
         assert mdata['id'] == wf['id']
@@ -1427,8 +1441,9 @@ def finalize_analysis_dirs(cromwell_host, analysis_dirs_roots):
     _log.info('Processing stats: %s', str(processing_stats))
 
 def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
-    parser.add_argument('analysis_dirs_roots', nargs='+', help='where are analysis dirs found')
-    parser.add_argument('--cromwellHost', dest='cromwell_host', default='localhost:8000', help='cromwell server hostname')
+    parser.add_argument('--cromwellHost', dest='cromwell_host', required=True, help='cromwell server hostname')
+    parser.add_argument('--hoursAgo', dest='hours_ago', type=int, default=24,
+                        help='only consider workflows submitted this or fewer hours ago')
     util.cmd.attach_main(parser, finalize_analysis_dirs, split_args=True)
 
 __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
