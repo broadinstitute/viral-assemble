@@ -23,6 +23,9 @@ In combination, these utilities enable much of what DNAnexus enables, but:
    - allowing the use of spot/preemptible instances (which DNAnexus disallows)
    - allowing easy archiving/unarchiving of data, using git-annex commands
    - using all of git's normal mechanisms, such as branches and submodules, to organize things
+
+TODO:
+  - make things work with v7 git-annex repos
 """
 
 __author__ = "ilya@broadinstitute.org"
@@ -112,6 +115,9 @@ def _dict_rename_key(d, old_key, new_key):
     del d[old_key]
     return d
 
+def _md5_base64(s):
+    return hashlib.md5(s).digest().encode('base64').strip()
+
 def _pretty_print_json(json_dict, sort_keys=True):
     """Return a pretty-printed version of a dict converted to json, as a string."""
     return json.dumps(json_dict, indent=4, separators=(',', ': '), sort_keys=sort_keys)
@@ -119,19 +125,31 @@ def _pretty_print_json(json_dict, sort_keys=True):
 def _write_json(fname, **json_dict):
     util.file.dump_file(fname=fname, value=_pretty_print_json(json_dict))
 
+_tz_eastern = pytz.timezone('US/Eastern')
+def _isoformat_datetime(dt):
+    return _tz_eastern.localize(dt).isoformat('T')
+
+def _isoformat_ago(**timedelta_args):
+    return (datetime.datetime.now(_tz_eastern) - datetime.timedelta(**timedelta_args)).isoformat('T')
+
+def _noquote(s):
+    return '_noquote:' + str(s)
+
 def _quote(s):
+    s = str(s)
+    if s.startswith('_noquote:'): return s[len('_noquote:'):]
     return pipes.quote(s) if hasattr(pipes, 'quote') else shlex.quote(s)
 
 def _make_cmd(cmd, *args):
-    print('ARGS=', args)
+    _log.debug('ARGS=%s', args)
     return ' '.join([cmd] + [_quote(str(arg)) for arg in args if arg not in (None, '')])
 
 def _run(cmd, *args):
     cmd = _make_cmd(cmd, *args)
-    print('running command: ', cmd, 'cwd=', os.getcwd())
+    _log.info('running command: %s cwd=%s', cmd, os.getcwd())
     beg_time = time.time()
     subprocess.check_call(cmd, shell=True)
-    print('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
+    _log.info('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
 
 def _run_succeeds(cmd, *args):
     try:
@@ -193,6 +211,9 @@ def _json_to_org(val, org_file, depth=1, heading='root'):
                 if len(val):
                     for i, v in enumerate(val):
                         _recurse(v, heading=str(i), depth=depth+2)
+            elif _maps(val, '$git_link'):
+                rel_path = val['$git_link']
+                out.write(' - [[file:{}][{}]]\n'.format(rel_path, os.path.basename(rel_path)))
             elif isinstance(val, collections.Mapping):
                 out.write(' - map of ' + str(len(val)) + '\n')
                 if len(val):
@@ -246,8 +267,26 @@ def _standardize_dx_url(url):
 
 # ** git-annex-related utils
 
+def _git_annex_get(f):
+    """Ensure the file exists in the local annex.  Unlike git-annex-get, follows symlinks and 
+    will get the file regardless of what the current dir is."""
+    while os.path.islink(f):
+        trg = os.readlink(f)
+        if '.git/annex/objects/' in trg:
+            break
+        if os.path.isabs(trg):
+            f = trg
+        else:
+            f = os.path.join(os.path.dirname(f), trg)
+
+    with util.file.pushd_popd(os.path.dirname(f)):
+        _run('git', 'annex', 'get', os.path.basename(f))
+
 def _git_annex_lookupkey(f):
     return _run_get_output('git', 'annex', 'lookupkey', f)
+
+def _git_annex_add(f):
+    _run('git', 'annex', 'add', f)
 
 def _git_annex_get_metadata(key, field):
     ga_mdata = _run_get_json('git', 'annex', 'metadata', '--json', '--key='+key)
@@ -255,6 +294,9 @@ def _git_annex_get_metadata(key, field):
 
 def _git_annex_set_metadata(key, field, val):
     _run('git', 'annex', 'metadata', '--key='+key, '-s', field + '=' + val)
+
+def _git_annex_checkpresentkey(key, remote):
+    return _run_succeeds('git annex checkpresentkey', key, remote)
 
 def _git_annex_get_url_key(url):
     """Return the git-annex key for a url"""
@@ -296,16 +338,296 @@ def parser_json_to_org(parser=argparse.ArgumentParser()):
 __commands__.append(('json_to_org', parser_json_to_org))
 
 
+
+# * import_dx_analysis
+
+# ** import_dx_analysis utils
+def _resolve_dx_link_to_dx_file_id_or_value(val, dx_analysis_id):
+    """If `val` represents a DNAnexus link to a file, return {$dnanexus_link: file-xxxx}.
+    If `val` represents a DNAnexus link to a value, return that value.
+    Else, return `val` unchanged.
+    """
+
+    #print('parsing val: ', val)
+    recurse = functools.partial(_resolve_dx_link_to_dx_file_id_or_value,
+                                dx_analysis_id=dx_analysis_id)
+    if not _maps(val, '$dnanexus_link'):
+        return val
+
+    link = val['$dnanexus_link']
+    if _maps(link, 'stage') and ('field' in link or 'outputField' in link):
+        print('link is ', link)
+        linked_analysis_descr = _dx_describe(link.get('analysis', dx_analysis_id))
+        linked_field = link['field'] if 'field' in link else link['outputField']
+        return recurse(val=linked_analysis_descr['output'][link['stage']+'.'+linked_field])
+    elif (_is_str(link) and link.startswith('file-')) or \
+         (isinstance(link, collections.Mapping) and 'id' in link \
+          and _is_str(link['id']) and link['id'].startswith('file-')):
+        if _is_str(link) and link.startswith('file-'):
+            dxid = link
+        else:
+            dxid = link['id']
+        return {'$dnanexus_link': dxid}
+    raise RuntimeError('Unknown $dnanexus_link: {}'.format(val))
+
+def _resolve_link_dx(val, git_file_dir, dx_analysis_id, _cache=None):
+    val_resolved = _resolve_dx_link_to_dx_file_id_or_value(val=val, dx_analysis_id=dx_analysis_id)
+    if _maps(val_resolved, '$dnanexus_link'):
+        dx_file_id = val_resolved['$dnanexus_link']
+        assert dx_file_id.startswith('file-')
+        if _maps(_cache, dx_file_id):
+            val_resolved = copy.deepcopy(_cache[dx_file_id])
+            print('RESOLVED', val, ' TO ', val_resolved, ' FROM CACHE')
+        else:
+            util.file.mkdir_p(git_file_dir)
+            val_resolved = {'$git_link': import_from_url(url='dx://' + dx_file_id, git_file_path=git_file_dir, fast=False)}
+            print('RESOLVED', val, ' TO ', val_resolved)
+            if _cache is not None:
+                _cache[dx_file_id] = val_resolved
+    return val_resolved
+
+def _resolve_link_local_path(val, git_file_dir):
+    if not (_is_str(val) and os.path.isfile(val) and os.access(val, os.R_OK)):
+        return val
+    util.file.mkdir_p(git_file_dir)
+    fname = os.path.join(git_file_dir, os.path.basename(val))
+    if os.path.exists(fname):
+        os.unlink(fname)
+    shutil.copyfile(val, fname)
+    assert os.path.isfile(fname)
+    _git_annex_add(fname)
+    _log.debug('GIT LINK TO %s', fname)
+    return {'$git_link': fname}
+    
+    # for now can just copy (or hardlink? careful) it here and git-annex-add
+    # later can see if can use known md5 from cromwell's caching calculations
+
+    # what if it's a dir?  
+
+def _resolve_link(val, git_file_dir, methods):
+    for method in methods:
+        result = method(val=val, git_file_dir=git_file_dir)
+        if result is not val: return result
+    return val
+
+def _resolve_links_in_parsed_json(val, rel_to_dir, methods, relpath='files'):
+    """Given a parsed json structure, replace in it references to files (in various forms) with one uniform
+    representation, a 'git link'.  A git link contains a relative path (relative to `analysis_dir`)
+    pointing to a git file, typically a git-annex file.
+    """
+    def handle_node(val, path):
+        maybe_resolve_link = _resolve_link(val=val,
+                                           git_file_dir=os.path.join(rel_to_dir, relpath,
+                                                                     *map(str, path)), methods=methods)
+        if _maps(maybe_resolve_link, '$git_link'):
+            maybe_resolve_link = {'$git_link': os.path.relpath(maybe_resolve_link['$git_link'], rel_to_dir)}
+        return maybe_resolve_link
+        
+    return _transform_parsed_json(val, node_handler=handle_node)
+
+# ** deleted code
+
+# def _resolve_links_in_dx_analysis(dx_analysis_id, analysis_dir):
+#     analysis_descr = _dx_describe(dx_analysis_id)
+#     del analysis_descr['originalInput']
+#     methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id)]
+#     resolved = _resolve_links_in_parsed_json(val=analysis_descr, rel_to_dir=analysis_dir, methods=methods)
+#     _write_json(os.path.join(analysis_dir, 'dx_resolved.json'), **resolved)
+
+# def _resolve_link_dx_old(val, dx_analysis_id):
+#     """Resolve a dx value: if it is a scalar, just return that;
+#     if it is a dx link, resolve the link to a file-xxxx identifier."""
+
+#     print('parsing val: ', val)
+#     if not (_is_mapping(val) and '$dnanexus_link' in val):
+#         return None
+
+#     recurs = functools.partial(_resolve_dx_ids_in_val, analysis_descr=analysis_descr)
+#     if isinstance(val, list):
+#         return [recurs(val=v, git_path = os.path.join(git_path, str(i))) for i, v in enumerate(val)]
+#     if isinstance(val, collections.Mapping):
+#         if  '$dnanexus_link' not in val:
+#             return collections.OrderedDict([(k, recurs(val=v, git_path=os.path.join(git_path, util.file.string_to_file_name(k))))
+#                                             for k, v in val.items()])
+#         link = val['$dnanexus_link']
+#         if isinstance(link, collections.Mapping) and 'stage' in link and ('field' in link or 'outputField' in link):
+#             print('link is ', link)
+#             linked_analysis_descr = dxpy.DXAnalysis(link['analysis']).describe() if 'analysis' in link else analysis_descr
+#             linked_field = link['field'] if 'field' in link else link['outputField']
+#             return recurs(val=linked_analysis_descr['output'][link['stage']+'.'+linked_field],
+#                           analysis_descr=analysis_descr, git_path=git_path)
+#         elif (_is_str(link) and link.startswith('file-')) or (isinstance(link, collections.Mapping) and 'id' in link and _is_str(link['id']) and link['id'].startswith('file-')):
+#             if _is_str(link) and link.startswith('file-'):
+#                 dxid = link
+#             else:
+#                 dxid = link['id']
+
+
+
+
+#     def _resolve_dx_ids_in_val(val, analysis_descr, git_path):
+#         """Resolve a dx value: if it is a scalar, just return that;
+#         if it is a dx link, resolve the link to a file-xxxx identifier."""
+
+#         print('parsing val: ', val)
+
+#         recurs = functools.partial(_resolve_dx_ids_in_val, analysis_descr=analysis_descr)
+#         if isinstance(val, list):
+#             return [recurs(val=v, git_path = os.path.join(git_path, str(i))) for i, v in enumerate(val)]
+#         if isinstance(val, collections.Mapping):
+#             if  '$dnanexus_link' not in val:
+#                 return collections.OrderedDict([(k, recurs(val=v, git_path=os.path.join(git_path, util.file.string_to_file_name(k))))
+#                                                 for k, v in val.items()])
+#             link = val['$dnanexus_link']
+#             if isinstance(link, collections.Mapping) and 'stage' in link and ('field' in link or 'outputField' in link):
+#                 print('link is ', link)
+#                 linked_analysis_descr = dxpy.DXAnalysis(link['analysis']).describe() if 'analysis' in link else analysis_descr
+#                 linked_field = link['field'] if 'field' in link else link['outputField']
+#                 return recurs(val=linked_analysis_descr['output'][link['stage']+'.'+linked_field],
+#                               analysis_descr=analysis_descr, git_path=git_path)
+#             elif (_is_str(link) and link.startswith('file-')) or (isinstance(link, collections.Mapping) and 'id' in link and _is_str(link['id']) and link['id'].startswith('file-')):
+#                 if _is_str(link) and link.startswith('file-'):
+#                     dxid = link
+#                 else:
+#                     dxid = link['id']
+#                 util.file.mkdir_p(git_path)
+#                 git_file_path = import_from_url(url='dx://' + dxid, git_file_path = git_path)
+#                 return _ord_dict(('$git_relpath', os.path.relpath(git_file_path, )) # return { $git_link: }
+#                 descr = dxpy.describe(dxid)
+#                 dx_file = os.path.join(dx_files_dir, dxid) + '-' + descr['name']
+#                 file_size = int(descr['size'])
+
+#                 # see if the file is cached in git-annex
+#                 ga_mdata = _run_get_json('git annex metadata --json --key=WORM-s0-m0--dx-' + dxid)
+#                 if ga_mdata['fields']:
+#                     ga_key = ga_mdata['fields']['ga_key'][0]
+#                     _run('git annex get --key', ga_key)
+#                     _run('git annex fromkey', ga_key, dx_file)
+
+#                 if not os.path.isfile(dx_file) or os.path.getsize(dx_file) != file_size:
+#                     print('fetching', dxid, 'to', dx_file)
+#                     # TODO: check that there is enough free space (with some to spare)
+#                     if os.path.isfile(dx_file):
+#                         os.unlink(dx_file)
+#                     fs_info = os.statvfs(dx_files_dir)
+#                     assert file_size < fs_info.f_bsize * fs_info.f_bavail
+#                     dxpy.bindings.dxfile_functions.download_dxfile(dxid=dxid, filename=dx_file+'.fetching', show_progress=True)
+#                     assert os.path.getsize(dx_file+'.fetching') == file_size
+#                     os.rename(dx_file+'.fetching', dx_file)
+#                     print('fetched', dxid, 'to', dx_file)
+#                     print('curdir is ', os.getcwd())
+#                     _run('git annex add', dx_file)
+#                     ga_key = _run_get_output('git annex lookupkey ' + dx_file).strip()
+#                     _run('git annex metadata -s', 'dxid+=' + dxid, dx_file)
+#                     # record a mapping from the dxid to the git-annex key
+#                     _run('git annex metadata', '--key=WORM-s0-m0-dx-'+dxid, '-s', 'ga_key='+ga_key)
+#                     # register a URL that can be used to re-fetch this file from DNAnexus;
+#                     # the URL is only valid if the 'run_dx_url_server' command is running.
+#                     #_run('git annex registerurl ' + ga_key + ' ' + ' http://localhost:8080/dx/' + dxid)
+#             else:
+#                 raise RuntimeError('Cannot parse dx link {}'.format(link))
+#             return dx_file
+#         else:
+#             return val
+# # end: def _resolve_dx_val(val, analysis_descr, dx_files_dir = 'input_files')
+
+
+
+
+# def _record_dx_metadata(val, analysis_dir, root_dir):
+#     """If 'val' is a filename, return a dict representing the file and some metadata about it;
+#     otherwise, return val as-is."""
+#     if isinstance(val, list): return [_record_file_metadata(v, analysis_dir, root_dir) for v in val]
+#     if _is_mapping(val): return collections.OrderedDict([(k, _record_file_metadata(v, analysis_dir, root_dir))
+#                                                           for k, v in val.items()])
+#     if not (_is_str(val) and (os.path.isfile(val) or os.path.isdir(val))): return val
+#     file_info = collections.OrderedDict([('_is_file' if os.path.isfile(val) else '_is_dir', True)])
+#     assert val.startswith(analysis_dir) or val.startswith(root_dir)
+#     if val.startswith(analysis_dir):
+#         relpath = os.path.relpath(val, analysis_dir)
+#         abspath = os.path.join(analysis_dir, relpath)
+#     else:
+#         cromwell_executions_dir = os.path.dirname(os.path.dirname(root_dir))
+#         relpath = os.path.relpath(val, cromwell_executions_dir)
+#         abspath = os.path.join(analysis_dir, 'output',
+#                                'call_logs' if os.path.basename(val) in ('stdout', 'stderr') else 'outputs', relpath)
+#         if os.path.isfile(val) and not os.path.isfile(abspath):
+#             print('LINKING {} to {}'.format(val, abspath))
+#             util.file.mkdir_p(os.path.dirname(abspath))
+#             shutil.copy(val, abspath)
+#         if os.path.isdir(val):
+#             util.file.mkdir_p(abspath)
+
+#     assert os.path.isabs(abspath) and abspath.startswith(analysis_dir), \
+#         'bad abspath: {} analysis_dir: {}'.format(abspath, analysis_dir)
+#     relpath = os.path.relpath(abspath, analysis_dir)
+#     assert not os.path.isabs(relpath), 'should be relative: {}'.format(relpath)
+#     assert os.path.isfile(abspath) or os.path.isdir(abspath), 'not file or dir: {}'.format(abspath)
+#     assert os.path.isdir(abspath) or os.path.getsize(abspath) == os.path.getsize(val)
+#     file_info['relpath'] = relpath
+#     if os.path.isfile(abspath):
+#         file_info['size'] = os.path.getsize(abspath)
+#         file_info['md5'] = _run_get_output('md5sum ' + abspath).strip().split()[0]
+#     return file_info
+
+# ** import_dx_analysis impl
+def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
+    """Import a DNAnexus analysis into git, in our analysis dir format."""
+
+    analysis_dir = analysis_dir_pfx + 'dx-' + dx_analysis_id
+    util.file.mkdir_p(analysis_dir)
+    mdata = _dx_describe(dx_analysis_id)
+
+    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id, _cache={})]
+    mdata = _resolve_links_in_parsed_json(val=mdata, rel_to_dir=analysis_dir, methods=methods)
+
+    # convert to Cromwell's metadata format:
+    # https://cromwell.readthedocs.io/en/develop/api/RESTAPI/#workflowmetadataresponse
+
+    mdata['_metadata_version'] = AnalysisDir.METADATA_VERSION
+    mdata['labels'] = _ord_dict(('platform', 'dnanexus'))
+    mdata['workflowName'] = mdata['executableName']
+
+    stage2name = {}
+    for stage in mdata['stages']:
+        if _maps(stage, 'id', 'execution'):
+            stage2name[stage['id']] = stage['execution']['name']
+
+    for mdata_rec in ('input', 'output', 'runInput'):
+        for k in mdata[mdata_rec]:
+            stage_id = k.split('.')[0]
+            if stage_id in stage2name:
+                _dict_rename_key(mdata[mdata_rec], k,
+                                 mdata['workflowName']+'.'+stage2name[stage_id]+k[len(stage_id):])
+
+    _dict_rename_key(mdata, 'input', 'inputs')
+    _dict_rename_key(mdata, 'output', 'outputs')
+    _dict_rename_key(mdata, 'state', 'status')
+    del mdata['originalInput']  # same as 'input'
+
+    if mdata['status'] == 'done':
+        mdata['status'] = 'Succeeded'
+    elif mdata['status'] == 'failed':
+        mdata['status'] = 'Failed'
+
+    submission_datetime = datetime.datetime.fromtimestamp(float(mdata['created']) / 1000.0)
+    mdata['submission'] = _isoformat_datetime(submission_datetime)
+
+    _write_json(os.path.join(analysis_dir, 'metadata.json'), **mdata)
+
+def parser_import_dx_analysis(parser=argparse.ArgumentParser()):
+    parser.add_argument('dx_analysis_id', help='dnanexus analysis id')
+    parser.add_argument('analysis_dir_pfx', help='analysis dir prefix; analysis id will be added to it.')
+    util.cmd.attach_main(parser, import_dx_analysis, split_args=True)
+
+__commands__.append(('import_dx_analysis', parser_import_dx_analysis))
+
+
 # * submit_analysis_wdl
-# ** get_workflow_inputs
+# ** _get_workflow_inputs_spec
 
-
-#
-# given a dx analysis, run it locally
-#
-
-def get_workflow_inputs(workflow_name, docker_img):
-    """Run womtool to get the inputs of the wdl workflow"""
+def _extract_wdl_from_docker_img(docker_img):
+    """Extracts from docker image the workflow and task .wdl files into the current directory"""
     _run('docker run --rm ' + docker_img + ' tar cf - source/pipes/WDL > wdl.tar')
     _run('tar xvf wdl.tar')
     for f in glob.glob('source/pipes/WDL/workflows/*.wdl'):
@@ -314,8 +636,111 @@ def get_workflow_inputs(workflow_name, docker_img):
         shutil.copy(f, '.')
     shutil.rmtree('source')
     os.unlink('wdl.tar')
-    return _run_get_json('womtool inputs ' + workflow_name + '.wdl')
-    
+
+def _get_workflow_inputs_spec(workflow_name, docker_img):
+    """Run womtool to get the inputs of the wdl workflow"""
+
+    def _parse_input_spec(spec):
+        optional = '(optional' in spec and spec.endswith(')')
+        default = None
+        opt_str = '(optional, default = '
+        if opt_str in spec:
+            default = _json_loads(spec[spec.rindex(opt_str)+len(opt_str):-1])
+        return dict(optional=optional, default=default, spec=spec)
+
+    input_spec_parsed = _run_get_json('womtool inputs ' + workflow_name + '.wdl')
+    print('input_spec_parsed=', input_spec_parsed.items())
+    return _ord_dict(*[(input_name, _parse_input_spec(input_spec_str))
+                       for input_name, input_spec_str in input_spec_parsed.items()])
+
+# ** _construct_analysis_inputs
+
+def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir, orig_cwd):
+    """Construct the inputs for the given workflow.
+
+    Args:
+      workflow_name: name of the wdl workflow
+      workflow_inputs_spec: input spec as output by womtool (parsed json)
+      inputs_sources: ordered list of sources from which to take inputs.
+        each source can be:
+          - a json file
+      analysis_dir: the analysis dir in which we are constructing the input spec
+      orig_cwd: the current working directory from which the top-level command was run
+
+    Returns:
+      a map from input name to a value.  values may include git_links to files under the analysis dir.
+    """
+    run_inputs = _ord_dict()
+
+    workflow_defaults = { input_name: input_spec['default'] for input_name, input_spec in workflow_inputs_spec.items()
+                          if input_spec.get('default') is not None }
+
+    def _load_inputs(inputs_source):
+        if inputs_source == '_workflow_defaults':
+            return workflow_defaults
+
+        key = None
+        if ':' in inputs_source:
+            inputs_source, key = inputs_source.split(':')
+        if not os.path.isabs(inputs_source):
+            inputs_source = os.path.join(orig_cwd, inputs_source)
+        if os.path.isdir(inputs_source) and os.path.isfile(os.path.join(inputs_source, 'metadata.json')):
+            inputs_source = os.path.join(inputs_source, 'metadata.json')
+        if key is None and os.path.basename(inputs_source) == 'metadata.json':
+            key = 'inputs'
+        inps = _json_loadf(inputs_source)
+        inps_orig = inps
+        if key is not None:
+            inps = inps[key]
+
+        # rename inputs, if needed
+        for k in set(inps):
+            for orig, repl in (input_name_subst or ()):
+                if orig in k:
+                    _dict_rename_key(inps, k, k.replace(orig, repl))
+
+        # change the workflow name to ours, if needed
+        for k in set(inps):
+            if not k.startswith(workflow_name+'.'):
+                assert k.startswith(inps_orig['workflowName']+'.')
+                k_renamed=workflow_name+k[k.index('.'):]
+                print('RENAMING INPUT KEY', k, k_renamed)
+                _dict_rename_key(inps, k, k_renamed)
+
+        # change the paths in any git_links to be relative to the analysis dir
+        inputs_source_dir = os.path.dirname(inputs_source)
+        def reroute_git_link(val):
+            if not _maps(val, '$git_link'):
+                return val
+            return {'$git_link': os.path.relpath(os.path.join(inputs_source_dir, val['$git_link']),
+                                                 analysis_dir)}
+        return _transform_parsed_json(inps, reroute_git_link)
+
+    inp_srcs = list(map(_load_inputs, inputs_sources))
+
+    for inp_name, inp_spec in workflow_inputs_spec.items():
+        for inp_src in inp_srcs:
+            if inp_name in inp_src:
+                run_inputs[inp_name] = inp_src[inp_name]
+                break
+
+        if inp_name not in run_inputs and not inp_spec['optional']:
+            raise RuntimeError('Required input {} not specified'.format(inp_name))
+
+    print('CONSTRUCTED', run_inputs)
+    return run_inputs
+# end: def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir)
+
+
+# ** _stage_inputs_for_backend
+
+def _stage_inputs_for_backend(inputs, backend):
+    """Stage inputs with git links for backend"""
+    def _stage_git_link(inp):
+        if not _maps(inp, '$git_link'):
+            return inp
+        return _stage_file_for_backend(git_file_path=inp['$git_link'], backend=backend)
+    return _transform_parsed_json(inputs, _stage_git_link)
 
 # ** _get_dx_val
 def _get_dx_val(val, dx_files_dir):
@@ -556,278 +981,11 @@ def _parse_cromwell_output_str(cromwell_output_str):
     json_end = cromwell_output_str.index('\n}\n', json_beg) + 2
     return _json_loads(cromwell_output_str[json_beg:json_end])
 
-# * import_dx_analysis
+# ** submit_analysis_wdl impl
 
-# ** import_dx_analysis utils
-def _resolve_dx_link_to_dx_file_id_or_value(val, dx_analysis_id):
-    """If `val` represents a DNAnexus link to a file, return {$dnanexus_link: file-xxxx}.
-    If `val` represents a DNAnexus link to a value, return that value.
-    Else, return `val` unchanged.
-    """
-
-    #print('parsing val: ', val)
-    recurse = functools.partial(_resolve_dx_link_to_dx_file_id_or_value,
-                                dx_analysis_id=dx_analysis_id)
-    if not _maps(val, '$dnanexus_link'):
-        return val
-
-    link = val['$dnanexus_link']
-    if _maps(link, 'stage') and ('field' in link or 'outputField' in link):
-        print('link is ', link)
-        linked_analysis_descr = _dx_describe(link.get('analysis', dx_analysis_id))
-        linked_field = link['field'] if 'field' in link else link['outputField']
-        return recurse(val=linked_analysis_descr['output'][link['stage']+'.'+linked_field])
-    elif (_is_str(link) and link.startswith('file-')) or \
-         (isinstance(link, collections.Mapping) and 'id' in link \
-          and _is_str(link['id']) and link['id'].startswith('file-')):
-        if _is_str(link) and link.startswith('file-'):
-            dxid = link
-        else:
-            dxid = link['id']
-        return {'$dnanexus_link': dxid}
-    raise RuntimeError('Unknown $dnanexus_link: {}'.format(val))
-
-def _resolve_link_dx(val, git_file_dir, dx_analysis_id, _cache=None):
-    val_resolved = _resolve_dx_link_to_dx_file_id_or_value(val=val, dx_analysis_id=dx_analysis_id)
-    if _maps(val_resolved, '$dnanexus_link'):
-        dx_file_id = val_resolved['$dnanexus_link']
-        assert dx_file_id.startswith('file-')
-        if _maps(_cache, dx_file_id):
-            val_resolved = copy.deepcopy(_cache[dx_file_id])
-            print('RESOLVED', val, ' TO ', val_resolved, ' FROM CACHE')
-        else:
-            util.file.mkdir_p(git_file_dir)
-            val_resolved = {'$git_link': import_from_url(url='dx://' + dx_file_id, git_file_path=git_file_dir, fast=False)}
-            print('RESOLVED', val, ' TO ', val_resolved)
-            if _cache is not None:
-                _cache[dx_file_id] = val_resolved
-    return val_resolved
-
-def _resolve_link(val, git_file_dir, methods):
-    for method in methods:
-        result = method(val=val, git_file_dir=git_file_dir)
-        if result is not val: return result
-    return val
-
-def _resolve_links_in_parsed_json(val, rel_to_dir, methods, relpath='files'):
-    """Given a parsed json structure, replace in it references to files (in various forms) with one uniform
-    representation, a 'git link'.  A git link contains a relative path (relative to `analysis_dir`)
-    pointing to a git file, typically a git-annex file.
-    """
-    def handle_node(val, path):
-        maybe_resolve_link = _resolve_link(val=val,
-                                           git_file_dir=os.path.join(rel_to_dir, relpath,
-                                                                     *map(str, path)), methods=methods)
-        if _maps(maybe_resolve_link, '$git_link'):
-            maybe_resolve_link = {'$git_link': os.path.relpath(maybe_resolve_link['$git_link'], rel_to_dir)}
-        return maybe_resolve_link
-        
-    return _transform_parsed_json(val, node_handler=handle_node)
-
-# ** deleted code
-
-# def _resolve_links_in_dx_analysis(dx_analysis_id, analysis_dir):
-#     analysis_descr = _dx_describe(dx_analysis_id)
-#     del analysis_descr['originalInput']
-#     methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id)]
-#     resolved = _resolve_links_in_parsed_json(val=analysis_descr, rel_to_dir=analysis_dir, methods=methods)
-#     _write_json(os.path.join(analysis_dir, 'dx_resolved.json'), **resolved)
-
-# def _resolve_link_dx_old(val, dx_analysis_id):
-#     """Resolve a dx value: if it is a scalar, just return that;
-#     if it is a dx link, resolve the link to a file-xxxx identifier."""
-
-#     print('parsing val: ', val)
-#     if not (_is_mapping(val) and '$dnanexus_link' in val):
-#         return None
-
-#     recurs = functools.partial(_resolve_dx_ids_in_val, analysis_descr=analysis_descr)
-#     if isinstance(val, list):
-#         return [recurs(val=v, git_path = os.path.join(git_path, str(i))) for i, v in enumerate(val)]
-#     if isinstance(val, collections.Mapping):
-#         if  '$dnanexus_link' not in val:
-#             return collections.OrderedDict([(k, recurs(val=v, git_path=os.path.join(git_path, util.file.string_to_file_name(k))))
-#                                             for k, v in val.items()])
-#         link = val['$dnanexus_link']
-#         if isinstance(link, collections.Mapping) and 'stage' in link and ('field' in link or 'outputField' in link):
-#             print('link is ', link)
-#             linked_analysis_descr = dxpy.DXAnalysis(link['analysis']).describe() if 'analysis' in link else analysis_descr
-#             linked_field = link['field'] if 'field' in link else link['outputField']
-#             return recurs(val=linked_analysis_descr['output'][link['stage']+'.'+linked_field],
-#                           analysis_descr=analysis_descr, git_path=git_path)
-#         elif (_is_str(link) and link.startswith('file-')) or (isinstance(link, collections.Mapping) and 'id' in link and _is_str(link['id']) and link['id'].startswith('file-')):
-#             if _is_str(link) and link.startswith('file-'):
-#                 dxid = link
-#             else:
-#                 dxid = link['id']
-
-
-
-
-#     def _resolve_dx_ids_in_val(val, analysis_descr, git_path):
-#         """Resolve a dx value: if it is a scalar, just return that;
-#         if it is a dx link, resolve the link to a file-xxxx identifier."""
-
-#         print('parsing val: ', val)
-
-#         recurs = functools.partial(_resolve_dx_ids_in_val, analysis_descr=analysis_descr)
-#         if isinstance(val, list):
-#             return [recurs(val=v, git_path = os.path.join(git_path, str(i))) for i, v in enumerate(val)]
-#         if isinstance(val, collections.Mapping):
-#             if  '$dnanexus_link' not in val:
-#                 return collections.OrderedDict([(k, recurs(val=v, git_path=os.path.join(git_path, util.file.string_to_file_name(k))))
-#                                                 for k, v in val.items()])
-#             link = val['$dnanexus_link']
-#             if isinstance(link, collections.Mapping) and 'stage' in link and ('field' in link or 'outputField' in link):
-#                 print('link is ', link)
-#                 linked_analysis_descr = dxpy.DXAnalysis(link['analysis']).describe() if 'analysis' in link else analysis_descr
-#                 linked_field = link['field'] if 'field' in link else link['outputField']
-#                 return recurs(val=linked_analysis_descr['output'][link['stage']+'.'+linked_field],
-#                               analysis_descr=analysis_descr, git_path=git_path)
-#             elif (_is_str(link) and link.startswith('file-')) or (isinstance(link, collections.Mapping) and 'id' in link and _is_str(link['id']) and link['id'].startswith('file-')):
-#                 if _is_str(link) and link.startswith('file-'):
-#                     dxid = link
-#                 else:
-#                     dxid = link['id']
-#                 util.file.mkdir_p(git_path)
-#                 git_file_path = import_from_url(url='dx://' + dxid, git_file_path = git_path)
-#                 return _ord_dict(('$git_relpath', os.path.relpath(git_file_path, )) # return { $git_link: }
-#                 descr = dxpy.describe(dxid)
-#                 dx_file = os.path.join(dx_files_dir, dxid) + '-' + descr['name']
-#                 file_size = int(descr['size'])
-
-#                 # see if the file is cached in git-annex
-#                 ga_mdata = _run_get_json('git annex metadata --json --key=WORM-s0-m0--dx-' + dxid)
-#                 if ga_mdata['fields']:
-#                     ga_key = ga_mdata['fields']['ga_key'][0]
-#                     _run('git annex get --key', ga_key)
-#                     _run('git annex fromkey', ga_key, dx_file)
-
-#                 if not os.path.isfile(dx_file) or os.path.getsize(dx_file) != file_size:
-#                     print('fetching', dxid, 'to', dx_file)
-#                     # TODO: check that there is enough free space (with some to spare)
-#                     if os.path.isfile(dx_file):
-#                         os.unlink(dx_file)
-#                     fs_info = os.statvfs(dx_files_dir)
-#                     assert file_size < fs_info.f_bsize * fs_info.f_bavail
-#                     dxpy.bindings.dxfile_functions.download_dxfile(dxid=dxid, filename=dx_file+'.fetching', show_progress=True)
-#                     assert os.path.getsize(dx_file+'.fetching') == file_size
-#                     os.rename(dx_file+'.fetching', dx_file)
-#                     print('fetched', dxid, 'to', dx_file)
-#                     print('curdir is ', os.getcwd())
-#                     _run('git annex add', dx_file)
-#                     ga_key = _run_get_output('git annex lookupkey ' + dx_file).strip()
-#                     _run('git annex metadata -s', 'dxid+=' + dxid, dx_file)
-#                     # record a mapping from the dxid to the git-annex key
-#                     _run('git annex metadata', '--key=WORM-s0-m0-dx-'+dxid, '-s', 'ga_key='+ga_key)
-#                     # register a URL that can be used to re-fetch this file from DNAnexus;
-#                     # the URL is only valid if the 'run_dx_url_server' command is running.
-#                     #_run('git annex registerurl ' + ga_key + ' ' + ' http://localhost:8080/dx/' + dxid)
-#             else:
-#                 raise RuntimeError('Cannot parse dx link {}'.format(link))
-#             return dx_file
-#         else:
-#             return val
-# # end: def _resolve_dx_val(val, analysis_descr, dx_files_dir = 'input_files')
-
-
-
-
-# def _record_dx_metadata(val, analysis_dir, root_dir):
-#     """If 'val' is a filename, return a dict representing the file and some metadata about it;
-#     otherwise, return val as-is."""
-#     if isinstance(val, list): return [_record_file_metadata(v, analysis_dir, root_dir) for v in val]
-#     if _is_mapping(val): return collections.OrderedDict([(k, _record_file_metadata(v, analysis_dir, root_dir))
-#                                                           for k, v in val.items()])
-#     if not (_is_str(val) and (os.path.isfile(val) or os.path.isdir(val))): return val
-#     file_info = collections.OrderedDict([('_is_file' if os.path.isfile(val) else '_is_dir', True)])
-#     assert val.startswith(analysis_dir) or val.startswith(root_dir)
-#     if val.startswith(analysis_dir):
-#         relpath = os.path.relpath(val, analysis_dir)
-#         abspath = os.path.join(analysis_dir, relpath)
-#     else:
-#         cromwell_executions_dir = os.path.dirname(os.path.dirname(root_dir))
-#         relpath = os.path.relpath(val, cromwell_executions_dir)
-#         abspath = os.path.join(analysis_dir, 'output',
-#                                'call_logs' if os.path.basename(val) in ('stdout', 'stderr') else 'outputs', relpath)
-#         if os.path.isfile(val) and not os.path.isfile(abspath):
-#             print('LINKING {} to {}'.format(val, abspath))
-#             util.file.mkdir_p(os.path.dirname(abspath))
-#             shutil.copy(val, abspath)
-#         if os.path.isdir(val):
-#             util.file.mkdir_p(abspath)
-
-#     assert os.path.isabs(abspath) and abspath.startswith(analysis_dir), \
-#         'bad abspath: {} analysis_dir: {}'.format(abspath, analysis_dir)
-#     relpath = os.path.relpath(abspath, analysis_dir)
-#     assert not os.path.isabs(relpath), 'should be relative: {}'.format(relpath)
-#     assert os.path.isfile(abspath) or os.path.isdir(abspath), 'not file or dir: {}'.format(abspath)
-#     assert os.path.isdir(abspath) or os.path.getsize(abspath) == os.path.getsize(val)
-#     file_info['relpath'] = relpath
-#     if os.path.isfile(abspath):
-#         file_info['size'] = os.path.getsize(abspath)
-#         file_info['md5'] = _run_get_output('md5sum ' + abspath).strip().split()[0]
-#     return file_info
-
-# ** import_dx_analysis impl
-def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
-    """Import a DNAnexus analysis into git, in our analysis dir format."""
-
-    analysis_dir = analysis_dir_pfx + 'dx-' + dx_analysis_id
-    util.file.mkdir_p(analysis_dir)
-    mdata = _dx_describe(dx_analysis_id)
-
-    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id, _cache={})]
-    mdata = _resolve_links_in_parsed_json(val=mdata, rel_to_dir=analysis_dir, methods=methods)
-
-    # convert to Cromwell's metadata format:
-    # https://cromwell.readthedocs.io/en/develop/api/RESTAPI/#workflowmetadataresponse
-
-    mdata['_metadata_version'] = AnalysisDir.METADATA_VERSION
-    mdata['labels'] = _ord_dict(('platform', 'dnanexus'))
-    mdata['workflowName'] = mdata['executableName']
-
-    stage2name = {}
-    for stage in mdata['stages']:
-        if _maps(stage, 'id', 'execution'):
-            stage2name[stage['id']] = stage['execution']['name']
-
-    for mdata_rec in ('input', 'output', 'runInput'):
-        for k in mdata[mdata_rec]:
-            stage_id = k.split('.')[0]
-            if stage_id in stage2name:
-                _dict_rename_key(mdata[mdata_rec], k,
-                                 mdata['workflowName']+'.'+stage2name[stage_id]+k[len(stage_id):])
-
-    _dict_rename_key(mdata, 'input', 'inputs')
-    _dict_rename_key(mdata, 'output', 'outputs')
-    _dict_rename_key(mdata, 'state', 'status')
-    del mdata['originalInput']  # same as 'input'
-
-    if mdata['status'] == 'done':
-        mdata['status'] = 'Succeeded'
-    elif mdata['status'] == 'failed':
-        mdata['status'] = 'Failed'
-
-    submission_datetime = datetime.datetime.fromtimestamp(float(mdata['created']) / 1000.0)
-    tz_eastern = pytz.timezone('US/Eastern')
-    mdata['submission'] = tz_eastern.localize(submission_datetime).isoformat('T')
-
-
-    _write_json(os.path.join(analysis_dir, 'metadata.json'), **mdata)
-
-def parser_import_dx_analysis(parser=argparse.ArgumentParser()):
-    parser.add_argument('dx_analysis_id', help='dnanexus analysis id')
-    parser.add_argument('analysis_dir_pfx', help='analysis dir prefix; analysis id will be added to it.')
-    util.cmd.attach_main(parser, import_dx_analysis, split_args=True)
-
-__commands__.append(('import_dx_analysis', parser_import_dx_analysis))
-
-# *** submit_analysis_wdl
-
-def submit_analysis_wdl(workflow_name, analysis_inputs,
-                        analysis_inputs_from_dx_analysis, docker_img, analysis_dir_pfx,
-                        analysis_inputs_specified=None, 
+def submit_analysis_wdl(workflow_name, inputs_sources,
+                        docker_img, analysis_dir_pfx,
+                        input_name_subst=(),
                         analysis_descr='', analysis_labels=None,
                         cromwell_server_url='http://localhost:8000',
                         backend='Local'):
@@ -839,54 +997,38 @@ def submit_analysis_wdl(workflow_name, analysis_inputs,
 
     Args:
         workflow_name: name of the workflow, from pipes/WDL/workflows
+        inputs_sources: list of sources of analysis inputs
         docker_img: docker image from which all viral-ngs and WDL code is taken.
             (later, we'll add the ability to use different docker images for different parts)
-        analysis_inputs_from_dx_analysis: id of a DNAnexus analysis from which to take analysis inputs
-        analysis_inputs_specified: json file specifying analysis inputs directly; overrides any given by
-         analysis_inputs_from_dx_analysis
         analysis_labels: json file specifying any analysis labels
         analysis_dir_pfx: prefix for the analysis dir
+
+    TODO:
+        - option to ignore input workflow name, use only stage name
     """
-    assert not os.path.isabs(analysis_dir)
+    analysis_id = _create_analysis_id(workflow_name)
+    _log.info('ANALYSIS_ID is %s', analysis_id)
 
-    if not analysis_inputs_specified:
-        analysis_inputs_specified = {}
-    else:
-        print('analysis_inputs_specified=', util.file.slurp_file(analysis_inputs_specified).strip())
-        analysis_inputs_specified = _json_loadf(analysis_inputs_specified)
+    docker_img_hash = docker_img + '@' + _get_docker_hash(docker_img)
 
-    analysis_id = create_analysis_id(workflow_name)
-    print('ANALYSIS_ID is ', analysis_id)
+    analysis_dir = os.path.abspath(os.path.join(analysis_dir_pfx + '-' + analysis_id))
+    util.file.mkdir_p(analysis_dir)
+    orig_cwd = os.getcwd()
+    with util.file.pushd_popd(analysis_dir):
+        _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
 
-    _run('docker pull ' + docker_img)
-    docker_img_hash = docker_img + '@' + get_docker_hash(docker_img)
+        output_dir = os.path.join(analysis_dir, 'output')
 
-    if analysis_inputs_from_dx_analysis:
-        dx_analysis = dxpy.DXAnalysis(dxid=analysis_inputs_from_dx_analysis)
-        dx_analysis_descr = dx_analysis.describe()
-    else:
-        dx_analysis_descr = collections.OrderedDict(runInput={}, originalInput={})
-
-    assert os.path.exists('.git/annex')
-    data_repo = data_repo or os.getcwd()
-
-    #_run('git config annex.security.allowed-http-addresses "127.0.0.1 ::1 localhost"')
-                # if data_remote:
-                #     _run('git annex enableremote ' + data_remote)
-
-    t_dir = os.path.abspath(os.path.join(analysis_dir_pfx + '-' + analysis_id))
-    util.file.mkdir_p(t_dir)
-    with util.file.pushd_popd(t_dir):
-        print('TTTTTTTTTTT t_dir=', t_dir)
-
-        output_dir = os.path.join(t_dir, 'output')
-
-        input_files_dir = os.path.join(t_dir, 'input_files')
+        input_files_dir = os.path.join(analysis_dir, 'input_files')
         util.file.mkdir_p(input_files_dir)
 
-        get_dx_val = functools.partial(_get_dx_val, dx_files_dir=input_files_dir)
-
-        wdl_wf_inputs = get_workflow_inputs(workflow_name, docker_img=docker_img_hash)
+        _extract_wdl_from_docker_img(docker_img)
+        workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
+        run_inputs = _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir,
+                                           orig_cwd)
+        _write_json('inputs-git-links.json', **run_inputs)
+        run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
+        _write_json('inputs.json', **run_inputs_staged)
 
         # TODO: use git annex batch mode to determine the keys for all the file-xxxx files, then
         # use batch mode to get the keys.  use -J to parallelize.  also option to use a cache remote, as
@@ -895,47 +1037,19 @@ def submit_analysis_wdl(workflow_name, analysis_inputs,
         # TODO: diff stages may have same-name inputs
         # note that dx runInput and originalInput mean the reverse of what one would think:
         # https://wiki.dnanexus.com/api-specification-v1.0.0/workflows-and-analyses
-        dx_wf_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['runInput'].items()}   # check for dups
-        dx_wf_orig_inputs = { k.split('.')[-1] : v for k, v in dx_analysis_descr['originalInput'].items()}   # check for dups
-        print('DX_WF_RUNINPUTS', '\n'.join(dx_wf_inputs.keys()))
-        print('DX_WF_ORIGINPUTS', '\n'.join(dx_wf_orig_inputs.keys()))
-        new_wdl_wf_inputs = collections.OrderedDict()
-        for wdl_wf_input, wdl_wf_input_descr in wdl_wf_inputs.items():
-            wdl_wf_input_full = wdl_wf_input
-            wdl_wf_input = wdl_wf_input.split('.')[-1]
-
-            def _set_input(dx_wf_input):
-                print('AAAAAAAAAAAAA wdl_wf_input=', wdl_wf_input, ' descr=', wdl_wf_input_descr, ' dx_wf_input=', dx_wf_input)
-                new_wdl_wf_inputs[wdl_wf_input_full] = get_dx_val(dx_wf_input)
-
-            if wdl_wf_input in analysis_inputs_specified:
-                _set_input(analysis_inputs_specified[wdl_wf_input])
-            elif wdl_wf_input in dx_wf_inputs:
-                print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_inputs[wdl_wf_input])
-                _set_input(dx_wf_inputs[wdl_wf_input])
-            elif (True or '(optional' not in wdl_wf_input_descr) and wdl_wf_input in dx_wf_orig_inputs:
-                print('HAVE', wdl_wf_input, wdl_wf_input_descr, dx_wf_orig_inputs[wdl_wf_input])
-                _set_input(dx_wf_orig_inputs[wdl_wf_input])
-            else:
-                print('MISSING', wdl_wf_input, wdl_wf_input_descr)
-                assert '(optional' in wdl_wf_input_descr, \
-                    'Missing required argument: {} {}'.format(wdl_wf_input, wdl_wf_input_descr)
-
-
-        print(_pretty_print_json(new_wdl_wf_inputs))
 
         ################# put in the right docker ID!!  and find a place to keep the docker cache.
 
-        def _rewrite_paths_to_gs(val):
-            if _is_mapping(val): return {k: _rewrite_paths_to_gs(v) for k, v in val.items()}
-            if isinstance(val, list): return list(map(_rewrite_paths_to_gs, val))
-            if _is_str(val) and os.path.isfile(val):
-                assert val.startswith(input_files_dir)
-                val = 'gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/' + val[len(input_files_dir)+1:]
-            return val
-        #_run('gsutil cp -r ' + input_files_dir + '/* gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/')
+        # def _rewrite_paths_to_gs(val):
+        #     if _is_mapping(val): return {k: _rewrite_paths_to_gs(v) for k, v in val.items()}
+        #     if isinstance(val, list): return list(map(_rewrite_paths_to_gs, val))
+        #     if _is_str(val) and os.path.isfile(val):
+        #         assert val.startswith(input_files_dir)
+        #         val = 'gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/' + val[len(input_files_dir)+1:]
+        #     return val
+        # #_run('gsutil cp -r ' + input_files_dir + '/* gs://sabeti-ilya-cromwell/cromwell-inputs/' + analysis_id + '/')
 
-        _write_json('inputs.json', **new_wdl_wf_inputs)
+        # _write_json('inputs.json', **new_wdl_wf_inputs)
 #            json.dump(_rewrite_paths_to_gs(new_wdl_wf_inputs), wf_out, indent=4, separators=(',', ': '))
 
         # TODO: option to update just some of the tasks.
@@ -968,9 +1082,9 @@ def submit_analysis_wdl(workflow_name, analysis_inputs,
                     analysis_descr=analysis_descr,
                     docker_img=docker_img,
                     docker_img_hash=docker_img_hash,
-                    inputs_from_dx_analysis=analysis_inputs_from_dx_analysis,
+                    inputs_sources=str(inputs_sources),
                     analysis_id=analysis_id,
-                    analysis_dir=t_dir,
+                    analysis_dir=analysis_dir,
                     submitter=getpass.getuser(),
                     **dict(analysis_labels or {}))
 
@@ -980,6 +1094,9 @@ def submit_analysis_wdl(workflow_name, analysis_inputs,
         _run('womtool', 'validate',  '-i',  'inputs.json', workflow_name + '.wdl')
         _log.info('Validated workflow; calling cromwell')
         _run('zip imports.zip *.wdl')
+        for wdl_f in os.listdir('.'):
+            if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and wdl_f != workflow_name+'.wdl':
+                os.unlink(wdl_f)
         try:
             cromwell_output_str = _run_get_output('cromwell', 'submit', workflow_name+'.wdl',
                                                   '-t', 'wdl', '-i', 'inputs.json', '-l', 'analysis_labels.json',
@@ -1015,7 +1132,6 @@ def submit_analysis_wdl(workflow_name, analysis_inputs,
         # else:
         #     util.file.make_empty('analysis_failed.txt')
 
-        _run('rm imports.zip *.wdl')
         if cromwell_returncode:
             raise RuntimeError('Cromwell failed - ' + cromwell_output_str)
 
@@ -1032,17 +1148,18 @@ def submit_analysis_wdl(workflow_name, analysis_inputs,
 #                 _run('chmod -R u+w . || true')
 
 
-def create_analysis_id(workflow_name):
+def _create_analysis_id(workflow_name):
     """Generate a unique ID for the analysis."""
     return util.file.string_to_file_name('-'.join(map(str, 
                                                        ('analysis', time.strftime('%Y%m%d-%H%M%S', time.localtime())[2:], 
                                                         uuid.uuid4(), workflow_name))))[:1024]
 
-def get_docker_hash(docker_img):
+def _get_docker_hash(docker_img):
+    _run('docker pull ' + docker_img)
     if docker_img.startswith('sha256:'):
         return docker_img
-    digest_lines = _run_get_output("docker images --digests --no-trunc --format "
-                                   "'{{.Repository}}:{{.Tag}} {{.Digest}}'")
+    digest_lines = _run_get_output('docker', 'images', '--digests', '--no-trunc', '--format',
+                                   '{{.Repository}}:{{.Tag}} {{.Digest}}', _noquote('|'), 'grep', docker_img+':')
     digest_lines = [line for line in digest_lines.strip().split('\n') if docker_img in line]
     assert len(digest_lines) == 1
     digest_line = digest_lines[0]
@@ -1080,18 +1197,15 @@ def gather_run_results(docker_img, cromwell_output):
 
 def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('workflow_name', help='Workflow name')
+    parser.add_argument('inputs_sources', help='analysis inputs', nargs='+')
+    parser.add_argument('--inputNameSubst', dest='input_name_subst', nargs=2, action='append')
     parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/an',
                         help='directory where analysis will be stored; a unique suffix will be added')
-    parser.add_argument('--analysisInputsFromDxAnalysis', dest='analysis_inputs_from_dx_analysis',
-                        help='DNAnexus analysis ID to take analysis inputs from; specific ones can be overridden by '
-                        '--analysisInputsSpecified')
     parser.add_argument('--dockerImg', dest='docker_img', default='quay.io/broadinstitute/viral-ngs')
-    parser.add_argument('--analysisInputsSpecified', dest='analysis_inputs_specified',
-                        help='explicitly specified analysis inputs')
     parser.add_argument('--analysisDescr', dest='analysis_descr', default='an analysis', help='description of the run')
     parser.add_argument('--analysisLabels', dest='analysis_labels', nargs=2, action='append',
                         help='labels to attach to the analysis')
-    parser.add_argument('--backend', default='Locall', help='backend on which to run')
+    parser.add_argument('--backend', default='Local', help='backend on which to run')
     util.cmd.attach_main(parser, submit_analysis_wdl, split_args=True)
 
 __commands__.append(('submit_analysis_wdl', parser_submit_analysis_wdl))
@@ -1223,11 +1337,13 @@ class CromwellServer(object):
     def __init__(self, host):
         self.host = host
 
-    def _api(self, url):
-        return _run_get_json('curl -s -X GET "http://{}/api/workflows/v1/{}" -H "accept: application/json"'.format(self.host, url))
+    def _api(self, endpoint, query=()):
+        query_str = ('?' + urllib.urlencode(query)) if query else ''
+        return _run_get_json('curl', '-s', '-X', 'GET', 'http://{}/api/workflows/v1/{}{}'.format(self.host, endpoint, query_str),
+                             '-H', 'accept: application/json')
 
-    def get_workflows(self):
-        return self._api('query')['results']
+    def get_workflows(self, query=()):
+        return self._api(endpoint='query', query=query)['results']
     
     def get_metadata(self, workflow_id):
         return self._api('{}/metadata?expandSubWorkflows=false'.format(workflow_id))
@@ -1245,7 +1361,8 @@ def _record_file_metadata(val, analysis_dir, root_dir):
                                                           for k, v in val.items()])
     if not (_is_str(val) and (os.path.isfile(val) or os.path.isdir(val))): return val
     file_info = collections.OrderedDict([('_is_file' if os.path.isfile(val) else '_is_dir', True)])
-    assert val.startswith(analysis_dir) or val.startswith(root_dir)
+    assert val.startswith(analysis_dir) or val.startswith(root_dir), \
+        '{} does not start with {} or {}'.format(val, analysis_dir, root_dir)
     if val.startswith(analysis_dir):
         relpath = os.path.relpath(val, analysis_dir)
         abspath = os.path.join(analysis_dir, relpath)
@@ -1290,16 +1407,14 @@ def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
     return functools.reduce(operator.concat, map(_get_analysis_dirs, util.misc.make_seq(analysis_dirs_roots)), [])
 
 # ** finalize_analysis_dirs impl
-def finalize_analysis_dirs(cromwell_host, analysis_dirs_roots):
+def finalize_analysis_dirs(cromwell_host, hours_ago=24):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
     processing_stats = collections.Counter()
-    _log.info('Gathering analysis dirs...')
-    all_analysis_dirs = _gather_analysis_dirs(analysis_dirs_roots, processing_stats)
-    processing_stats['all_analysis_dirs'] = len(all_analysis_dirs)
-    _log.info('Got %d analysis dirs', len(all_analysis_dirs))
-    for wf in cromwell_server.get_workflows():
+
+    for wf in cromwell_server.get_workflows(query=[('submission', _isoformat_ago(hours=hours_ago)),
+                                                   ('status', 'Succeeded'), ('status', 'Failed')]):
         processing_stats['workflowsFromCromwell'] += 1
         mdata = cromwell_server.get_metadata(wf['id'])
         assert mdata['id'] == wf['id']
@@ -1318,15 +1433,17 @@ def finalize_analysis_dirs(cromwell_host, analysis_dirs_roots):
             processing_stats['workflow_root_not_in_mdata'] += 1
         else:
             _write_json(mdata_fname, **mdata)
-            mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
+            #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
+            mdata_rel = _resolve_links_in_parsed_json(val=mdata, rel_to_dir=analysis_dir, methods=[_resolve_link_local_path])
             _write_json(mdata_rel_fname, **mdata_rel)
             _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
             processing_stats['saved_metata'] += 1
     _log.info('Processing stats: %s', str(processing_stats))
 
 def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
-    parser.add_argument('analysis_dirs_roots', nargs='+', help='where are analysis dirs found')
-    parser.add_argument('--cromwellHost', dest='cromwell_host', default='localhost:8000', help='cromwell server hostname')
+    parser.add_argument('--cromwellHost', dest='cromwell_host', required=True, help='cromwell server hostname')
+    parser.add_argument('--hoursAgo', dest='hours_ago', type=int, default=24,
+                        help='only consider workflows submitted this or fewer hours ago')
     util.cmd.attach_main(parser, finalize_analysis_dirs, split_args=True)
 
 __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
@@ -1404,12 +1521,6 @@ __commands__.append(('import_from_url', parser_import_from_url))
 def _gs_stat(gs_url):
     return _run_succeeds('gsutil stat', gs_url)
 
-def _git_annex_checkpresentkey(key, remote):
-    return _run_succeeds('git annex checkpresentkey', key, remote)
-
-def _md5_base64(s):
-    return hashlib.md5(s).digest().encode('base64').strip()
-
 def _get_gs_remote_uuid():
     return '0b42380a-45f8-4b9d-82b3-e10aaf7bab6c'  # TODO determine this from git and git-annex config
 
@@ -1425,7 +1536,7 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
     fname = os.path.basename(git_file_path)
     urls_with_right_fname = [url for url in urls if url.endswith(fname)]
 
-    key = _run_get_output('git annex lookupkey', git_file_path)
+    key = _git_annex_lookupkey(git_file_path)
     gs_remote_uuid = _get_gs_remote_uuid()
     if not urls_with_right_fname:
         gs_url = '/'.join((gs_prefix, 'inp', _md5_base64(whereis['key']), fname))
@@ -1441,7 +1552,7 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
         if urls:
             _run('gsutil cp', urls[0], gs_url)
         else:
-            _run('git annex get', git_file_path)
+            _git_annex_get(git_file_path)
             _run('gsutil cp', git_file_path, gs_url)
             _run('git annex setpresentkey', key, gs_remote_uuid, 1)
         urls_with_right_fname.append(gs_url)
@@ -1450,14 +1561,13 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
     return urls_with_right_fname[0]
 
 def _stage_file_for_backend(git_file_path, backend):
-    """Ensure file exists in given backend"""
+    """Ensure file exists in filesystem of the given Cromwell backend, and return the path to the file
+    (local or cloud, depending on the backend)."""
     if backend == 'Local':
-        _run('git annex get ' + git_file_path)
-        return git_file_path
+        _git_annex_get(git_file_path)
+        return os.path.abspath(git_file_path)
     elif backend == 'JES':
         return _copy_to_gs(git_file_path)
-
-
 
 ########################################################################################################################
 
