@@ -278,6 +278,9 @@ def _git_annex_get(f):
 def _git_annex_lookupkey(f):
     return _run_get_output('git', 'annex', 'lookupkey', f)
 
+def _git_annex_add(f):
+    _run('git', 'annex', 'add', f)
+
 def _git_annex_get_metadata(key, field):
     ga_mdata = _run_get_json('git', 'annex', 'metadata', '--json', '--key='+key)
     return ga_mdata.get('fields', {}).get(field, [])
@@ -375,6 +378,24 @@ def _resolve_link_dx(val, git_file_dir, dx_analysis_id, _cache=None):
             if _cache is not None:
                 _cache[dx_file_id] = val_resolved
     return val_resolved
+
+def _resolve_link_local_path(val, git_file_dir):
+    if not (_is_str(val) and os.path.isfile(val) and os.access(val, os.R_OK)):
+        return val
+    util.file.mkdir_p(git_file_dir)
+    fname = os.path.join(git_file_dir, os.path.basename(val))
+    if os.path.exists(fname):
+        os.unlink(fname)
+    shutil.copyfile(val, fname)
+    assert os.path.isfile(fname)
+    _git_annex_add(fname)
+    _log.debug('GIT LINK TO %s', fname)
+    return {'$git_link': fname}
+    
+    # for now can just copy (or hardlink? careful) it here and git-annex-add
+    # later can see if can use known md5 from cromwell's caching calculations
+
+    # what if it's a dir?  
 
 def _resolve_link(val, git_file_dir, methods):
     for method in methods:
@@ -1324,7 +1345,8 @@ def _record_file_metadata(val, analysis_dir, root_dir):
                                                           for k, v in val.items()])
     if not (_is_str(val) and (os.path.isfile(val) or os.path.isdir(val))): return val
     file_info = collections.OrderedDict([('_is_file' if os.path.isfile(val) else '_is_dir', True)])
-    assert val.startswith(analysis_dir) or val.startswith(root_dir)
+    assert val.startswith(analysis_dir) or val.startswith(root_dir), \
+        '{} does not start with {} or {}'.format(val, analysis_dir, root_dir)
     if val.startswith(analysis_dir):
         relpath = os.path.relpath(val, analysis_dir)
         abspath = os.path.join(analysis_dir, relpath)
@@ -1397,7 +1419,8 @@ def finalize_analysis_dirs(cromwell_host, analysis_dirs_roots):
             processing_stats['workflow_root_not_in_mdata'] += 1
         else:
             _write_json(mdata_fname, **mdata)
-            mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
+            #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
+            mdata_rel = _resolve_links_in_parsed_json(val=mdata, rel_to_dir=analysis_dir, methods=[_resolve_link_local_path])
             _write_json(mdata_rel_fname, **mdata_rel)
             _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
             processing_stats['saved_metata'] += 1
