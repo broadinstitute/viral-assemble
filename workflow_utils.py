@@ -386,6 +386,12 @@ def _resolve_link_dx(val, git_file_dir, dx_analysis_id, _cache=None):
                 _cache[dx_file_id] = val_resolved
     return val_resolved
 
+def _resolve_link_gs(val, git_file_dir):
+    if not (_is_str(val) and val.startswith('gs://') and _gs_stat(val)): return val
+    util.file.mkdir_p(git_file_dir)
+    val_resolved = {'$git_link': import_from_url(url=val, git_file_path=git_file_dir, fast=False)}
+    return val_resolved
+
 def _resolve_link_local_path(val, git_file_dir):
     if not (_is_str(val) and os.path.isfile(val) and os.access(val, os.R_OK)):
         return val
@@ -1407,7 +1413,7 @@ def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
     return functools.reduce(operator.concat, map(_get_analysis_dirs, util.misc.make_seq(analysis_dirs_roots)), [])
 
 # ** finalize_analysis_dirs impl
-def finalize_analysis_dirs(cromwell_host, hours_ago=24):
+def finalize_analysis_dirs(cromwell_host, hours_ago=24, dummy=None):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
@@ -1427,23 +1433,25 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24):
 
         mdata_fname = os.path.join(analysis_dir, 'metadata_orig.json') # mdata['workflowLog'][:-4]+'.metadata.json'
         mdata_rel_fname = os.path.join(analysis_dir, 'metadata.json') # mdata['workflowLog'][:-4]+'.metadata.json'
-        if os.path.exists(mdata_fname):
+        if os.path.exists(mdata_rel_fname):
             processing_stats['metadata_already_saved'] += 1
         elif 'workflowRoot' not in mdata:
             processing_stats['workflow_root_not_in_mdata'] += 1
         else:
             _write_json(mdata_fname, **mdata)
             #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
-            mdata_rel = _resolve_links_in_parsed_json(val=mdata, rel_to_dir=analysis_dir, methods=[_resolve_link_local_path])
+            mdata_rel = _resolve_links_in_parsed_json(val=mdata, rel_to_dir=analysis_dir, methods=[_resolve_link_local_path,
+                                                                                                   _resolve_link_gs])
             _write_json(mdata_rel_fname, **mdata_rel)
             _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
             processing_stats['saved_metata'] += 1
     _log.info('Processing stats: %s', str(processing_stats))
 
 def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
-    parser.add_argument('--cromwellHost', dest='cromwell_host', required=True, help='cromwell server hostname')
+    parser.add_argument('--cromwellHost', dest='cromwell_host', default='localhost:8000', help='cromwell server hostname')
     parser.add_argument('--hoursAgo', dest='hours_ago', type=int, default=24,
                         help='only consider workflows submitted this or fewer hours ago')
+    parser.add_argument('--dummy', action='store_true', help='there just to let us run without args')
     util.cmd.attach_main(parser, finalize_analysis_dirs, split_args=True)
 
 __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
