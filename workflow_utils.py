@@ -24,6 +24,20 @@ In combination, these utilities enable much of what DNAnexus enables, but:
    - allowing easy archiving/unarchiving of data, using git-annex commands
    - using all of git's normal mechanisms, such as branches and submodules, to organize things
 
+Terms:
+   workflow:
+       currently this means a WDL workflow, normally from pipes/WDL/workflows in a specific
+       version of vira-ngs.
+   analysis:
+       particular execution of a particular workflow.  same concept as a DNAnexus analysis
+       (https://wiki.dnanexus.com/API-Specification-v1.0.0/Workflows-and-Analyses)
+   specified inputs: 
+       inputs explicitly provided to a given analysis.  together with the workflow's default inputs, the form `full inputs`.
+       corresponds to DNAnexus notion of 'runInputs'
+   full inputs:
+       full inputs to an analysis, comprised of `specified inputs` supplemented where needed by workflow's defaults.
+       corresponds to DNAnexus notion of 'originalInputs'.
+
 TODO:
   - make things work with v7 git-annex repos
 """
@@ -106,13 +120,24 @@ def _maps(obj, *keys):
 def _is_scalar(val):
     isinstance(val, _scalar_types)
 
+def _dict_subset(d, keys):
+    """Return a newly allocated shallow copy of a mapping `d` restricted to keys in `keys`."""
+    return {k: v for k, v in d.items() if k in keys}
+
 def _ord_dict(*args):
     return collections.OrderedDict(args)
 
+def _ord_dict_merge(dicts):
+    dicts_items = [d.items() for d in dicts]
+    return _ord_dict(*functools.reduce(operator.concat, dicts_items, []))
+
 def _dict_rename_key(d, old_key, new_key):
-    assert new_key not in d
-    d[new_key] = d[old_key]
-    del d[old_key]
+    print('RENAMING', old_key, type(old_key), ' TO ', new_key, type(new_key))
+    assert old_key in d, '{} (type {}) not in {}'.format(old_key, type(old_key), d)
+    assert new_key not in d, '{} (type {}) already in {}'.format(new_key, type(new_key), d)
+    if new_key != old_key:
+        d[new_key] = d[old_key]
+        del d[old_key]
     return d
 
 def _md5_base64(s):
@@ -196,7 +221,7 @@ def _transform_parsed_json(val, node_handler, path=()):
         return _ord_dict(*[(k, recurse(val=v, path=path+(k,)))
                            for k, v in val.items()])
     return val
-
+# end: def _transform_parsed_json(val, node_handler, path=())
 
 def _json_to_org(val, org_file, depth=1, heading='root'):
     """Transform a parsed json structure to org.
@@ -222,6 +247,60 @@ def _json_to_org(val, org_file, depth=1, heading='root'):
             else:
                 out.write(' - ' + str(val) + '\n')
         _recurse(val=val, heading=heading, depth=depth)
+# end: def _json_to_org(val, org_file, depth=1, heading='root')
+
+def _argparse_ensure_value(namespace, name, value):
+    """From argarse"""
+    if getattr(namespace, name, None) is None:
+        setattr(namespace, name, value)
+    return getattr(namespace, name)
+
+class _NestedParserAction(argparse.Action):
+
+    """Parses a list of args using a specified parser.
+
+    Code adapted from argparse._AppendAction
+    """
+
+    def __init__(self,
+                 option_strings,
+                 dest,
+                 nargs=None,
+                 const=None,
+                 default=None,
+                 type=None,
+                 choices=None,
+                 required=False,
+                 help=None,
+                 metavar=None,
+                 nested_parser=None):
+        if nested_parser is None:
+            raise ValueError('nested_parser must be specified')
+        if nargs == 0:
+            raise ValueError('nargs for append actions must be > 0; if arg '
+                             'strings are not supplying the value to append, '
+                             'the append const action may be more appropriate')
+        if const is not None:
+            raise ValueError('const should not be specified')
+        super(_NestedParserAction, self).__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=nargs,
+            const=const,
+            default=default,
+            type=type,
+            choices=choices,
+            required=required,
+            help=help,
+            metavar=metavar)
+        self.nested_parser = nested_parser
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        items = copy.copy(_argparse_ensure_value(namespace, self.dest, []))
+        print('NESTED PARSING', values)
+        items.append(self.nested_parser.parse_args(values))
+        setattr(namespace, self.dest, items)
+# end: class _NestedParserAction(argparse.Action)
 
 def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy and git-annex."""
@@ -661,29 +740,90 @@ def _get_workflow_inputs_spec(workflow_name, docker_img):
 
 # ** _construct_analysis_inputs
 
-def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir, orig_cwd):
+# *** parsing of analysis inputs specified in different ways
+
+def _analysis_inputs_from_name_value_pair(args, **kw):
+    """Handle case of analysis inputs explicitly as one name-value pair on the command line."""
+    return {args.input_name: args.input_value}
+
+def _make_git_links_absolute(d, base_dir):
+    assert os.path.isabs(base_dir)
+    def _make_git_link_absolute(val):
+        if not _maps(val, '$git_link'):
+            return val
+        assert not os.path.isabs(val['$git_link'])
+        return {'$git_link': os.path.join(base_dir, val['$git_link'])}
+    return _transform_parsed_json(d, _make_git_link_absolute)
+
+def _make_git_links_relative(d, base_dir):
+    def _make_git_link_relative(val):
+        if not _maps(val, '$git_link'):
+            return val
+        assert os.path.isabs(val['$git_link'])
+        return {'$git_link': os.path.relpath(val['$git_link'], base_dir)}
+    return _transform_parsed_json(d, _make_git_link_relative)
+
+def _apply_input_renamings(inps, input_name_subst):
+    for orig, repl in (input_name_subst or ()):
+        for inp_name in tuple(inps):
+            if orig in inp_name:
+                assert inp_name in inps
+                _dict_rename_key(inps, inp_name, inp_name.replace(orig, repl))
+
+def _analysis_inputs_from_analysis_dir(args, **kw):
+    """Extract analysis inputs from an existing analysis dir."""
+    workflow_name = kw['workflow_name']
+    mdata_fname = os.path.join(args.analysis_dir, 'metadata.json')
+    mdata = _json_loadf(mdata_fname) 
+    inps = mdata['inputs']
+
+    # rename inputs, if needed
+    _apply_input_renamings(inps, args.input_name_subst)
+
+    # change the workflow name to ours, if needed
+    for inp_name in tuple(inps):
+        if not inp_name.startswith(workflow_name+'.'):
+            assert inp_name.startswith(mdata['workflowName']+'.')
+            inp_renamed=workflow_name+inp_name[inp_name.index('.'):]
+            _dict_rename_key(inps, inp_name, inp_renamed)
+
+    return _make_git_links_absolute(inps, os.path.abspath(args.analysis_dir))
+
+def _construct_analysis_inputs_parser():
+    parser = argparse.ArgumentParser(prefix_chars='+', prog='')
+    subparsers = parser.add_subparsers(title='analysis inputs', description='specification of analysis inputs', dest='input_kind')
+
+    parser_name_value_pair = subparsers.add_parser('nvp', help='name-value pair', prefix_chars='+')
+    parser_name_value_pair.add_argument('input_name')
+    parser_name_value_pair.add_argument('input_value')
+    parser_name_value_pair.set_defaults(func=_analysis_inputs_from_name_value_pair)
+
+    parser_analysis_dir = subparsers.add_parser('analysisDir', help='analysis dir', prefix_chars='+')
+    parser_analysis_dir.add_argument('analysis_dir')
+    parser_analysis_dir.add_argument('++inputNameSubst', dest='input_name_subst', nargs=2, action='append',
+                                    help='substitute strings in input names')
+    parser_analysis_dir.set_defaults(func=_analysis_inputs_from_analysis_dir)
+
+    return parser
+
+def _construct_run_inputs(workflow_name, inputs, analysis_dir):
     """Construct the inputs for the given workflow.
 
     Args:
       workflow_name: name of the wdl workflow
-      workflow_inputs_spec: input spec as output by womtool (parsed json)
-      inputs_sources: ordered list of sources from which to take inputs.
-        each source can be:
-          - a json file
+      inputs: ordered list of sources from which to take inputs.
       analysis_dir: the analysis dir in which we are constructing the input spec
       orig_cwd: the current working directory from which the top-level command was run
 
     Returns:
       a map from input name to a value.  values may include git_links to files under the analysis dir.
     """
-    run_inputs = _ord_dict()
-
-    workflow_defaults = { input_name: input_spec['default'] for input_name, input_spec in workflow_inputs_spec.items()
-                          if input_spec.get('default') is not None }
+    # workflow_defaults = { input_name: input_spec['default'] for input_name, input_spec in workflow_inputs_spec.items()
+    #                       if input_spec.get('default') is not None }
 
     def _load_inputs(inputs_source):
-        if inputs_source == '_workflow_defaults':
-            return workflow_defaults
+        # if inputs_source == '_workflow_defaults':
+        #     return workflow_defaults
 
         key = None
         if ':' in inputs_source:
@@ -723,20 +863,13 @@ def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, i
         return _transform_parsed_json(inps, reroute_git_link)
 
     inp_srcs = list(map(_load_inputs, inputs_sources))
-
-    for inp_name, inp_spec in workflow_inputs_spec.items():
-        for inp_src in inp_srcs:
-            if inp_name in inp_src:
-                run_inputs[inp_name] = inp_src[inp_name]
-                break
-
-        if inp_name not in run_inputs and not inp_spec['optional']:
-            raise RuntimeError('Required input {} not specified'.format(inp_name))
+    run_inputs = _ord_dict()
+    for inp_src in inp_srcs:
+        run_puts.update(inp_src)
 
     print('CONSTRUCTED', run_inputs)
     return run_inputs
-# end: def _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir)
-
+# end: def _construct_run_inputs(workflow_name, inputs_sources, input_name_subst, analysis_dir)
 
 # ** _stage_inputs_for_backend
 
@@ -989,9 +1122,8 @@ def _parse_cromwell_output_str(cromwell_output_str):
 
 # ** submit_analysis_wdl impl
 
-def submit_analysis_wdl(workflow_name, inputs_sources,
+def submit_analysis_wdl(workflow_name, inputs,
                         docker_img, analysis_dir_pfx,
-                        input_name_subst=(),
                         analysis_descr='', analysis_labels=None,
                         cromwell_server_url='http://localhost:8000',
                         backend='Local'):
@@ -1003,7 +1135,7 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
 
     Args:
         workflow_name: name of the workflow, from pipes/WDL/workflows
-        inputs_sources: list of sources of analysis inputs
+        inputs: inputs to the workflow
         docker_img: docker image from which all viral-ngs and WDL code is taken.
             (later, we'll add the ability to use different docker images for different parts)
         analysis_labels: json file specifying any analysis labels
@@ -1012,6 +1144,8 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
     TODO:
         - option to ignore input workflow name, use only stage name
     """
+    inputs = _ord_dict_merge([inp.func(inp, workflow_name=workflow_name) for inp in inputs])
+
     analysis_id = _create_analysis_id(workflow_name)
     _log.info('ANALYSIS_ID is %s', analysis_id)
 
@@ -1019,7 +1153,6 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
 
     analysis_dir = os.path.abspath(os.path.join(analysis_dir_pfx + '-' + analysis_id))
     util.file.mkdir_p(analysis_dir)
-    orig_cwd = os.getcwd()
     with util.file.pushd_popd(analysis_dir):
         _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
 
@@ -1030,8 +1163,8 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
 
         _extract_wdl_from_docker_img(docker_img)
         workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
-        run_inputs = _construct_run_inputs(workflow_name, workflow_inputs_spec, inputs_sources, input_name_subst, analysis_dir,
-                                           orig_cwd)
+        run_inputs = _make_git_links_relative(inputs, analysis_dir)
+        run_inputs = _dict_subset(run_inputs, workflow_inputs_spec.keys())
         _write_json('inputs-git-links.json', **run_inputs)
         run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
         _write_json('inputs.json', **run_inputs_staged)
@@ -1088,7 +1221,6 @@ def submit_analysis_wdl(workflow_name, inputs_sources,
                     analysis_descr=analysis_descr,
                     docker_img=docker_img,
                     docker_img_hash=docker_img_hash,
-                    inputs_sources=str(inputs_sources),
                     analysis_id=analysis_id,
                     analysis_dir=analysis_dir,
                     submitter=getpass.getuser(),
@@ -1203,8 +1335,11 @@ def gather_run_results(docker_img, cromwell_output):
 
 def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('workflow_name', help='Workflow name')
-    parser.add_argument('inputs_sources', help='analysis inputs', nargs='+')
-    parser.add_argument('--inputNameSubst', dest='input_name_subst', nargs=2, action='append')
+
+    #parser.add_argument('inputs_sources', help='analysis inputs', nargs='+')
+
+    parser.add_argument('--inputs', dest='inputs', nargs='+', action=_NestedParserAction,
+                        nested_parser=_construct_analysis_inputs_parser())
     parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/an',
                         help='directory where analysis will be stored; a unique suffix will be added')
     parser.add_argument('--dockerImg', dest='docker_img', default='quay.io/broadinstitute/viral-ngs')
@@ -1413,7 +1548,7 @@ def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
     return functools.reduce(operator.concat, map(_get_analysis_dirs, util.misc.make_seq(analysis_dirs_roots)), [])
 
 # ** finalize_analysis_dirs impl
-def finalize_analysis_dirs(cromwell_host, hours_ago=24, dummy=None):
+def finalize_analysis_dirs(cromwell_host, hours_ago=24):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
@@ -1451,7 +1586,6 @@ def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('--cromwellHost', dest='cromwell_host', default='localhost:8000', help='cromwell server hostname')
     parser.add_argument('--hoursAgo', dest='hours_ago', type=int, default=24,
                         help='only consider workflows submitted this or fewer hours ago')
-    parser.add_argument('--dummy', action='store_true', help='there just to let us run without args')
     util.cmd.attach_main(parser, finalize_analysis_dirs, split_args=True)
 
 __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
