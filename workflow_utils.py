@@ -745,7 +745,8 @@ def _get_workflow_inputs_spec(workflow_name, docker_img):
 
 def _analysis_inputs_from_name_value_pair(args, **kw):
     """Handle case of analysis inputs explicitly as one name-value pair on the command line."""
-    return [{args.input_name: _json_loads(input_value)}
+    def _maybe_quote(v): return '"'+v+'"' if args.quote else v
+    return [{args.input_name: _json_loads(_maybe_quote(input_value))}
             for input_value in args.input_value]
 
 def _make_git_links_absolute(d, base_dir):
@@ -798,6 +799,7 @@ def _construct_analysis_inputs_parser():
     parser_name_value_pair = subparsers.add_parser('nvp', help='name-value pair', prefix_chars='+')
     parser_name_value_pair.add_argument('input_name')
     parser_name_value_pair.add_argument('input_value', nargs='+', help='if multiple values given, analyses will be run with each')
+    parser_name_value_pair.add_argument('++quote', default=False, action='store_true', help='quote the values')
     parser_name_value_pair.set_defaults(func=_analysis_inputs_from_name_value_pair)
 
     parser_analysis_dir = subparsers.add_parser('analysisDir', help='analysis dir', prefix_chars='+')
