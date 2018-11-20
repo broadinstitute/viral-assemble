@@ -65,6 +65,7 @@ import time
 import getpass
 import uuid
 import functools
+import itertools
 import operator
 import builtins
 import datetime
@@ -1122,11 +1123,11 @@ def _parse_cromwell_output_str(cromwell_output_str):
 
 # ** submit_analysis_wdl impl
 
-def submit_analysis_wdl(workflow_name, inputs,
-                        docker_img, analysis_dir_pfx,
-                        analysis_descr='', analysis_labels=None,
-                        cromwell_server_url='http://localhost:8000',
-                        backend='Local'):
+def _submit_analysis_wdl_do(workflow_name, inputs,
+                            docker_img, analysis_dir_pfx,
+                            analysis_descr='', analysis_labels=None,
+                            cromwell_server_url='http://localhost:8000',
+                            backend='Local'):
     """Submit a WDL analysis to a Cromwell server.
 
     Inputs to the analysis.
@@ -1144,8 +1145,6 @@ def submit_analysis_wdl(workflow_name, inputs,
     TODO:
         - option to ignore input workflow name, use only stage name
     """
-    inputs = _ord_dict_merge([inp.func(inp, workflow_name=workflow_name) for inp in inputs])
-
     analysis_id = _create_analysis_id(workflow_name)
     _log.info('ANALYSIS_ID is %s', analysis_id)
 
@@ -1285,6 +1284,18 @@ def submit_analysis_wdl(workflow_name, inputs,
 #                 # enable cleanup
 #                 _run('chmod -R u+w . || true')
 
+def submit_analysis_wdl(workflow_name, inputs,
+                        docker_img, analysis_dir_pfx,
+                        analysis_descr='', analysis_labels=None,
+                        cromwell_server_url='http://localhost:8000',
+                        backend='Local'):
+    def _proc(inp):
+        return util.misc.make_seq(inp.func(inp, workflow_name=workflow_name),
+                                  atom_types=collections.Mapping)
+    for inps in itertools.product(*map(_proc, inputs)):
+        _submit_analysis_wdl_do(workflow_name, _ord_dict_merge(inps), docker_img, analysis_dir_pfx,
+                                analysis_descr, analysis_labels, cromwell_server_url,
+                                backend)
 
 def _create_analysis_id(workflow_name):
     """Generate a unique ID for the analysis."""
