@@ -13,6 +13,7 @@ import logging
 import argparse
 import util.version
 import util.file
+import util.misc
 
 __author__ = "dpark@broadinstitute.org"
 __version__ = util.version.get_version()
@@ -164,7 +165,8 @@ def make_parser(commands, description):
         parser.set_defaults(command='')
     else:
         # multiple commands available
-        parser = argparse.ArgumentParser(description=description, usage='%(prog)s subcommand', add_help=False)
+        parser = argparse.ArgumentParser(description=description, usage='%(prog)s subcommand', add_help=False,
+                                         fromfile_prefix_chars='@')
         parser.add_argument('--help', '-h', action=_HelpAction, help=argparse.SUPPRESS)
         parser.add_argument('--version', '-V', action='version', version=__version__, help=argparse.SUPPRESS)
         subparsers = parser.add_subparsers(title='subcommands', dest='command', metavar='\033[F') # \033[F moves cursor up
@@ -174,12 +176,12 @@ def make_parser(commands, description):
             # so sphinx-argparse doesnt't render "Undocumented"
             if (not help_str) and os.environ.get('READTHEDOCS') or 'sphinx' in sys.modules:
                 help_str = "   "
-            p = subparsers.add_parser(cmd_name, help=help_str)
+            p = subparsers.add_parser(cmd_name, help=help_str, fromfile_prefix_chars='@')
             cmd_parser(p)
     return parser
 
 
-def main_argparse(commands, description):
+def _main_argparse_do(commands, description):
     parser = make_parser(commands, description)
 
     # if called with no arguments, print help
@@ -223,6 +225,11 @@ def main_argparse(commands, description):
         ret = 0
     return ret
 
+def main_argparse(commands, description):
+    try:
+        _main_argparse_do(commands, description)
+    finally:
+        util.misc.cleanup_misc()
 
 def find_tmp_dir():
     ''' This provides a suggested base directory for a temp dir for use in your

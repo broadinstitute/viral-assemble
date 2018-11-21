@@ -16,6 +16,8 @@ import inspect
 
 import util.file
 
+import sqlitedict
+
 log = logging.getLogger(__name__)
 
 __author__ = "dpark@broadinstitute.org"
@@ -29,6 +31,24 @@ def timer(prefix):
     elapsed = '{:.2f}'.format(finish - start)
     print(prefix + ' - ' + elapsed, file=sys.stderr)
 
+def wraps(f):
+    """Like functools.wraps but sets __wrapped__ even on Python 2.7"""
+    wrapper = functools.wraps(f)
+    def do_wrap(ff):
+        wrapped = wrapper(ff)
+        if not hasattr(wrapped, '__wrapped__'):
+            setattr(wrapped, '__wrapped__', f)
+        return wrapped
+    return do_wrap
+
+def unwrap(f):
+    """Find the original function under layers of wrappers"""
+    return f if not hasattr(f, '__wrapped__') else unwrap(getattr(f, '__wrapped__'))
+
+def get_module_name(f):
+    """Get module name of a function"""
+    return os.path.splitext(os.path.relpath(inspect.getsourcefile(util.misc.unwrap(f)),
+                                            util.version.get_project_path()))[0].replace(os.sep, '.')
 
 def memoize(obj):
     cache = obj.cache = {}
@@ -40,6 +60,38 @@ def memoize(obj):
             cache[key] = obj(*args, **kwargs)
         return cache[key]
     return memoizer
+
+def identity(x):
+    return x
+
+def _commit_sqlite(db):
+    print('COMMITTING SQLITE DB...')
+    db.commit()
+    print('COMMITTED SQLITE DB')
+
+_caches = []
+def _commit_caches():
+    for cache in _caches:
+        cache.commit()
+
+def cleanup_misc():
+    _commit_caches()
+
+def memoize_persist(to_picklable=identity, from_picklable=identity):
+    def memoize_persist_do(obj):
+        cache_dir = os.path.join(util.file.get_cache_dir(), 'vngs', get_module_name(obj))
+        util.file.mkdir_p(cache_dir)
+        cache = obj.cache = sqlitedict.SqliteDict(os.path.join(cache_dir, obj.__name__))
+        _caches.append(cache)
+
+        @wraps(obj)
+        def memoizer(*args, **kwargs):
+            key = "".join([str(args),str(kwargs)])
+            if key not in cache:
+                cache[key] = to_picklable(obj(*args, **kwargs))
+            return from_picklable(cache[key])
+        return memoizer
+    return memoize_persist_do
 
 def unique(items):
     ''' Return unique items in the same order as seen in the input. '''
@@ -614,3 +666,4 @@ def getnamedargs(func):
     """Return a list of named args -- both positional and keyword-only -- of the given function."""
     argspec = getfullargspec(func)
     return flatten(argspec.args + argspec.kwonlyargs)
+

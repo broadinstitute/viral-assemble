@@ -186,12 +186,11 @@ def _run_succeeds(cmd, *args):
 
 def _run_get_output(cmd, *args):
     cmd = _make_cmd(cmd, *args)
-    print('running command: ', cmd)
+    _log.info('running command: %s cwd=%s', cmd, os.getcwd())
     beg_time = time.time()
     output = subprocess.check_output(cmd, shell=True)
-    print('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
+    _log.info('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
     return output.strip()
-
 
 def _json_loads(s):
     return json.loads(s.strip(), object_pairs_hook=collections.OrderedDict)
@@ -331,7 +330,8 @@ class AnalysisDir(object):
 
 # ** DNAnexus-related utils
 
-@util.misc.memoize
+@util.misc.memoize_persist(to_picklable=functools.partial(json.dumps, separators=(',',':')),
+                           from_picklable=_json_loads)
 def _dx_describe(dxid):
     return _run_get_json('dx', 'describe', '--verbose', '--details', '--json', dxid)
 
@@ -419,11 +419,13 @@ __commands__.append(('json_to_org', parser_json_to_org))
 
 
 
-# * import_dx_analysis
+# * import_dx_analysis: import DNAnexus analyses as analysis dirs
 
 # ** import_dx_analysis utils
 def _resolve_dx_link_to_dx_file_id_or_value(val, dx_analysis_id):
-    """If `val` represents a DNAnexus link to a file, return {$dnanexus_link: file-xxxx}.
+    """Resolve DNAnexus links, including indirect ones that point to the output of an analysis stage,
+    to either direct link to a DNAnexus file or a simple value.
+    If `val` represents a DNAnexus link to a file, return {$dnanexus_link: file-xxxx}.
     If `val` represents a DNAnexus link to a value, return that value.
     Else, return `val` unchanged.
     """
@@ -657,18 +659,22 @@ def _resolve_links_in_parsed_json(val, rel_to_dir, methods, relpath='files'):
 #     return file_info
 
 # ** import_dx_analysis impl
-def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
+def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
     """Import a DNAnexus analysis into git, in our analysis dir format."""
 
-    analysis_dir = analysis_dir_pfx + 'dx-' + dx_analysis_id
+    analysis_dir = analysis_dir_pfx + dx_analysis_id
     util.file.mkdir_p(analysis_dir)
     mdata = _dx_describe(dx_analysis_id)
 
     methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id, _cache={})]
     mdata = _resolve_links_in_parsed_json(val=mdata, rel_to_dir=analysis_dir, methods=methods)
 
-    # convert to Cromwell's metadata format:
+    # 
+    # Convert DNAnexus analysis metadata to Cromwell's metadata format,
+    # so that all our analysis dirs have analysis metadata in the same format:
     # https://cromwell.readthedocs.io/en/develop/api/RESTAPI/#workflowmetadataresponse
+    # Currently only convert a few basic fields.
+    # 
 
     mdata['_metadata_version'] = AnalysisDir.METADATA_VERSION
     mdata['labels'] = _ord_dict(('platform', 'dnanexus'))
@@ -701,13 +707,18 @@ def import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
 
     _write_json(os.path.join(analysis_dir, 'metadata.json'), **mdata)
 
-def parser_import_dx_analysis(parser=argparse.ArgumentParser()):
-    parser.add_argument('dx_analysis_id', help='dnanexus analysis id')
-    parser.add_argument('analysis_dir_pfx', help='analysis dir prefix; analysis id will be added to it.')
-    util.cmd.attach_main(parser, import_dx_analysis, split_args=True)
+def import_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
+    """Import one or more DNAnexus analyses into git, in our analysis dir format."""
+    for dx_analysis_id in dx_analysis_ids:
+        _import_dx_analysis(dx_analysis_id, analysis_dir_pfx)
 
-__commands__.append(('import_dx_analysis', parser_import_dx_analysis))
+def parser_import_dx_analyses(parser=argparse.ArgumentParser(fromfile_prefix_chars='@')):
+    parser.add_argument('dx_analysis_ids', metavar='DX_ANALYSIS_ID', nargs='+', help='dnanexus analysis id(s)')
+    parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/dxan-',
+                        help='analysis dir prefix; analysis id will be added to it.')
+    util.cmd.attach_main(parser, import_dx_analyses, split_args=True)
 
+__commands__.append(('import_dx_analyses', parser_import_dx_analyses))
 
 # * submit_analysis_wdl
 # ** _get_workflow_inputs_spec

@@ -20,6 +20,7 @@ import io
 import csv
 import inspect
 import tarfile
+import atexit
 
 import util.cmd
 import util.misc
@@ -210,6 +211,14 @@ def destroy_tmp_dir(tempdir=None):
             shutil.rmtree(tempfile.tempdir)
     tempfile.tempdir = None
 
+def get_cache_dir(prefix='cache'):
+    """Return a directory that can be used for caching information.  If VIRAL_NGS_CACHE_DIR environment variable is set, the cache
+    can persist between command executions."""
+    if 'VIRAL_NGS_CACHE_DIR' in os.environ:
+        return os.environ['VIRAL_NGS_CACHE_DIR']
+    cache_dir = next(tmp_dir(prefix=prefix))
+    atexit.register(shutil.rmtree, cache_dir, ignore_errors=True)
+    return cache_dir
 
 def extract_tarball(tarfile, out_dir=None, threads=None, compression='auto', pipe_hint=None):
     if not (tarfile == '-' or (os.path.exists(tarfile) and not os.path.isdir(tarfile))):
