@@ -818,7 +818,7 @@ def _construct_analysis_inputs_parser():
     parser_name_value_pair = subparsers.add_parser('nvp', help='name-value pair', prefix_chars='+')
     parser_name_value_pair.add_argument('input_name')
     parser_name_value_pair.add_argument('input_value', nargs='+', help='if multiple values given, analyses will be run with each')
-    parser_name_value_pair.add_argument('++quote', default=False, action='store_true', help='quote the values')
+    parser_name_value_pair.add_argument('++quote', '+q', default=False, action='store_true', help='quote the values')
     parser_name_value_pair.set_defaults(func=_analysis_inputs_from_name_value_pair)
 
     parser_analysis_dir = subparsers.add_parser('analysisDir', help='analysis dir', prefix_chars='+')
@@ -1148,8 +1148,8 @@ def _parse_cromwell_output_str(cromwell_output_str):
 # ** submit_analysis_wdl impl
 
 def _submit_analysis_wdl_do(workflow_name, inputs,
-                            docker_img, analysis_dir_pfx,
-                            analysis_descr='', analysis_labels=None,
+                            analysis_dir_pfx,
+                            analysis_labels=None,
                             cromwell_server_url='http://localhost:8000',
                             backend='Local'):
     """Submit a WDL analysis to a Cromwell server.
@@ -1160,17 +1160,17 @@ def _submit_analysis_wdl_do(workflow_name, inputs,
 
     Args:
         workflow_name: name of the workflow, from pipes/WDL/workflows
-        inputs: inputs to the workflow
-        docker_img: docker image from which all viral-ngs and WDL code is taken.
-            (later, we'll add the ability to use different docker images for different parts)
-        analysis_labels: json file specifying any analysis labels
+        inputs: inputs to the workflow; also, the docker image to use.
         analysis_dir_pfx: prefix for the analysis dir
+        analysis_labels: json file specifying any analysis labels
 
     TODO:
         - option to ignore input workflow name, use only stage name
     """
     analysis_id = _create_analysis_id(workflow_name)
     _log.info('ANALYSIS_ID is %s', analysis_id)
+
+    docker_img = inputs['docker_img']
 
     docker_img_hash = docker_img + '@' + _get_docker_hash(docker_img)
 
@@ -1241,7 +1241,6 @@ def _submit_analysis_wdl_do(workflow_name, inputs,
         _write_json('execution_env.json', ncpus=util.misc.available_cpu_count())
 
         _write_json('analysis_labels.json',
-                    analysis_descr=analysis_descr,
                     docker_img=docker_img,
                     docker_img_hash=docker_img_hash,
                     analysis_id=analysis_id,
@@ -1309,8 +1308,8 @@ def _submit_analysis_wdl_do(workflow_name, inputs,
 #                 _run('chmod -R u+w . || true')
 
 def submit_analysis_wdl(workflow_name, inputs,
-                        docker_img, analysis_dir_pfx,
-                        analysis_descr='', analysis_labels=None,
+                        analysis_dir_pfx,
+                        analysis_labels=None,
                         cromwell_server_url='http://localhost:8000',
                         backend='Local'):
     def _proc(inp):
@@ -1318,8 +1317,8 @@ def submit_analysis_wdl(workflow_name, inputs,
                                   atom_types=collections.Mapping)
     n_submitted = 0
     for inps in itertools.product(*map(_proc, inputs)):
-        _submit_analysis_wdl_do(workflow_name, _ord_dict_merge(inps), docker_img, analysis_dir_pfx,
-                                analysis_descr, analysis_labels, cromwell_server_url,
+        _submit_analysis_wdl_do(workflow_name, _ord_dict_merge(inps), analysis_dir_pfx,
+                                analysis_labels, cromwell_server_url,
                                 backend)
         n_submitted += 1
     if n_submitted == 0:
@@ -1336,7 +1335,8 @@ def _get_docker_hash(docker_img):
     if docker_img.startswith('sha256:'):
         return docker_img
     digest_lines = _run_get_output('docker', 'images', '--digests', '--no-trunc', '--format',
-                                   '{{.Repository}}:{{.Tag}} {{.Digest}}', _noquote('|'), 'grep', docker_img+':')
+                                   '{{.Repository}}:{{.Tag}} {{.Digest}}', _noquote('|'), 'grep',
+                                   docker_img+(':' if ':' not in docker_img else '') + ' sha256:')
     digest_lines = [line for line in digest_lines.strip().split('\n') if docker_img in line]
     assert len(digest_lines) == 1
     digest_line = digest_lines[0]
@@ -1381,8 +1381,6 @@ def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
                         nested_parser=_construct_analysis_inputs_parser())
     parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/an',
                         help='directory where analysis will be stored; a unique suffix will be added')
-    parser.add_argument('--dockerImg', dest='docker_img', default='quay.io/broadinstitute/viral-ngs')
-    parser.add_argument('--analysisDescr', dest='analysis_descr', default='an analysis', help='description of the run')
     parser.add_argument('--analysisLabels', dest='analysis_labels', nargs=2, action='append',
                         help='labels to attach to the analysis')
     parser.add_argument('--backend', default='Local', help='backend on which to run')
