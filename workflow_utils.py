@@ -773,7 +773,7 @@ def _apply_input_renamings(inps, input_name_subst):
                 assert inp_name in inps
                 _dict_rename_key(inps, inp_name, inp_name.replace(orig, repl))
 
-def _analysis_inputs_from_analysis_dir(args, **kw):
+def _analysis_inputs_from_analysis_dir_do(args, **kw):
     """Extract analysis inputs from an existing analysis dir."""
     workflow_name = kw['workflow_name']
     mdata_fname = os.path.join(args.analysis_dir, 'metadata.json')
@@ -792,6 +792,25 @@ def _analysis_inputs_from_analysis_dir(args, **kw):
 
     return _make_git_links_absolute(inps, os.path.abspath(args.analysis_dir))
 
+def _analysis_inputs_from_analysis_dir(args, **kw):
+    dirs_seen = set()
+    root_dir = args.analysis_dir
+    analysis_dirs_inputs = []
+    def _walk_error(e):
+        raise e
+    for dirpath, subdirs, files in os.walk(root_dir, followlinks=True, onerror=_walk_error):
+        dirpath = os.path.realpath(dirpath)
+        if dirpath in dirs_seen:
+            subdirs[:] = []
+        elif os.path.isfile(os.path.join(dirpath, 'metadata.json')):
+            args.analysis_dir = dirpath
+            analysis_dirs_inputs.append(_analysis_inputs_from_analysis_dir_do(args, **kw))
+            subdirs[:] = []
+        elif not args.recurse:
+            break
+        dirs_seen.add(dirpath)
+    return analysis_dirs_inputs
+
 def _construct_analysis_inputs_parser():
     parser = argparse.ArgumentParser(prefix_chars='+', prog='')
     subparsers = parser.add_subparsers(title='analysis inputs', description='specification of analysis inputs', dest='input_kind')
@@ -806,6 +825,8 @@ def _construct_analysis_inputs_parser():
     parser_analysis_dir.add_argument('analysis_dir')
     parser_analysis_dir.add_argument('++inputNameSubst', dest='input_name_subst', nargs=2, action='append',
                                     help='substitute strings in input names')
+    parser_analysis_dir.add_argument('+r', '++recurse', default=False, action='store_true',
+                                     help='include all analysis dirs in subtree')
     parser_analysis_dir.set_defaults(func=_analysis_inputs_from_analysis_dir)
 
     return parser
@@ -1295,10 +1316,14 @@ def submit_analysis_wdl(workflow_name, inputs,
     def _proc(inp):
         return util.misc.make_seq(inp.func(inp, workflow_name=workflow_name),
                                   atom_types=collections.Mapping)
+    n_submitted = 0
     for inps in itertools.product(*map(_proc, inputs)):
         _submit_analysis_wdl_do(workflow_name, _ord_dict_merge(inps), docker_img, analysis_dir_pfx,
                                 analysis_descr, analysis_labels, cromwell_server_url,
                                 backend)
+        n_submitted += 1
+    if n_submitted == 0:
+        raise RuntimeError('No analyses submitted')
 
 def _create_analysis_id(workflow_name):
     """Generate a unique ID for the analysis."""
