@@ -216,7 +216,7 @@ def get_cache_dir(prefix='cache'):
     can persist between command executions."""
     if 'VIRAL_NGS_CACHE_DIR' in os.environ:
         return os.environ['VIRAL_NGS_CACHE_DIR']
-    cache_dir = next(tmp_dir(prefix=prefix))
+    cache_dir = tmp_dir(prefix=prefix).__enter__()
     atexit.register(shutil.rmtree, cache_dir, ignore_errors=True)
     return cache_dir
 
