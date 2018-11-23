@@ -78,6 +78,8 @@ import SimpleHTTPServer
 import SocketServer
 import traceback
 import copy
+from pprint import pprint
+import binascii
 
 # *** 3rd-party
 import dxpy
@@ -85,6 +87,8 @@ import dxpy.bindings.dxfile_functions
 import boto3
 import uritools
 import pytz
+from googleapiclient import discovery
+from oauth2client.client import GoogleCredentials
 
 # *** intra-module
 import util.cmd
@@ -352,6 +356,89 @@ def _standardize_dx_url(url):
     dxid = _url_to_dxid(url)
     dx_descr = _dx_describe(_url_to_dxid(url))
     return DX_URI_PFX + dxid + '/' + urllib.pathname2url(dx_descr['name'])
+
+
+# ** GCS-related utils
+
+def _transfer_to_gcs(url, file_size, file_md5, bucket_name='sabeti-ilya-cromwell', project_id='viral-comp-dev'):
+    """Transfer given files to GCS using Google's Data Transfer Service; return their URLs."""
+
+    ##############
+
+    # Create the file manifest
+
+    with util.file.tempfname(prefix='tmp_togcs', suffix='.tsv') as manifest_fname:
+        with open(manifest_fname, 'w') as manifest:
+            manifest.write('TsvHttpData-1.0\n')
+            manifest.write('{}\t{}\t{}\n'.format(url, file_size, file_md5))
+
+        transfer_uuid = uuid.uuid4()
+        manifest_gs_uri = 'gs://{}/transfers/{}/manifest.tsv'.format(bucket_name, transfer_uuid)
+        _run('gsutil', 'cp', '-a', 'public-read', manifest_fname, manifest_gs_uri)
+        assert _gs_stat(manifest_gs_uri)
+
+    ##############
+
+        credentials = GoogleCredentials.get_application_default()
+
+        service = discovery.build('storagetransfer', 'v1', credentials=credentials)
+
+        # The ID of the Google Cloud Platform Console project that the Google service
+        # account is associated with.
+        # Required.
+
+        request = service.googleServiceAccounts().get(projectId=project_id)
+        response = request.execute()
+
+        # TODO: Change code below to process the `response` dict:
+        print('RESPONSE TO SERVICE BUILD')
+        pprint(response)
+        #sys.exit(0)
+
+        now = datetime.datetime.now()
+
+        transfer_job_body = {
+            'description': 'testing transfer',
+            'status': 'ENABLED',
+            'projectId': 'viral-comp-dev',
+            'schedule': {
+                'scheduleStartDate': {
+                    'day': now.day,
+                    'month': now.month,
+                    'year': now.year
+                },
+                'scheduleEndDate': {
+                    'day': now.day,
+                    'month': now.month,
+                    'year': now.year
+                },
+            },
+            'transferSpec': {
+                'httpDataSource': {
+                    'listUrl': manifest_gs_uri
+                },
+                "gcsDataSink": {
+                    "bucketName": bucket_name
+                }
+            }
+                # TODO: Add desired entries to the request body.
+        }
+
+        request = service.transferJobs().create(body=transfer_job_body)
+        response = request.execute()
+
+        # TODO: Change code below to process the `response` dict:
+        print('RESPONSE TO TRANSFER REQUEST SUBMIT')
+        pprint(response)
+
+        url_parts = uritools.urisplit(url)
+        gs_file_uri = 'gs://{}/{}'.format(bucket_name, url_parts.authority + url_parts.path)
+
+        while True:
+            _log.info('waiting for file transfer...')
+            time.sleep(10)
+            if _gs_stat(gs_file_uri):
+                return gs_file_uri
 
 # ** git-annex-related utils
 
@@ -1744,6 +1831,13 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
 
     key = _git_annex_lookupkey(git_file_path)
     gs_remote_uuid = _get_gs_remote_uuid()
+
+    size_from_key = None
+    if key.startswith('MD5E-s'):
+        size_from_key = int(key.split('-')[1][1:])
+        md5_from_key = key.split('--')[1][:32]
+        md5_base64_from_key = binascii.unhexlify(md5_from_key).encode('base64').strip()
+
     if not urls_with_right_fname:
         gs_url = '/'.join((gs_prefix, 'inp', _md5_base64(whereis['key']), fname))
         headers = None
@@ -1757,9 +1851,13 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
         if urls:
             _run('gsutil cp', urls[0], gs_url)
             _run('git annex registerurl', key, gs_url)
-        # elif _running_on_aws() and dx_urls:  # TODO fix dx egress hack
-        #     # avoid AWS egress charges by copying directly from dnanexus
-        #     return _dx_make_download_url(_url_to_dxid(dx_urls[0]))
+        elif size_from_key is not None and (size_from_key is None or size_from_key > 1000) and _running_on_aws() and dx_urls:
+            # TODO fix dx egress hack
+            # avoid AWS egress charges by copying directly from dnanexus
+            dx_tmp_url =  _dx_make_download_url(_url_to_dxid(dx_urls[0]))
+            gs_url = _transfer_to_gcs(dx_tmp_url, size_from_key, md5_base64_from_key)
+            _run('git annex setpresentkey', key, gs_remote_uuid, 1)
+            _run('git annex registerurl', key, gs_url)
         else:
             _git_annex_get(git_file_path)
             _run('gsutil cp', git_file_path, gs_url)
