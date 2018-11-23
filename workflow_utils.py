@@ -302,6 +302,11 @@ class _NestedParserAction(argparse.Action):
         setattr(namespace, self.dest, items)
 # end: class _NestedParserAction(argparse.Action)
 
+@util.misc.memoize
+def _running_on_aws():
+    return 'VIRAL_NGS_ON_AWS' in os.environ or \
+        run_succeeds('wget', 'http://169.254.169.254/latest/dynamic/instance-identity/document')
+
 def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy and git-annex."""
     _run('conda install cromwell dxpy git-annex')
@@ -339,6 +344,9 @@ DX_URI_PFX='dx://'
 
 def _url_to_dxid(url):
     return os.path.splitext(url[len(DX_URI_PFX):].split('/')[0])[0]
+
+def _dx_make_download_url(dxid, duration='2h'):
+    return _run_get_output('dx', 'make_download_url', dxid, '--duration', duration)
 
 def _standardize_dx_url(url):
     dxid = _url_to_dxid(url)
@@ -803,23 +811,29 @@ def _analysis_inputs_from_analysis_dir_do(args, **kw):
 
     return _make_git_links_absolute(inps, os.path.abspath(args.analysis_dir))
 
-def _analysis_inputs_from_analysis_dir(args, **kw):
+def _get_analysis_dirs_under(analysis_dir_roots, recurse=True):
+    """Yield the analysis dirs under `analysis_dir_roots`.  If `recurse` is False, only `analysis_dir_roots`
+    themselves are yielded."""
     dirs_seen = set()
-    root_dir = args.analysis_dir
-    analysis_dirs_inputs = []
     def _walk_error(e):
         raise e
-    for dirpath, subdirs, files in os.walk(root_dir, followlinks=True, onerror=_walk_error):
-        dirpath = os.path.realpath(dirpath)
-        if dirpath in dirs_seen:
-            subdirs[:] = []
-        elif os.path.isfile(os.path.join(dirpath, 'metadata.json')):
-            args.analysis_dir = dirpath
-            analysis_dirs_inputs.append(_analysis_inputs_from_analysis_dir_do(args, **kw))
-            subdirs[:] = []
-        elif not args.recurse:
-            break
-        dirs_seen.add(dirpath)
+    for root_dir in util.misc.make_seq(analysis_dir_roots):
+        for dirpath, subdirs, files in os.walk(root_dir, followlinks=True, onerror=_walk_error):
+            dirpath = os.path.realpath(dirpath)
+            if dirpath in dirs_seen:
+                subdirs[:] = []
+            elif os.path.isfile(os.path.join(dirpath, 'metadata.json')):
+                yield dirpath
+                subdirs[:] = []
+            elif not recurse:
+                break
+            dirs_seen.add(dirpath)
+
+def _analysis_inputs_from_analysis_dir_roots(args, **kw):
+    analysis_dirs_inputs = []
+    for analysis_dir in _get_analysis_dirs_under(args.analysis_dir_roots, recurse=args.recurse):
+        args.analysis_dir = analysis_dir
+        analysis_dirs_inputs.append(_analysis_inputs_from_analysis_dir_do(args, **kw))
     return analysis_dirs_inputs
 
 def _construct_analysis_inputs_parser():
@@ -832,79 +846,80 @@ def _construct_analysis_inputs_parser():
     parser_name_value_pair.add_argument('++quote', '+q', default=False, action='store_true', help='quote the values')
     parser_name_value_pair.set_defaults(func=_analysis_inputs_from_name_value_pair)
 
-    parser_analysis_dir = subparsers.add_parser('analysisDir', help='analysis dir', prefix_chars='+')
-    parser_analysis_dir.add_argument('analysis_dir')
+    parser_analysis_dir = subparsers.add_parser('analysisDirsUnder',
+                                                help='analysis dirs for past analyses', prefix_chars='+')
+    parser_analysis_dir.add_argument('analysis_dir_roots', metavar='ANALYSIS_DIR_ROOT', nargs='+')
     parser_analysis_dir.add_argument('++inputNameSubst', dest='input_name_subst', nargs=2, action='append',
                                     help='substitute strings in input names')
     parser_analysis_dir.add_argument('+r', '++recurse', default=False, action='store_true',
-                                     help='include all analysis dirs in subtree')
-    parser_analysis_dir.set_defaults(func=_analysis_inputs_from_analysis_dir)
+                                     help='include all analysis dirs under each root')
+    parser_analysis_dir.set_defaults(func=_analysis_inputs_from_analysis_dir_roots)
 
     return parser
 
-def _construct_run_inputs(workflow_name, inputs, analysis_dir):
-    """Construct the inputs for the given workflow.
+# def _construct_run_inputs(workflow_name, inputs, analysis_dir):
+#     """Construct the inputs for the given workflow.
 
-    Args:
-      workflow_name: name of the wdl workflow
-      inputs: ordered list of sources from which to take inputs.
-      analysis_dir: the analysis dir in which we are constructing the input spec
-      orig_cwd: the current working directory from which the top-level command was run
+#     Args:
+#       workflow_name: name of the wdl workflow
+#       inputs: ordered list of sources from which to take inputs.
+#       analysis_dir: the analysis dir in which we are constructing the input spec
+#       orig_cwd: the current working directory from which the top-level command was run
 
-    Returns:
-      a map from input name to a value.  values may include git_links to files under the analysis dir.
-    """
-    # workflow_defaults = { input_name: input_spec['default'] for input_name, input_spec in workflow_inputs_spec.items()
-    #                       if input_spec.get('default') is not None }
+#     Returns:
+#       a map from input name to a value.  values may include git_links to files under the analysis dir.
+#     """
+#     # workflow_defaults = { input_name: input_spec['default'] for input_name, input_spec in workflow_inputs_spec.items()
+#     #                       if input_spec.get('default') is not None }
 
-    def _load_inputs(inputs_source):
-        # if inputs_source == '_workflow_defaults':
-        #     return workflow_defaults
+#     def _load_inputs(inputs_source):
+#         # if inputs_source == '_workflow_defaults':
+#         #     return workflow_defaults
 
-        key = None
-        if ':' in inputs_source:
-            inputs_source, key = inputs_source.split(':')
-        if not os.path.isabs(inputs_source):
-            inputs_source = os.path.join(orig_cwd, inputs_source)
-        if os.path.isdir(inputs_source) and os.path.isfile(os.path.join(inputs_source, 'metadata.json')):
-            inputs_source = os.path.join(inputs_source, 'metadata.json')
-        if key is None and os.path.basename(inputs_source) == 'metadata.json':
-            key = 'inputs'
-        inps = _json_loadf(inputs_source)
-        inps_orig = inps
-        if key is not None:
-            inps = inps[key]
+#         key = None
+#         if ':' in inputs_source:
+#             inputs_source, key = inputs_source.split(':')
+#         if not os.path.isabs(inputs_source):
+#             inputs_source = os.path.join(orig_cwd, inputs_source)
+#         if os.path.isdir(inputs_source) and os.path.isfile(os.path.join(inputs_source, 'metadata.json')):
+#             inputs_source = os.path.join(inputs_source, 'metadata.json')
+#         if key is None and os.path.basename(inputs_source) == 'metadata.json':
+#             key = 'inputs'
+#         inps = _json_loadf(inputs_source)
+#         inps_orig = inps
+#         if key is not None:
+#             inps = inps[key]
 
-        # rename inputs, if needed
-        for k in set(inps):
-            for orig, repl in (input_name_subst or ()):
-                if orig in k:
-                    _dict_rename_key(inps, k, k.replace(orig, repl))
+#         # rename inputs, if needed
+#         for k in set(inps):
+#             for orig, repl in (input_name_subst or ()):
+#                 if orig in k:
+#                     _dict_rename_key(inps, k, k.replace(orig, repl))
 
-        # change the workflow name to ours, if needed
-        for k in set(inps):
-            if not k.startswith(workflow_name+'.'):
-                assert k.startswith(inps_orig['workflowName']+'.')
-                k_renamed=workflow_name+k[k.index('.'):]
-                print('RENAMING INPUT KEY', k, k_renamed)
-                _dict_rename_key(inps, k, k_renamed)
+#         # change the workflow name to ours, if needed
+#         for k in set(inps):
+#             if not k.startswith(workflow_name+'.'):
+#                 assert k.startswith(inps_orig['workflowName']+'.')
+#                 k_renamed=workflow_name+k[k.index('.'):]
+#                 print('RENAMING INPUT KEY', k, k_renamed)
+#                 _dict_rename_key(inps, k, k_renamed)
 
-        # change the paths in any git_links to be relative to the analysis dir
-        inputs_source_dir = os.path.dirname(inputs_source)
-        def reroute_git_link(val):
-            if not _maps(val, '$git_link'):
-                return val
-            return {'$git_link': os.path.relpath(os.path.join(inputs_source_dir, val['$git_link']),
-                                                 analysis_dir)}
-        return _transform_parsed_json(inps, reroute_git_link)
+#         # change the paths in any git_links to be relative to the analysis dir
+#         inputs_source_dir = os.path.dirname(inputs_source)
+#         def reroute_git_link(val):
+#             if not _maps(val, '$git_link'):
+#                 return val
+#             return {'$git_link': os.path.relpath(os.path.join(inputs_source_dir, val['$git_link']),
+#                                                  analysis_dir)}
+#         return _transform_parsed_json(inps, reroute_git_link)
 
-    inp_srcs = list(map(_load_inputs, inputs_sources))
-    run_inputs = _ord_dict()
-    for inp_src in inp_srcs:
-        run_puts.update(inp_src)
+#     inp_srcs = list(map(_load_inputs, inputs_sources))
+#     run_inputs = _ord_dict()
+#     for inp_src in inp_srcs:
+#         run_puts.update(inp_src)
 
-    print('CONSTRUCTED', run_inputs)
-    return run_inputs
+#     print('CONSTRUCTED', run_inputs)
+#     return run_inputs
 # end: def _construct_run_inputs(workflow_name, inputs_sources, input_name_subst, analysis_dir)
 
 # ** _stage_inputs_for_backend
@@ -1723,6 +1738,7 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
     locs = []
     assert whereis['success']
     urls = [url for w in whereis['whereis'] for url in w.get('urls', ()) if url.startswith(gs_prefix) and _gs_stat(url)]
+    dx_urls = [url for w in whereis['whereis'] for url in w.get('urls', ()) if url.startswith(DX_URI_PFX)]
     fname = os.path.basename(git_file_path)
     urls_with_right_fname = [url for url in urls if url.endswith(fname)]
 
@@ -1730,7 +1746,6 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
     gs_remote_uuid = _get_gs_remote_uuid()
     if not urls_with_right_fname:
         gs_url = '/'.join((gs_prefix, 'inp', _md5_base64(whereis['key']), fname))
-        _run('git annex registerurl', key, gs_url)
         headers = None
         # TODO: set Content-Type based on extension
         # TODO: maybe use -z to compress if large text file.
@@ -1741,10 +1756,16 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
 
         if urls:
             _run('gsutil cp', urls[0], gs_url)
+            _run('git annex registerurl', key, gs_url)
+        # elif _running_on_aws() and dx_urls:  # TODO fix dx egress hack
+        #     # avoid AWS egress charges by copying directly from dnanexus
+        #     return _dx_make_download_url(_url_to_dxid(dx_urls[0]))
         else:
             _git_annex_get(git_file_path)
             _run('gsutil cp', git_file_path, gs_url)
             _run('git annex setpresentkey', key, gs_remote_uuid, 1)
+            _run('git annex registerurl', key, gs_url)
+
         urls_with_right_fname.append(gs_url)
     assert _gs_stat(urls_with_right_fname[0])
     assert _git_annex_checkpresentkey(key, gs_remote_uuid)
@@ -1807,16 +1828,14 @@ def compare_analysis_pairs(workflow_name, analysis_dirs, filter_A, filter_B, met
     """
 
     # For each distinct combination of `common_fields` values, gather the analyses with that combination.
-    analysis_dirs=[os.path.join(analysis_dirs, d) for d in os.listdir(analysis_dirs) \
-                   if os.path.isfile(os.path.join(analysis_dirs, d, 'metadata.json'))]
     filter_A = dict(filter_A)
     filter_B = dict(filter_B)
     print('filter_A=', filter_A)
     print('filter_B=', filter_B)
     metrics = metrics or ()
 
-    flat_analyses = [ _flatten(_load_analysis_metadata(analysis_dir)) for analysis_dir in analysis_dirs if
-                      os.path.isfile(os.path.join(analysis_dir, 'metadata.json')) ]
+    flat_analyses = [_flatten(_load_analysis_metadata(analysis_dir)) for analysis_dir in
+                     _get_analysis_dirs_under(analysis_dirs)]
     flat_analyses = [ f for f in flat_analyses if dict(f)['status'] == 'Succeeded' ]
     print('len(analysis_dirs)=', len(analysis_dirs))
     print('len(flat_analyses)=', len(flat_analyses))
