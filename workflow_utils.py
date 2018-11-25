@@ -872,10 +872,10 @@ def _make_git_links_relative(d, base_dir):
         return {'$git_link': os.path.relpath(val['$git_link'], base_dir)}
     return _transform_parsed_json(d, _make_git_link_relative)
 
-def _apply_input_renamings(inps, input_name_subst):
+def _apply_input_renamings(inps, input_name_subst, orig_workflow_name):
     for orig, repl in (input_name_subst or ()):
         for inp_name in tuple(inps):
-            if orig in inp_name:
+            if inp_name == orig_workflow_name+'.'+orig:
                 assert inp_name in inps
                 _dict_rename_key(inps, inp_name, inp_name.replace(orig, repl))
 
@@ -887,7 +887,7 @@ def _analysis_inputs_from_analysis_dir_do(args, **kw):
     inps = mdata['inputs']
 
     # rename inputs, if needed
-    _apply_input_renamings(inps, args.input_name_subst)
+    _apply_input_renamings(inps, args.input_name_subst, mdata['workflowName'])
 
     # change the workflow name to ours, if needed
     for inp_name in tuple(inps):
