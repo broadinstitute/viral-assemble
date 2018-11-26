@@ -13,6 +13,7 @@ import sys
 import copy
 import yaml, json
 import inspect
+import time
 
 import util.file
 
@@ -22,7 +23,8 @@ log = logging.getLogger(__name__)
 
 __author__ = "dpark@broadinstitute.org"
 
-import time
+MAX_INT32 = (2 ** 31)-1
+
 @contextlib.contextmanager
 def timer(prefix):
     start = time.time()
@@ -531,7 +533,7 @@ def is_nonatom_iterable(x, atom_types=(str,)):
 def make_seq(x, atom_types=(str,)):
     '''Return a tuple containing the items in `x`, or containing just `x` if `x` is a non-string iterable.  Convenient
     for uniformly writing iterations over parameters that may be passed in as either an item or a tuple/list of items.
-    Note that if `x` is an iterator, it will be concretized.
+    Note that if `x` is an iterator, it will be concretized.  `str_types` gives the type(s) to treat as strings.'
     '''
     return tuple(x) if is_nonatom_iterable(x, atom_types) else (x,)
 
@@ -667,3 +669,24 @@ def getnamedargs(func):
     argspec = getfullargspec(func)
     return flatten(argspec.args + argspec.kwonlyargs)
 
+def as_type(val, types):
+    """Try converting `val`to each of `types` in turn, returning the first one that succeeds."""
+    errs = []
+    for type in make_seq(types):
+        try:
+            return type(val)
+        except Exception as e:
+            errs.append(e)
+            pass
+    raise TypeError('Could not convert {} to any of {}: {}'.format(val, types, errs))
+
+def subdict(d, keys):
+    """Return a newly allocated shallow copy of a mapping `d` restricted to keys in `keys`."""
+    d = dict(d)
+    keys = set(keys)
+    return {k: v for k, v in d.items() if k in keys}
+
+def chk(condition, message='Check failed', exc=RuntimeError):
+    """Check a condition, raise an exception if condition is False."""
+    if not condition:
+        raise exc(message)
