@@ -533,6 +533,9 @@ def _resolve_dx_link_to_dx_file_id_or_value(val, dx_analysis_id):
         _log.debug('link is %s', link)
         linked_analysis_descr = _dx_describe(link.get('analysis', dx_analysis_id))
         linked_field = link['field'] if 'field' in link else link['outputField']
+        if link['stage']+'.'+linked_field not in linked_analysis_descr['output']:
+            # this can happen if the stage has failed.
+            return {'$dnanexus_failed_stage_output': None}
         return recurse(val=linked_analysis_descr['output'][link['stage']+'.'+linked_field])
     elif (_is_str(link) and link.startswith('file-')) or \
          (isinstance(link, collections.Mapping) and 'id' in link \
