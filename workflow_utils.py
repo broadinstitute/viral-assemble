@@ -78,7 +78,7 @@ import SimpleHTTPServer
 import SocketServer
 import traceback
 import copy
-from pprint import pprint
+from pprint import pformat
 import binascii
 
 # *** 3rd-party
@@ -137,7 +137,7 @@ def _ord_dict_merge(dicts):
     return _ord_dict(*functools.reduce(operator.concat, dicts_items, []))
 
 def _dict_rename_key(d, old_key, new_key):
-    print('RENAMING', old_key, type(old_key), ' TO ', new_key, type(new_key))
+    _log.debug('RENAMING %s (%s) TO %s (%s)', old_key, type(old_key), new_key, type(new_key))
     assert old_key in d, '{} (type {}) not in {}'.format(old_key, type(old_key), d)
     assert new_key not in d, '{} (type {}) already in {}'.format(new_key, type(new_key), d)
     if new_key != old_key:
@@ -217,7 +217,7 @@ def _transform_parsed_json(val, node_handler, path=()):
         node_handler_args['path'] = path
     handled_val = node_handler(val, **node_handler_args)
     if handled_val is not val:
-        print('resolved', val, 'to', handled_val)
+        _log.debug('resolved %s to %s', val, handled_val)
         return handled_val
     if isinstance(val, list):
         return [recurse(val=v, path=path+(i,)) for i, v in enumerate(val)]
@@ -301,7 +301,7 @@ class _NestedParserAction(argparse.Action):
 
     def __call__(self, parser, namespace, values, option_string=None):
         items = copy.copy(_argparse_ensure_value(namespace, self.dest, []))
-        print('NESTED PARSING', values)
+        _log.debug('NESTED PARSING %s', values)
         items.append(self.nested_parser.parse_args(values))
         setattr(namespace, self.dest, items)
 # end: class _NestedParserAction(argparse.Action)
@@ -391,9 +391,7 @@ def _transfer_to_gcs(url, file_size, file_md5, bucket_name='sabeti-ilya-cromwell
         response = request.execute()
 
         # TODO: Change code below to process the `response` dict:
-        print('RESPONSE TO SERVICE BUILD')
-        pprint(response)
-        #sys.exit(0)
+        _log.debug('RESPONSE TO SERVICE BUILD: %s', pformat(response))
 
         now = datetime.datetime.now()
 
@@ -428,8 +426,7 @@ def _transfer_to_gcs(url, file_size, file_md5, bucket_name='sabeti-ilya-cromwell
         response = request.execute()
 
         # TODO: Change code below to process the `response` dict:
-        print('RESPONSE TO TRANSFER REQUEST SUBMIT')
-        pprint(response)
+        print('RESPONSE TO TRANSFER REQUEST SUBMIT %s', pformat(response))
 
         url_parts = uritools.urisplit(url)
         gs_file_uri = 'gs://{}/{}'.format(bucket_name, url_parts.authority + url_parts.path)
@@ -475,7 +472,7 @@ def _git_annex_checkpresentkey(key, remote):
 
 def _git_annex_get_url_key(url):
     """Return the git-annex key for a url"""
-    print('get-url-key', url)
+    _log.debug('get-url-key %s', url)
     assert uritools.isuri(url)
     url = _minimize_url(url)
     assert uritools.isuri(url)
@@ -533,7 +530,7 @@ def _resolve_dx_link_to_dx_file_id_or_value(val, dx_analysis_id):
 
     link = val['$dnanexus_link']
     if _maps(link, 'stage') and ('field' in link or 'outputField' in link):
-        print('link is ', link)
+        _log.debug('link is %s', link)
         linked_analysis_descr = _dx_describe(link.get('analysis', dx_analysis_id))
         linked_field = link['field'] if 'field' in link else link['outputField']
         return recurse(val=linked_analysis_descr['output'][link['stage']+'.'+linked_field])
@@ -554,11 +551,11 @@ def _resolve_link_dx(val, git_file_dir, dx_analysis_id, _cache=None):
         assert dx_file_id.startswith('file-')
         if _maps(_cache, dx_file_id):
             val_resolved = copy.deepcopy(_cache[dx_file_id])
-            print('RESOLVED', val, ' TO ', val_resolved, ' FROM CACHE')
+            _log.debug('RESOLVED %s TO %s FROM CACHE', val, val_resolved)
         else:
             util.file.mkdir_p(git_file_dir)
             val_resolved = {'$git_link': import_from_url(url='dx://' + dx_file_id, git_file_path=git_file_dir, fast=False)}
-            print('RESOLVED', val, ' TO ', val_resolved)
+            _log.debug('RESOLVED %s TO %s', val, val_resolved)
             if _cache is not None:
                 _cache[dx_file_id] = val_resolved
     return val_resolved
@@ -841,7 +838,7 @@ def _get_workflow_inputs_spec(workflow_name, docker_img):
         return dict(optional=optional, default=default, spec=spec)
 
     input_spec_parsed = _run_get_json('womtool inputs ' + workflow_name + '.wdl')
-    print('input_spec_parsed=', input_spec_parsed.items())
+    _log.debug('input_spec_parsed=%s', input_spec_parsed.items())
     return _ord_dict(*[(input_name, _parse_input_spec(input_spec_str))
                        for input_name, input_spec_str in input_spec_parsed.items()])
 
@@ -1031,7 +1028,7 @@ def _get_dx_val(val, dx_files_dir):
     if isinstance(val, collections.Mapping) and '$dnanexus_link' in val:
         link = val['$dnanexus_link']
         if isinstance(link, collections.Mapping) and 'analysis' in link:
-            print('link is ', link)
+            _log.debug('link is %s', link)
             return _get_dx_val(dxpy.DXAnalysis(link['analysis']).describe()['output'][link['stage']+'.'+link['field']],
                                dx_files_dir)
         elif (_is_str(link) and link.startswith('file-')) or (isinstance(link, collections.Mapping) and 'id' in link and _is_str(link['id']) and link['id'].startswith('file-')):
@@ -1051,7 +1048,7 @@ def _get_dx_val(val, dx_files_dir):
                 _run('git annex fromkey', ga_key, dx_file)
 
             if not os.path.isfile(dx_file) or os.path.getsize(dx_file) != file_size:
-                print('fetching', dxid, 'to', dx_file)
+                _log.debug('fetching %s to %s', dxid, dx_file)
                 # TODO: check that there is enough free space (with some to spare)
                 if os.path.isfile(dx_file):
                     os.unlink(dx_file)
@@ -1060,8 +1057,8 @@ def _get_dx_val(val, dx_files_dir):
                 dxpy.bindings.dxfile_functions.download_dxfile(dxid=dxid, filename=dx_file+'.fetching', show_progress=True)
                 assert os.path.getsize(dx_file+'.fetching') == file_size
                 os.rename(dx_file+'.fetching', dx_file)
-                print('fetched', dxid, 'to', dx_file)
-                print('curdir is ', os.getcwd())
+                _log.debug('fetched %s to %s', dxid, dx_file)
+                _log.debug('curdir is %s', os.getcwd())
                 _run('git annex add', dx_file)
                 ga_key = _run_get_output('git annex lookupkey ' + dx_file).strip()
                 _run('git annex metadata -s', 'dxid+=' + dxid, dx_file)
@@ -1204,7 +1201,7 @@ def _resolve_file_values(input_name, val, input_files_dir):
     if isinstance(val, collections.Mapping) and '$dnanexus_link' in val:
         link = val['$dnanexus_link']
         if isinstance(link, collections.Mapping) and 'analysis' in link:
-            print('link is ', link)
+            _log.debug('link is %s', link)
             return _get_dx_val(dxpy.DXAnalysis(link['analysis']).describe()['output'][link['stage']+'.'+link['field']],
                                dx_files_dir)
         elif (_is_str(link) and link.startswith('file-')) or (isinstance(link, collections.Mapping) and 'id' in link and _is_str(link['id']) and link['id'].startswith('file-')):
@@ -1224,7 +1221,7 @@ def _resolve_file_values(input_name, val, input_files_dir):
                 _run('git annex fromkey ' + ga_key + ' ' + dx_file)
 
             if not os.path.isfile(dx_file) or os.path.getsize(dx_file) != file_size:
-                print('fetching', dxid, 'to', dx_file)
+                _log.debug('fetching %s to %s', dxid, dx_file)
                 # TODO: check that there is enough free space (with some to spare)
                 if os.path.isfile(dx_file):
                     os.unlink(dx_file)
@@ -1233,8 +1230,8 @@ def _resolve_file_values(input_name, val, input_files_dir):
                 dxpy.bindings.dxfile_functions.download_dxfile(dxid=dxid, filename=dx_file+'.fetching', show_progress=True)
                 assert os.path.getsize(dx_file+'.fetching') == file_size
                 os.rename(dx_file+'.fetching', dx_file)
-                print('fetched', dxid, 'to', dx_file)
-                print('curdir is ', os.getcwd())
+                _log.debug('fetched %s to %s', dxid, dx_file)
+                _log.debug('curdir is %s', os.getcwd())
                 _run('git annex add ' + dx_file)
                 ga_key = _run_get_output('git annex lookupkey ' + dx_file).strip()
                 _run('git annex metadata -s dxid+=' + dxid + ' ' + dx_file)
@@ -1382,7 +1379,7 @@ def _submit_analysis_wdl_do(workflow_name, inputs,
 
         _log.info('Cromwell returned with return code %d', cromwell_returncode)
         util.file.dump_file('cromwell_submit_output.txt', cromwell_output_str)
-        print('cromwell output is ', cromwell_output_str)
+        _log.debug('cromwell output is %s', cromwell_output_str)
 #        import sys
 #        sys.exit(0)
 
@@ -1453,7 +1450,7 @@ def _get_docker_hash(docker_img):
     digest_lines = [line for line in digest_lines.strip().split('\n') if docker_img in line]
     assert len(digest_lines) == 1
     digest_line = digest_lines[0]
-    print('digest_line is |||{}|||'.format(digest_line))
+    _log.debug('digest_line is |||{}|||'.format(digest_line))
     img, digest = digest_line.strip().split()
     assert img == docker_img + (':latest' if ':' not in docker_img else '')
     assert digest.startswith('sha256:') and len(digest) == 71
@@ -1515,9 +1512,9 @@ class RedirectToCloudObject(SimpleHTTPServer.SimpleHTTPRequestHandler):
        try:
            file_info = _run_get_json('dx', 'describe', '--json', self._get_dx_id())
        except subprocess.CalledProcessError as e:
-           print('CalledProcessError:', e)
+           _log.info('CalledProcessError: %s', e)
            raise
-       print('got file_info', file_info)
+       _log.debug('got file_info %s', file_info)
        assert file_info['id'] == self._get_dx_id()
 
        self.send_response(307)
@@ -1528,7 +1525,7 @@ class RedirectToCloudObject(SimpleHTTPServer.SimpleHTTPRequestHandler):
        #self.send_header('Content-Disposition', 'attachment; filename="{}"'.format(file_info['name']))
 
        new_path = _run_get_output('dx make_download_url --duration 2h ' + self._get_dx_id())
-       print('new_path=', new_path)
+       _log.debug('new_path=%s', new_path)
        self.send_header('Location', new_path)
        self.end_headers()
 
@@ -1566,7 +1563,7 @@ class RedirectToCloudObject(SimpleHTTPServer.SimpleHTTPRequestHandler):
                self._get_gs()
                _log.info('RETURNED FROM get_gs')
            else:
-               print('UNKNOWN PATH!!', self.path)
+               _log.warning('UNKNOWN PATH!! %s', self.path)
                raise IOError('Unknown URL')
        except (IOError, subprocess.CalledProcessError):
            self.send_error(404, 'file not found')
@@ -1597,13 +1594,13 @@ def run_cloud_object_url_server(port, gs_key, valid_paths):
         server.serve_forever()
     except Exception as e:
         if server is None:
-            print('No server!')
+            _log.error('No server!')
         else:
-            print('calling shutdown...')
+            _log.info('calling shutdown...')
             server.shutdown()
-            print('calling server_close...')
+            _log.info('calling server_close...')
             server.server_close()
-            print('re-raising exception', e)
+            _log.error('re-raising exception %s', e)
             raise
 
 def parser_run_cloud_object_url_server(parser=argparse.ArgumentParser()):
@@ -1663,7 +1660,7 @@ def _record_file_metadata(val, analysis_dir, root_dir):
         abspath = os.path.join(analysis_dir, 'output',
                                'call_logs' if os.path.basename(val) in ('stdout', 'stderr') else 'outputs', relpath)
         if os.path.isfile(val) and not os.path.isfile(abspath):
-            print('LINKING {} to {}'.format(val, abspath))
+            _log.debug('LINKING {} to {}'.format(val, abspath))
             util.file.mkdir_p(os.path.dirname(abspath))
             shutil.copy(val, abspath)
         if os.path.isdir(val):
@@ -1928,15 +1925,15 @@ def compare_analysis_pairs(workflow_name, analysis_dirs, filter_A, filter_B, met
     # For each distinct combination of `common_fields` values, gather the analyses with that combination.
     filter_A = dict(filter_A)
     filter_B = dict(filter_B)
-    print('filter_A=', filter_A)
-    print('filter_B=', filter_B)
+    _log.info('filter_A=%s', filter_A)
+    _log.info('filter_B=%s', filter_B)
     metrics = metrics or ()
 
     flat_analyses = [_flatten(_load_analysis_metadata(analysis_dir)) for analysis_dir in
                      _get_analysis_dirs_under(analysis_dirs)]
     flat_analyses = [ f for f in flat_analyses if dict(f)['status'] == 'Succeeded' ]
-    print('len(analysis_dirs)=', len(analysis_dirs))
-    print('len(flat_analyses)=', len(flat_analyses))
+    _log.info('len(analysis_dirs)=%d', len(analysis_dirs))
+    _log.info('len(flat_analyses)=%d', len(flat_analyses))
 
     assert filter_A.keys() == filter_B.keys(), 'Atypical usage -- probably error?'
     
@@ -1967,7 +1964,7 @@ def compare_analysis_pairs(workflow_name, analysis_dirs, filter_A, filter_B, met
             found_pairs += 1
             for metric in metrics:
                 metric2diffs[metric].append((an_B[metric] - an_A[metric], an_A['analysis_dir'], an_B['analysis_dir']))
-    print('found_pairs=', found_pairs)
+    _log.info('found_pairs=%s', found_pairs)
     for metric in metrics:
         print('metric=', metric, 'diffs=\n')
         print('\n'.join(map(str, sorted(metric2diffs[metric]))))
