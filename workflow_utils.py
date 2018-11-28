@@ -437,8 +437,7 @@ def _transfer_to_gcs(url, file_size, file_md5, bucket_name='sabeti-ilya-cromwell
             if _gs_stat(gs_file_uri):
                 return gs_file_uri
 
-# ** git-annex-related utils
-
+# ** git and git-annex-related utils
 
 def _git_annex_get_link_into_annex(f):
     """Follow symlinks as needed, to find the final symlink pointing into the annex"""
@@ -607,7 +606,7 @@ def _resolve_link_local_path(val, git_file_dir):
         return val
     util.file.mkdir_p(git_file_dir)
     fname = os.path.join(git_file_dir, os.path.basename(val))
-    if os.path.exists(fname):
+    if os.path.lexists(fname):
         os.unlink(fname)
     shutil.copyfile(val, fname)
     assert os.path.isfile(fname)
@@ -1749,13 +1748,16 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24):
             processing_stats['noAnalysisDirForWorkflow'] += 1
             continue
 
+        util.file.mkdir_p(analysis_dir)
         mdata_fname = os.path.join(analysis_dir, 'metadata_orig.json') # mdata['workflowLog'][:-4]+'.metadata.json'
         mdata_rel_fname = os.path.join(analysis_dir, 'metadata.json') # mdata['workflowLog'][:-4]+'.metadata.json'
-        if os.path.exists(mdata_rel_fname):
+        if os.path.lexists(mdata_rel_fname):
             processing_stats['metadata_already_saved'] += 1
         elif 'workflowRoot' not in mdata:
             processing_stats['workflow_root_not_in_mdata'] += 1
         else:
+            if os.path.lexists(mdata_fname):
+                os.unlink(mdata_fname)
             _write_json(mdata_fname, **mdata)
             #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
             mdata_rel = _resolve_links_in_parsed_json(val=mdata, rel_to_dir=analysis_dir, methods=[_resolve_link_local_path,
@@ -1814,13 +1816,15 @@ def import_from_url(url, git_file_path, fast=False):
     if os.path.isdir(git_file_path):
         git_file_path = os.path.join(git_file_path, os.path.basename(url))
 
-    assert not os.path.exists(git_file_path)
+    #assert not os.path.lexists(git_file_path)
+    if os.path.lexists(git_file_path):
+        os.unlink(git_file_path)
 
     # check if we have an md5 key for the url.
     url_key = _git_annex_get_url_key(url)
     md5_key = _get_url_md5_key(url_key)
     if md5_key:
-        _run('git', 'annex', 'fromkey', md5_key, git_file_path)
+        _run('git', 'annex', 'fromkey', '--force', md5_key, git_file_path)
         if not fast:
             _run('git', 'annex', 'get', git_file_path)
         return git_file_path
