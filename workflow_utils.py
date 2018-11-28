@@ -457,8 +457,9 @@ def _git_annex_lookupkey(f):
     if link_target:
         link_target_basename = os.path.basename(link_target)
         if link_target_basename.startswith('MD5-') or link_target_basename.startswith('MD5E-'):
-            md5_start = link_target_basename.index('--')+2
-            return link_target_basename[md5_start:md5_start+32]
+            return link_target_basename
+            #md5_start = link_target_basename.index('--')+2
+            #return link_target_basename[md5_start:md5_start+32]
 
     return _run_get_output('git', 'annex', 'lookupkey', f)
 
@@ -471,7 +472,10 @@ def _git_link_md5(git_link):
     # use readlink here for speed
     assert _is_git_link(git_link)
     if 'md5' not in git_link:
-        git_link['md5'] = _git_annex_lookupkey(git_link['$git_link'])
+        ga_key = _git_annex_lookupkey(git_link['$git_link'])
+        assert ga_key.startswith('MD5E-')
+        md5_start = ga_key.index('--')+2
+        git_link['md5'] = ga_key[md5_start:md5_start+32]
     return git_link['md5']
 
 def _git_annex_get(f):
@@ -1319,7 +1323,7 @@ def _submit_analysis_wdl_do(workflow_name, inputs,
 
     docker_img_hash = docker_img + '@' + _get_docker_hash(docker_img)
 
-    analysis_dir = os.path.abspath(os.path.join(analysis_dir_pfx + '-' + analysis_id))
+    analysis_dir = os.path.abspath(os.path.join(analysis_dir_pfx + ('-' if not analysis_dir_pfx.endswith('/') else '') + analysis_id))
     util.file.mkdir_p(analysis_dir)
     with util.file.pushd_popd(analysis_dir):
         _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
@@ -1457,6 +1461,22 @@ def submit_analysis_wdl(workflow_name, inputs,
                         analysis_labels=None,
                         cromwell_server_url='http://localhost:8000',
                         backend='Local'):
+    """Submit a WDL analysis (or a set of analyses) to a Cromwell server.
+
+    Inputs to the analysis.
+    The analysis can be executed on either a local or a cloud Cromwell backend.  This routine will, if needed,
+    copy the inputs to the filesystem needed by the backend.
+
+    Args:
+        workflow_name: name of the workflow, from pipes/WDL/workflows
+        inputs: inputs to the workflow; also, the docker image to use.
+        analysis_dir_pfx: prefix for the analysis dir
+        analysis_labels: json file specifying any analysis labels
+
+    TODO:
+        - option to ignore input workflow name, use only stage name
+    """
+
     def _proc(inp):
         return util.misc.make_seq(inp.func(inp, workflow_name=workflow_name),
                                   atom_types=collections.Mapping)
