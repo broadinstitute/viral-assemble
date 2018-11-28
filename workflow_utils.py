@@ -145,6 +145,10 @@ def _dict_rename_key(d, old_key, new_key):
         del d[old_key]
     return d
 
+def _is_under_dir(path, base_dir):
+    """Tests whether `path` is somewhere in the dir tree under `base_dir`"""
+    return os.path.realpath(path).startswith(os.path.realpath(base_dir))
+
 def _md5_base64(s):
     return hashlib.md5(s).digest().encode('base64').strip()
 
@@ -1750,7 +1754,7 @@ def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
     return functools.reduce(operator.concat, map(_get_analysis_dirs, util.misc.make_seq(analysis_dirs_roots)), [])
 
 # ** finalize_analysis_dirs impl
-def finalize_analysis_dirs(cromwell_host, hours_ago=24):
+def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
@@ -1764,6 +1768,9 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24):
         assert 'workflowLog' not in mdata or mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
         if 'analysis_dir' in mdata['labels']:
             analysis_dir = mdata['labels']['analysis_dir']
+            if analysis_dirs_roots and not any(_is_under_dir(analysis_dir, analysis_dirs_root)
+                                               for analysis_dirs_root in analysis_dirs_roots):
+                continue
         else:
             processing_stats['noAnalysisDirForWorkflow'] += 1
             continue
@@ -1791,6 +1798,8 @@ def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('--cromwellHost', dest='cromwell_host', default='localhost:8000', help='cromwell server hostname')
     parser.add_argument('--hoursAgo', dest='hours_ago', type=int, default=24,
                         help='only consider workflows submitted this or fewer hours ago')
+    parser.add_argument('--analysisDirsRoots', dest='analysis_dirs_roots', nargs='+',
+                        help='only consider analyses whose analysis dirs are in one of these trees')
     util.cmd.attach_main(parser, finalize_analysis_dirs, split_args=True)
 
 __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
