@@ -439,23 +439,56 @@ def _transfer_to_gcs(url, file_size, file_md5, bucket_name='sabeti-ilya-cromwell
 
 # ** git-annex-related utils
 
+
+def _git_annex_get_link_into_annex(f):
+    """Follow symlinks as needed, to find the final symlink pointing into the annex"""
+    link_target = None
+    while os.path.islink(f):
+        link_target = os.readlink(f)
+        if '.git/annex/objects/' in link_target:
+            break
+        if os.path.isabs(link_target):
+            f = link_target
+        else:
+            f = os.path.join(os.path.dirname(f), link_target)
+    return f, link_target
+
+def _git_annex_lookupkey(f):
+    f, link_target = _git_annex_get_link_into_annex(f)
+    if link_target:
+        link_target_basename = os.path.basename(link_target)
+        if link_target_basename.startswith('MD5-') or link_target_basename.startswith('MD5E-'):
+            md5_start = link_target_basename.index('--')+2
+            return link_target_basename[md5_start:md5_start+32]
+
+    return _run_get_output('git', 'annex', 'lookupkey', f)
+
+def _is_git_link(val):
+    """Tests whether `val` points to a file in git"""
+    return _maps(val, '$git_link')
+
+def _git_link_md5(git_link):
+    """Return the md5 of the file pointed to by git_link"""
+    # use readlink here for speed
+    assert _is_git_link(git_link)
+    if 'md5' not in git_link:
+        git_link['md5'] = _git_annex_lookupkey(git_link['$git_link'])
+    return git_link['md5']
+
 def _git_annex_get(f):
     """Ensure the file exists in the local annex.  Unlike git-annex-get, follows symlinks and 
     will get the file regardless of what the current dir is."""
-    while os.path.islink(f):
-        trg = os.readlink(f)
-        if '.git/annex/objects/' in trg:
-            break
-        if os.path.isabs(trg):
-            f = trg
-        else:
-            f = os.path.join(os.path.dirname(f), trg)
 
-    with util.file.pushd_popd(os.path.dirname(f)):
-        _run('git', 'annex', 'get', os.path.basename(f))
+    # TODO: what if f is a dir, or list of dirs?  including symlinks?
+    # then, to preserve git-annex-get semantics, need to 
 
-def _git_annex_lookupkey(f):
-    return _run_get_output('git', 'annex', 'lookupkey', f)
+    assert os.path.islink(f)
+    f, link_target = _git_annex_get_link_into_annex(f)
+    if not os.path.isfile(f):
+        with util.file.pushd_popd(os.path.dirname(f)):
+            _run('git', 'annex', 'get', os.path.basename(f))
+    assert os.path.isfile(f)
+
 
 def _git_annex_add(f):
     _run('git', 'annex', 'add', f)
@@ -1896,27 +1929,47 @@ def gather_analyses(dirs):
 
 # * compare_analysis_pairs
 
-def _load_analysis_metadata(analysis_dir):
+def _load_analysis_metadata(analysis_dir, git_links_abspaths=False):
     """Read the analysis metadata from an analysis dir"""
     md = _json_loadf(os.path.join(analysis_dir, 'metadata.json'))
     md['analysis_dir'] = analysis_dir
+    if git_links_abspaths:
+        md = _make_git_links_absolute(md, base_dir=os.path.abspath(analysis_dir))
     return md
 
-def _flatten(val, pfx=''):
-    if isinstance(val, list): return functools.reduce(operator.concat,
-                                                      [_flatten(v, pfx+('.' if pfx else '')+str(i)) for i, v in enumerate(val)],
-                                                      [])
+def _flatten_analysis_metadata(val, pfx=''):
+    if _is_git_link(val):
+        return _flatten_analysis_metadata('md5:'+_git_link_md5(val), pfx)
+
+    def _concat(iters): return list(itertools.chain.from_iterable(iters))
+
+    if isinstance(val, list):
+        return _concat(_flatten_analysis_metadata(v, pfx+('.' if pfx else '')+str(i))
+                       for i, v in enumerate(val))
     if _is_mapping(val):
-        if '_is_file' in val:
-            if 'md5' in val: return _flatten('md5:'+val['md5'], pfx)
-            # for now, assume that if the file is from a URL then its unique id e.g. dx file-xxxx is in filename
-            return _flatten(val['relpath'], pfx)
-        if '_is_dir' in val:
-            return _flatten(val['relpath'], pfx)
-        return functools.reduce(operator.concat,
-                                [_flatten(v, pfx+('.' if pfx else '')+k) for k, v in val.items()],
-                                [])
+        return _concat(_flatten_analysis_metadata(v, pfx+('.' if pfx else '')+k)
+                       for k, v in val.items())
     return [(pfx, val)]
+
+def diff_analyses(analysis_dirs, key_prefixes=()):
+    assert len(analysis_dirs)==2, 'currently can only compare two analyses'
+
+    flat_mdatas = [dict(_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir, git_links_abspaths=True)))
+                   for analysis_dir in analysis_dirs]
+    all_keys = sorted(set(itertools.chain.from_iterable(flat_mdatas)))
+    for key in all_keys:
+        if not key_prefixes or any(key.startswith(key_prefix) for key_prefix in (key_prefixes or ())):
+            vals = [flat_mdatas[i].get(key, None) for i in (0, 1)]
+            if vals[0] != vals[1]:
+                print(key, vals[0], vals[1])
+
+def parser_diff_analyses(parser=argparse.ArgumentParser()):
+    parser.add_argument('analysis_dirs', nargs=2, help='the two analysis dirs')
+    parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+')
+    util.cmd.attach_main(parser, diff_analyses, split_args=True)
+
+__commands__.append(('diff_analyses', parser_diff_analyses))
+    
 
 def compare_analysis_pairs(workflow_name, analysis_dirs, filter_A, filter_B, metrics):
     """Compare pairs of analyses from `analysis_dirs` where the two analyses of a pair have
@@ -1932,8 +1985,8 @@ def compare_analysis_pairs(workflow_name, analysis_dirs, filter_A, filter_B, met
     _log.info('filter_B=%s', filter_B)
     metrics = metrics or ()
 
-    flat_analyses = [_flatten(_load_analysis_metadata(analysis_dir)) for analysis_dir in
-                     _get_analysis_dirs_under(analysis_dirs)]
+    flat_analyses = [_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir))
+                     for analysis_dir in _get_analysis_dirs_under(analysis_dirs)]
     flat_analyses = [ f for f in flat_analyses if dict(f)['status'] == 'Succeeded' ]
     _log.info('len(analysis_dirs)=%d', len(analysis_dirs))
     _log.info('len(flat_analyses)=%d', len(flat_analyses))
