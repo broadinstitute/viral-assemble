@@ -18,6 +18,7 @@ import sys
 import concurrent.futures
 from contextlib import contextmanager
 import functools
+import itertools
 
 from Bio import SeqIO
 import pysam
@@ -905,6 +906,77 @@ def parser_rmdup_cdhit_bam(parser=argparse.ArgumentParser()):
 
 
 __commands__.append(('rmdup_cdhit_bam', parser_rmdup_cdhit_bam))
+
+def _rg_dict(rg):
+    assert rg[0] == '@RG'
+    return dict(pair.split(':', 1) for pair in rg[1:])
+
+def _rg_to_lib(rg):
+    return _rg_dict(rg).get('LB', 'none')
+
+def _merge_fastqs_for_one_lib(lb, rgs, in_bam_header, fnames_pfx, out_dir):
+    lb_hdr_fname = fnames_pfx + '.hdr.txt'
+
+    tools.samtools.SamtoolsTool().putHeader([line for line in in_bam_header
+                                             if line[0] != '@RG' or line in rgs],
+                                            lb_hdr_fname)
+    print('PUTHEADER TO', lb_hdr_fname)
+
+    lib_fq_fnames = []
+    for d in range(2):
+        d_sfx = '_'+str(d+1)+'.fastq'
+        rgs_fastq_fnames = [os.path.join(out_dir, _rg_dict(rg)['ID']+d_sfx) for rg in rgs]
+        lib_fq_fnames.append(fnames_pfx+d_sfx)
+        util.file.concat(filter(os.path.isfile, rgs_fastq_fnames), lib_fq_fnames[-1])
+    print('TOBAM: ', lib_fq_fnames)
+    tools.picard.FastqToSamTool().execute(lib_fq_fnames[0], lib_fq_fnames[1], 'dummy_sample_name',
+                                          fnames_pfx+'.dummyheader.bam')
+    tools.samtools.SamtoolsTool().reheader(fnames_pfx+'.dummyheader.bam', lb_hdr_fname, fnames_pfx+'.bam')
+    return fnames_pfx+'.bam'
+
+def split_bam_by_lib(in_bam, out_dir=None, JVMmemory=None):
+    '''Split a .bam into libraries in `out_dir`
+    '''
+
+    # TODO: if only one rg in bam, just return the bam; have option to symlink or hardlink if ok.
+    # TODO: if things run in paralllel they should not each grap all threads
+    # TODO: use piping instead of writing to disk whenever possible
+    # TODO: make a decorator that takes a given function and makes it operate on one-lib bams and combinees the results
+
+    # TODO: when one lib conversion finishes should be able to start assembling that lib at that point?
+    
+    util.file.mkdir_p(out_dir)
+    # Convert BAM -> FASTQ pairs per read group and load all read groups
+    tools.picard.SamToFastqTool().per_read_group(in_bam, out_dir,
+                                                 picardOptions=['VALIDATION_STRINGENCY=LENIENT'], JVMmemory=JVMmemory)
+    
+    in_bam_header = tools.samtools.SamtoolsTool().getHeader(in_bam)
+    read_groups = [line for line in in_bam_header if line[0] == '@RG']
+
+    fnames_pfx = os.path.join(out_dir, os.path.basename(in_bam))
+    lib_bams = []
+    with concurrent.futures.ProcessPoolExecutor(max_workers=util.misc.available_cpu_count()) as executor:
+        futures = [executor.submit(_merge_fastqs_for_one_lib, lb, tuple(rgs), in_bam_header,
+                                   fnames_pfx+'.lb'+util.file.string_to_file_name(lb), out_dir)
+                   for lb, rgs in itertools.groupby(sorted(read_groups, key=_rg_to_lib), key=_rg_to_lib)]
+        for future in concurrent.futures.as_completed(futures):
+            lib_bams.append(future.result())
+    print('LIB BAMS', lib_bams)
+
+def parser_split_bam_by_lib(parser=argparse.ArgumentParser()):
+    parser.add_argument('in_bam', help='Input reads, BAM format.')
+    parser.add_argument('out_dir', help='Directory where to put library files')
+    parser.add_argument(
+        '--JVMmemory',
+        default=tools.picard.FilterSamReadsTool.jvmMemDefault,
+        help='JVM virtual memory size (default: %(default)s)'
+    )
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, split_bam_by_lib, split_args=True)
+    return parser
+
+__commands__.append(('split_bam_by_lib', parser_split_bam_by_lib))
+
 
 def _merge_fastqs_and_mvicuna(lb, files):
     readList = mkstempfname('.keep_reads.txt')
