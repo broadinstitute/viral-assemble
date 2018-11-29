@@ -253,6 +253,12 @@ class SamtoolsTool(tools.Tool):
         os.unlink(tmpf)
         return header
 
+    def putHeader(self, header_data, out_header_fname):
+        '''Write BAM header, given in the format read in by getHeader(), out to a file.'''
+        with open(out_header_fname, 'wb') as outf:
+            for header_line_data in header_data:
+                outf.write(('\t'.join(header_line_data)+'\n').encode("latin-1"))
+
     def getReadGroups(self, inBam):
         ''' fetch all read groups from the BAM header as an OrderedDict of
             RG ID -> RG dict.  The RG dict is a mapping of read group keyword
