@@ -345,7 +345,7 @@ def parser_assemble_trinity(parser=argparse.ArgumentParser()):
 
 __commands__.append(('assemble_trinity', parser_assemble_trinity))
 
-def assemble_spades(
+def _assemble_spades_do(
     in_bam,
     clip_db,
     out_fasta,
@@ -388,7 +388,43 @@ def assemble_spades(
     if not outReads:
         os.unlink(trim_rmdup_bam)
 
+def assemble_spades(
+    in_bam,
+    clip_db,
+    out_fasta,
+    spades_opts='',
+    contigs_trusted=None, contigs_untrusted=None,
+    filter_contigs=False,
+    min_contig_len=0,
+    kmer_sizes=(55,65),
+    n_reads=10000000,
+    outReads=None,
+    always_succeed=False,
+    max_kmer_sizes=1,
+    mem_limit_gb=8,
+    threads=None,
+):
+    assert not outReads, 'not implemented'
+    with util.file.tmp_dir('_spades_by_lib') as t_dir:
+        lib_bams = read_utils.split_bam_by_lib(in_bam, t_dir)
+        # so, let's first try the metaspades.
+        # the only thing is we can't give it single reads.
+        # so, to not waste those, we should still run rnaspades there, giving metaspades results as trusted.
+        # also look into running on cleaned not on taxfilt, esp with metaspades;
+        # maybe giving contigs from taxfilt as trusted.
 
+        lib_fastas = []
+        for lib_bam in lib_bams:
+            lib_fasta = lib_bam+'.fasta'
+            _assemble_spades_do(in_bam=lib_bam, clip_db=clip_db, out_fasta=lib_fasta,
+                                spades_opts=spades_opts, contigs_trusted=contigs_trusted,
+                                contigs_untrusted=contigs_untrusted,
+                                filter_contigs=filter_contigs, min_contig_len=min_contig_len,
+                                kmer_sizes=kmer_sizes, n_reads=n_reads,
+                                outReads=outReads, always_succeed=always_succeed, max_kmer_sizes=max_kmer_sizes,
+                                max_limit_gb=max_limit_gb, threads=threads)
+            lib_fastas.append(lib_fasta)
+        util.file.concat(lib_fastas, out_fasta)
 
 def parser_assemble_spades(parser=argparse.ArgumentParser()):
     parser.add_argument('in_bam', help='Input unaligned reads, BAM format. May include both paired and unpaired reads.')
