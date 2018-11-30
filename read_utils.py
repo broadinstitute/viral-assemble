@@ -920,7 +920,6 @@ def _merge_fastqs_for_one_lib(lb, rgs, in_bam_header, fnames_pfx, out_dir):
     tools.samtools.SamtoolsTool().putHeader([line for line in in_bam_header
                                              if line[0] != '@RG' or line in rgs],
                                             lb_hdr_fname)
-    print('PUTHEADER TO', lb_hdr_fname)
 
     lib_fq_fnames = []
     for d in range(2):
@@ -928,13 +927,15 @@ def _merge_fastqs_for_one_lib(lb, rgs, in_bam_header, fnames_pfx, out_dir):
         rgs_fastq_fnames = [os.path.join(out_dir, _rg_dict(rg)['ID']+d_sfx) for rg in rgs]
         lib_fq_fnames.append(fnames_pfx+d_sfx)
         util.file.concat(filter(os.path.isfile, rgs_fastq_fnames), lib_fq_fnames[-1])
-    print('TOBAM: ', lib_fq_fnames)
+
+    if not (os.path.getsize(lib_fq_fnames[0]) and os.path.getsize(lib_fq_fnames[1])):
+        return None
     tools.picard.FastqToSamTool().execute(lib_fq_fnames[0], lib_fq_fnames[1], 'dummy_sample_name',
                                           fnames_pfx+'.dummyheader.bam')
     tools.samtools.SamtoolsTool().reheader(fnames_pfx+'.dummyheader.bam', lb_hdr_fname, fnames_pfx+'.bam')
     return fnames_pfx+'.bam'
 
-def split_bam_by_lib(in_bam, out_dir=None, JVMmemory=None):
+def split_bam_by_lib(in_bam, out_dir, JVMmemory=None, may_symlink=False):
     '''Split a .bam into libraries in `out_dir`
     '''
 
@@ -946,22 +947,32 @@ def split_bam_by_lib(in_bam, out_dir=None, JVMmemory=None):
     # TODO: when one lib conversion finishes should be able to start assembling that lib at that point?
     
     util.file.mkdir_p(out_dir)
+
+    in_bam_header = tools.samtools.SamtoolsTool().getHeader(in_bam)
+    read_groups = [line for line in in_bam_header if line[0] == '@RG']
+
+    if len(set(map(_rg_to_lib, read_groups))) < 2:
+        out_bam = os.path.join(out_dir, os.path.basename(in_bam))
+        if may_symlink:
+            os.symlink(in_bam, out_bam)
+        else:
+            shutil.copyfile(in_bam, out_bam)
+        return [out_bam]
+
     # Convert BAM -> FASTQ pairs per read group and load all read groups
     tools.picard.SamToFastqTool().per_read_group(in_bam, out_dir,
                                                  picardOptions=['VALIDATION_STRINGENCY=LENIENT'], JVMmemory=JVMmemory)
     
-    in_bam_header = tools.samtools.SamtoolsTool().getHeader(in_bam)
-    read_groups = [line for line in in_bam_header if line[0] == '@RG']
 
     fnames_pfx = os.path.join(out_dir, os.path.basename(in_bam))
     lib_bams = []
-    with concurrent.futures.ProcessPoolExecutor(max_workers=util.misc.available_cpu_count()) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=util.misc.available_cpu_count()) as executor:
         futures = [executor.submit(_merge_fastqs_for_one_lib, lb, tuple(rgs), in_bam_header,
                                    fnames_pfx+'.lb'+util.file.string_to_file_name(lb), out_dir)
                    for lb, rgs in itertools.groupby(sorted(read_groups, key=_rg_to_lib), key=_rg_to_lib)]
         for future in concurrent.futures.as_completed(futures):
             lib_bams.append(future.result())
-    print('LIB BAMS', lib_bams)
+    return filter(None, lib_bams)
 
 def parser_split_bam_by_lib(parser=argparse.ArgumentParser()):
     parser.add_argument('in_bam', help='Input reads, BAM format.')

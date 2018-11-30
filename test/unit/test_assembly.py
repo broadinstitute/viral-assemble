@@ -154,12 +154,12 @@ class TestAssembleSpades(TestCaseWithTmp):
         inBam = os.path.join(inDir, '..', 'G5012.3.subset.bam')
         clipDb = os.path.join(inDir, 'clipDb.fasta')
         with util.file.tempfname('.fasta') as outFasta:
-            assembly.assemble_spades(in_bam=inBam, clip_db=clipDb, min_contig_len=180, out_fasta=outFasta)
+            assembly.assemble_spades(in_bam=inBam, clip_db=clipDb, min_contig_len=180, out_fasta=outFasta, threads=2)
             self.assertGreater(os.path.getsize(outFasta), 0)
             contig_lens = list(sorted(len(seq.seq) for seq in Bio.SeqIO.parse(outFasta, 'fasta')))
-            #import sys
-            #print('test_assembly_contigs_lens:', contig_lens, file=sys.stderr)
-            self.assertEqual(contig_lens, [180, 184, 187, 190, 191, 194, 197, 211, 243, 244, 247, 288, 328, 348, 430])
+            #with open('/tmp/thelist.txt', 'wt') as out:
+            #    out.write(str(contig_lens))
+            self.assertEqual(contig_lens, [180, 183, 184, 187, 190, 191, 194, 197, 201, 211, 243, 244, 247, 288, 319, 328, 348])
 
     def test_assembly_with_previously_assembled_contigs(self):
         inDir = util.file.get_test_input_path(self)
@@ -168,12 +168,13 @@ class TestAssembleSpades(TestCaseWithTmp):
         previously_assembled_contigs = os.path.join(inDir, 'trinity_contigs.fasta')
         with util.file.tempfname('.fasta') as outFasta:
             assembly.assemble_spades(in_bam=inBam, clip_db=clipDb, contigs_untrusted=previously_assembled_contigs,
-                                     out_fasta=outFasta, mem_limit_gb=1)
+                                     out_fasta=outFasta, mem_limit_gb=1, threads=2)
             self.assertGreater(os.path.getsize(outFasta), 0)
             contig_lens = list(sorted(len(seq.seq) for seq in Bio.SeqIO.parse(outFasta, 'fasta')))
-            #import sys
-            #print('test_assembly_with_previously_assembled_contigs_contigs_lens:', contig_lens, file=sys.stderr)
-            self.assertEqual(contig_lens, [168, 170, 177, 180, 184, 187, 190, 191, 194, 197, 211, 243, 244, 247, 288, 328, 348, 430])
+            #with open('/tmp/thelist.txt', 'wt') as out:
+            #    out.write(str(contig_lens))
+            self.assertEqual(contig_lens, [168, 170, 177, 180, 183, 184, 187, 190, 191, 194, 197, 201, 211, 243, 244, 247, 
+                                           288, 319, 328, 348])
 
     def test_empty_input_succeed(self):
         inDir = util.file.get_test_input_path()

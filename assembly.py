@@ -50,6 +50,11 @@ import Bio.AlignIO
 import Bio.SeqIO
 import Bio.Data.IUPACData
 
+try:
+    from contextlib import ExitStack
+except ImportError:
+    from contextlib2 import ExitStack
+
 log = logging.getLogger(__name__)
 
 
@@ -345,7 +350,7 @@ def parser_assemble_trinity(parser=argparse.ArgumentParser()):
 
 __commands__.append(('assemble_trinity', parser_assemble_trinity))
 
-def _assemble_spades_do(
+def assemble_spades(
     in_bam,
     clip_db,
     out_fasta,
@@ -353,7 +358,7 @@ def _assemble_spades_do(
     contigs_trusted=None, contigs_untrusted=None,
     filter_contigs=False,
     min_contig_len=0,
-    kmer_sizes=(55,65),
+    kmer_sizes=None,
     n_reads=10000000,
     outReads=None,
     always_succeed=False,
@@ -364,72 +369,48 @@ def _assemble_spades_do(
     '''De novo RNA-seq assembly with the SPAdes assembler.
     '''
 
-    if outReads:
-        trim_rmdup_bam = outReads
-    else:
-        trim_rmdup_bam = util.file.mkstempfname('.subsamp.bam')
+    with util.file.tmp_dir('_asm_spades') as t_dir:
+        print('SPLITTING BY LIB', in_bam, t_dir)
+        lib_bams = read_utils.split_bam_by_lib(in_bam, t_dir, may_symlink=True)
+        print('SPLIT BY LIB', lib_bams)
+        preproc_bams = [lib_bam+'.preproc.bam' for lib_bam in lib_bams]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=util.misc.available_cpu_count()) as executor:
+            results = list(executor.map(functools.partial(trim_rmdup_subsamp_reads,
+                                                          n_reads=n_reads,
+                                                          trim_opts=dict(maxinfo_target_length=35, maxinfo_strictness=.2)),
+                                        lib_bams, [clip_db]*len(lib_bams), preproc_bams))
 
-    trim_rmdup_subsamp_reads(in_bam, clip_db, trim_rmdup_bam, n_reads=n_reads,
-                             trim_opts=dict(maxinfo_target_length=35, maxinfo_strictness=.2))
+        with ExitStack() as stack:
+            def make_lib(reads_fwd, reads_bwd, reads_unpaired):
+                return tools.spades.SpadesTool.Library(reads_fwd=reads_fwd, reads_bwd=reads_bwd, reads_unpaired=reads_unpaired)
+            libs = [make_lib(*stack.enter_context(tools.picard.SamToFastqTool().execute_tmp(preproc_bam,
+                                                                                            includeUnpaired=True,
+                                                                                            illuminaClipping=True)))
+                    for preproc_bam in preproc_bams]
 
-    with tools.picard.SamToFastqTool().execute_tmp(trim_rmdup_bam, includeUnpaired=True, illuminaClipping=True
-                                                   ) as (reads_fwd, reads_bwd, reads_unpaired):
-        try:
-            tools.spades.SpadesTool().assemble(reads_fwd=reads_fwd, reads_bwd=reads_bwd, reads_unpaired=reads_unpaired,
-                                               contigs_untrusted=contigs_untrusted, contigs_trusted=contigs_trusted,
-                                               contigs_out=out_fasta, filter_contigs=filter_contigs,
-                                               min_contig_len=min_contig_len,
-                                               kmer_sizes=kmer_sizes, always_succeed=always_succeed, max_kmer_sizes=max_kmer_sizes,
-                                               spades_opts=spades_opts, mem_limit_gb=mem_limit_gb,
-                                               threads=threads)
-        except subprocess.CalledProcessError as e:
-            raise DenovoAssemblyError('SPAdes assembler failed: ' + str(e))
+            try:
+                tools.spades.SpadesTool().assemble(libraries=libs,
+                                                   contigs_untrusted=contigs_untrusted, contigs_trusted=contigs_trusted,
+                                                   contigs_out=out_fasta, filter_contigs=filter_contigs,
+                                                   min_contig_len=min_contig_len,
+                                                   kmer_sizes=kmer_sizes, always_succeed=always_succeed,
+                                                   max_kmer_sizes=max_kmer_sizes,
+                                                   spades_opts=spades_opts, mem_limit_gb=mem_limit_gb,
+                                                   threads=threads)
+            except subprocess.CalledProcessError as e:
+                raise DenovoAssemblyError('SPAdes assembler failed: ' + str(e))
 
-    if not outReads:
-        os.unlink(trim_rmdup_bam)
+        if outReads:
+           util.cmd.run_cmd(read_utils, 'merge_bams', preproc_bams + [outReads])
 
-def assemble_spades(
-    in_bam,
-    clip_db,
-    out_fasta,
-    spades_opts='',
-    contigs_trusted=None, contigs_untrusted=None,
-    filter_contigs=False,
-    min_contig_len=0,
-    kmer_sizes=(55,65),
-    n_reads=10000000,
-    outReads=None,
-    always_succeed=False,
-    max_kmer_sizes=1,
-    mem_limit_gb=8,
-    threads=None,
-):
-    assert not outReads, 'not implemented'
-    with util.file.tmp_dir('_spades_by_lib') as t_dir:
-        lib_bams = read_utils.split_bam_by_lib(in_bam, t_dir)
-        # so, let's first try the metaspades.
-        # the only thing is we can't give it single reads.
-        # so, to not waste those, we should still run rnaspades there, giving metaspades results as trusted.
-        # also look into running on cleaned not on taxfilt, esp with metaspades;
-        # maybe giving contigs from taxfilt as trusted.
-
-        lib_fastas = []
-        for lib_bam in lib_bams:
-            lib_fasta = lib_bam+'.fasta'
-            _assemble_spades_do(in_bam=lib_bam, clip_db=clip_db, out_fasta=lib_fasta,
-                                spades_opts=spades_opts, contigs_trusted=contigs_trusted,
-                                contigs_untrusted=contigs_untrusted,
-                                filter_contigs=filter_contigs, min_contig_len=min_contig_len,
-                                kmer_sizes=kmer_sizes, n_reads=n_reads,
-                                outReads=outReads, always_succeed=always_succeed, max_kmer_sizes=max_kmer_sizes,
-                                max_limit_gb=max_limit_gb, threads=threads)
-            lib_fastas.append(lib_fasta)
-        util.file.concat(lib_fastas, out_fasta)
+# end: def assemble_spades(...)
 
 def parser_assemble_spades(parser=argparse.ArgumentParser()):
     parser.add_argument('in_bam', help='Input unaligned reads, BAM format. May include both paired and unpaired reads.')
     parser.add_argument('clip_db', help='Trimmomatic clip db')
-    parser.add_argument('out_fasta', help='Output assembled contigs. Note that, since this is RNA-seq assembly, for each assembled genomic region there may be several contigs representing different variants of that region.')
+    parser.add_argument('out_fasta', help='Output assembled contigs. Note that, since this is RNA-seq assembly, '
+                        'for each assembled genomic region there may be several contigs representing different variants '
+                        'of that region.')
     parser.add_argument('--contigsTrusted', dest='contigs_trusted', 
                         help='Optional input contigs of high quality, previously assembled from the same sample')
     parser.add_argument('--contigsUntrusted', dest='contigs_untrusted', 
@@ -444,12 +425,13 @@ def parser_assemble_spades(parser=argparse.ArgumentParser()):
                         'an error code')
     parser.add_argument('--minContigLen', dest='min_contig_len', type=int, default=0,
                         help='only output contigs longer than this many bp')
-    parser.add_argument('--spadesOpts', dest='spades_opts', default='', help='(advanced) Extra flags to pass to the SPAdes assembler')
-    parser.add_argument('--memLimitGb', dest='mem_limit_gb', default=4, type=int, help='Max memory to use, in GB (default: %(default)s)')
+    parser.add_argument('--spadesOpts', dest='spades_opts', default='',
+                        help='(advanced) Extra flags to pass to the SPAdes assembler')
+    parser.add_argument('--memLimitGb', dest='mem_limit_gb', default=4, type=int,
+                        help='Max memory to use, in GB (default: %(default)s)')
     util.cmd.common_args(parser, (('threads', None), ('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, assemble_spades, split_args=True)
     return parser
-
 
 __commands__.append(('assemble_spades', parser_assemble_spades))
 
