@@ -603,10 +603,10 @@ def _resolve_link_dx(val, git_file_dir, dx_analysis_id, _cache=None):
                 _cache[dx_file_id] = val_resolved
     return val_resolved
 
-def _resolve_link_gs(val, git_file_dir):
+def _resolve_link_gs(val, git_file_dir, fast=True):
     if not (_is_str(val) and val.startswith('gs://') and _gs_stat(val)): return val
     util.file.mkdir_p(git_file_dir)
-    val_resolved = {'$git_link': import_from_url(url=val, git_file_path=git_file_dir, fast=False)}
+    val_resolved = {'$git_link': import_from_url(url=val, git_file_path=git_file_dir, fast=fast)}
     return val_resolved
 
 def _resolve_link_local_path(val, git_file_dir):
@@ -1847,11 +1847,25 @@ def import_from_url(url, git_file_path, fast=False):
 
     #assert not os.path.lexists(git_file_path)
     if os.path.lexists(git_file_path):
+        # TODO: keep link if it's correct
         os.unlink(git_file_path)
 
     # check if we have an md5 key for the url.
     url_key = _git_annex_get_url_key(url)
     md5_key = _get_url_md5_key(url_key)
+
+    if not md5_key and url.startswith('gs://'):
+        gs_stat_result = _gs_stat(url)
+        if _maps(gs_stat_result, 'md5'):
+            # print(gs_stat_result['Content-Length:'], type(gs_stat_result['Content-Length:']))
+            # print(gs_stat_result['md5'], type(gs_stat_result['md5']))
+            # print(str(uritools.urisplit(url).path), type(str(uritools.urisplit(url).path)))
+                  
+            md5_key = 'MD5E-s' + gs_stat_result['Content-Length:'] + '--' \
+                      + gs_stat_result['md5'] + os.path.splitext(str(uritools.urisplit(url).path))[1]
+            _run('git annex setpresentkey', md5_key, _get_gs_remote_uuid(), 1)
+            _run('git annex registerurl', md5_key, url)
+
     if md5_key:
         _run('git', 'annex', 'fromkey', '--force', md5_key, git_file_path)
         if not fast:
@@ -1877,7 +1891,20 @@ __commands__.append(('import_from_url', parser_import_from_url))
 ########################################################################################################################
 
 def _gs_stat(gs_url):
-    return _run_succeeds('gsutil stat', gs_url)
+    assert gs_url.startswith('gs://')
+    try:
+        stat_output = _run_get_output('gsutil', 'stat', gs_url)
+        result = {}
+        for line in stat_output.split('\n')[1:]:
+            result[line[:25].strip()] = line[25:].strip()
+
+        if 'Hash (md5):' in result:
+            result['md5'] = binascii.hexlify(result['Hash (md5):'].decode('base64'))
+
+        return result
+
+    except subprocess.CalledProcessError:
+        return {}
 
 def _get_gs_remote_uuid():
     return '0b42380a-45f8-4b9d-82b3-e10aaf7bab6c'  # TODO determine this from git and git-annex config
