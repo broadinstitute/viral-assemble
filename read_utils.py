@@ -968,11 +968,11 @@ def split_bam_by_lib(in_bam, out_dir, JVMmemory=None, may_symlink=False):
     lib_bams = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=util.misc.available_cpu_count()) as executor:
         futures = [executor.submit(_merge_fastqs_for_one_lib, lb, tuple(rgs), in_bam_header,
-                                   fnames_pfx+'.lb'+util.file.string_to_file_name(lb), out_dir)
+                                   fnames_pfx+'.lb_'+util.file.string_to_file_name(lb), out_dir)
                    for lb, rgs in itertools.groupby(sorted(read_groups, key=_rg_to_lib), key=_rg_to_lib)]
         for future in concurrent.futures.as_completed(futures):
             lib_bams.append(future.result())
-    return list(filter(None, lib_bams))
+    return sorted(filter(None, lib_bams))
 
 def parser_split_bam_by_lib(parser=argparse.ArgumentParser()):
     parser.add_argument('in_bam', help='Input reads, BAM format.')
