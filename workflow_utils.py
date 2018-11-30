@@ -1838,7 +1838,7 @@ def _set_url_md5_key(url_key, md5_key):
     _git_annex_set_metadata(key=url_key, field='alt_keys', val=md5_key)
     
 
-def import_from_url(url, git_file_path, fast=False):
+def import_from_url(url, git_file_path, fast=False, import_dirs=False):
     """Imports a URL into the git-annex repository."""
 
     url = _standardize_url(url)
@@ -1848,6 +1848,8 @@ def import_from_url(url, git_file_path, fast=False):
     #assert not os.path.lexists(git_file_path)
     if os.path.lexists(git_file_path):
         # TODO: keep link if it's correct
+        # TODO: have a --force option to do this
+        # TODO: check what if this is a dir
         os.unlink(git_file_path)
 
     # check if we have an md5 key for the url.
@@ -1856,6 +1858,7 @@ def import_from_url(url, git_file_path, fast=False):
 
     if not md5_key and url.startswith('gs://'):
         gs_stat_result = _gs_stat(url)
+        _log.debug('stat result: %s', gs_stat_result)
         if _maps(gs_stat_result, 'md5'):
             # print(gs_stat_result['Content-Length:'], type(gs_stat_result['Content-Length:']))
             # print(gs_stat_result['md5'], type(gs_stat_result['md5']))
@@ -1865,6 +1868,14 @@ def import_from_url(url, git_file_path, fast=False):
                       + gs_stat_result['md5'] + os.path.splitext(str(uritools.urisplit(url).path))[1]
             _run('git annex setpresentkey', md5_key, _get_gs_remote_uuid(), 1)
             _run('git annex registerurl', md5_key, url)
+        elif not import_dirs:
+            _log.info('Not importing dir: %s', url)
+            return
+        else:
+            util.file.mkdir_p(git_file_path)
+            for gs_entry in _gs_ls(url):
+                import_from_url(gs_entry, git_file_path, fast=fast, import_dirs=import_dirs)
+            return
 
     if md5_key:
         _run('git', 'annex', 'fromkey', '--force', md5_key, git_file_path)
@@ -1884,6 +1895,7 @@ def parser_import_from_url(parser=argparse.ArgumentParser()):
     parser.add_argument('url', help='the URL of the file to add.')
     parser.add_argument('--gitFilePath', dest='git_file_path', help='filename in the git-annex repository', default='.')
     parser.add_argument('--fast', default=False, action='store_true', help='do not immediately download the file')
+    parser.add_argument('--importDirs', dest='import_dirs', default=False, action='store_true', help='import directories')
     util.cmd.attach_main(parser, import_from_url, split_args=True)
 
 __commands__.append(('import_from_url', parser_import_from_url))
@@ -1905,6 +1917,9 @@ def _gs_stat(gs_url):
 
     except subprocess.CalledProcessError:
         return {}
+
+def _gs_ls(gs_url):
+    return _run_get_output('gsutil', 'ls', gs_url).split('\n')
 
 def _get_gs_remote_uuid():
     return '0b42380a-45f8-4b9d-82b3-e10aaf7bab6c'  # TODO determine this from git and git-annex config
