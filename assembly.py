@@ -129,6 +129,8 @@ def trim_rmdup_subsamp_reads(inBam, clipDb, outBam, n_reads=100000, trim_opts=No
 
     tmp_header = util.file.mkstempfname('.header.sam')
     tools.samtools.SamtoolsTool().dumpHeader(inBam, tmp_header)
+    with open(tmp_header, 'a') as t_hdr:
+        t_hdr.write('@RG\tID:A\tSM:A\tLB:A\tPL:illumina\tPU:CBMYCANXX.5.TCCTGAGC-AAGGCTAT\tCN:BI\tDT:2017-10-13T00:00:00+0000\n')
 
     # convert paired reads to bam
     # stub out an empty file if the input fastqs are empty
