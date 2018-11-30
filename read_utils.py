@@ -972,7 +972,7 @@ def split_bam_by_lib(in_bam, out_dir, JVMmemory=None, may_symlink=False):
                    for lb, rgs in itertools.groupby(sorted(read_groups, key=_rg_to_lib), key=_rg_to_lib)]
         for future in concurrent.futures.as_completed(futures):
             lib_bams.append(future.result())
-    return filter(None, lib_bams)
+    return list(filter(None, lib_bams))
 
 def parser_split_bam_by_lib(parser=argparse.ArgumentParser()):
     parser.add_argument('in_bam', help='Input reads, BAM format.')
