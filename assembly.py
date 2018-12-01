@@ -357,6 +357,7 @@ def assemble_spades(
     clip_db,
     out_fasta,
     spades_opts='',
+    mode='rna',
     contigs_trusted=None, contigs_untrusted=None,
     filter_contigs=False,
     min_contig_len=0,
@@ -372,9 +373,10 @@ def assemble_spades(
     '''
 
     with util.file.tmp_dir('_asm_spades') as t_dir:
-        print('SPLITTING BY LIB', in_bam, t_dir)
-        lib_bams = read_utils.split_bam_by_lib(in_bam, t_dir, may_symlink=True)
-        print('SPLIT BY LIB', lib_bams)
+        log.info('SPLITTING BY LIB %s into %s', in_bam, t_dir)
+        tools.picard.SplitSamByLibraryTool().execute(in_bam, t_dir)
+        lib_bams = [os.path.join(t_dir, f) for f in os.listdir(t_dir)]
+        log.info('SPLIT BY LIB %s into %s', lib_bams, t_dir)
         preproc_bams = [lib_bam+'.preproc.bam' for lib_bam in lib_bams]
         with concurrent.futures.ThreadPoolExecutor(max_workers=util.misc.available_cpu_count()) as executor:
             results = list(executor.map(functools.partial(trim_rmdup_subsamp_reads,
@@ -391,7 +393,7 @@ def assemble_spades(
                     for preproc_bam in preproc_bams]
 
             try:
-                tools.spades.SpadesTool().assemble(libraries=libs,
+                tools.spades.SpadesTool().assemble(libraries=libs, mode=mode,
                                                    contigs_untrusted=contigs_untrusted, contigs_trusted=contigs_trusted,
                                                    contigs_out=out_fasta, filter_contigs=filter_contigs,
                                                    min_contig_len=min_contig_len,
@@ -413,6 +415,7 @@ def parser_assemble_spades(parser=argparse.ArgumentParser()):
     parser.add_argument('out_fasta', help='Output assembled contigs. Note that, since this is RNA-seq assembly, '
                         'for each assembled genomic region there may be several contigs representing different variants '
                         'of that region.')
+    parser.add_argument('--mode', choices=('rna', 'meta'), default='meta', help='rnaSPAdes or metaSPAdes')
     parser.add_argument('--contigsTrusted', dest='contigs_trusted', 
                         help='Optional input contigs of high quality, previously assembled from the same sample')
     parser.add_argument('--contigsUntrusted', dest='contigs_untrusted', 
@@ -427,6 +430,7 @@ def parser_assemble_spades(parser=argparse.ArgumentParser()):
                         'an error code')
     parser.add_argument('--minContigLen', dest='min_contig_len', type=int, default=0,
                         help='only output contigs longer than this many bp')
+    parser.add_argument('--kmerSizes', dest='kmer_sizes', type=int, nargs='+', help='k-mer sizes to use')
     parser.add_argument('--spadesOpts', dest='spades_opts', default='',
                         help='(advanced) Extra flags to pass to the SPAdes assembler')
     parser.add_argument('--memLimitGb', dest='mem_limit_gb', default=4, type=int,

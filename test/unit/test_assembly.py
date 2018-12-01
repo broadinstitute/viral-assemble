@@ -162,6 +162,19 @@ class TestAssembleSpades(TestCaseWithTmp):
             self.assertEqual(contig_lens, [184, 187, 191, 194, 197, 200, 201, 210, 211, 222, 243, 244, 268,
                                            294, 348, 376, 381, 430, 431])
 
+    def test_assembly_metaspades(self):
+        inDir = util.file.get_test_input_path(self)
+        inBam = os.path.join(inDir, '..', 'G5012.3.subset.bam')
+        clipDb = os.path.join(inDir, 'clipDb.fasta')
+        with util.file.tempfname('.fasta') as outFasta:
+            assembly.assemble_spades(in_bam=inBam, clip_db=clipDb, min_contig_len=180, out_fasta=outFasta,
+                                     mode='meta', threads=2)
+            self.assertGreater(os.path.getsize(outFasta), 0)
+            contig_lens = list(sorted(len(seq.seq) for seq in Bio.SeqIO.parse(outFasta, 'fasta')))
+            #with open('/tmp/thelist.txt', 'wt') as out:
+            #    out.write(str(contig_lens))
+            self.assertEqual(contig_lens, [210, 210, 222, 243, 244, 268, 300, 328, 337, 348, 376, 381])
+
     def test_assembly_with_previously_assembled_contigs(self):
         inDir = util.file.get_test_input_path(self)
         inBam = os.path.join(inDir, '..', 'G5012.3.subset.bam')
