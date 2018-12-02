@@ -373,10 +373,22 @@ def assemble_spades(
     '''
 
     with util.file.tmp_dir('_asm_spades') as t_dir:
-        log.info('SPLITTING BY LIB %s into %s', in_bam, t_dir)
-        tools.picard.SplitSamByLibraryTool().execute(in_bam, t_dir)
-        lib_bams = [os.path.join(t_dir, f) for f in os.listdir(t_dir)]
-        log.info('SPLIT BY LIB %s into %s', lib_bams, t_dir)
+        by_lib_dir = os.path.join(t_dir, 'by_lib')
+        util.file.mkdir_p(by_lib_dir)
+        log.info('SPLITTING BY LIB %s into %s', in_bam, by_lib_dir)
+        tools.picard.SplitSamByLibraryTool().execute(in_bam, by_lib_dir)
+        lib_bams = [os.path.join(by_lib_dir, f) for f in sorted(os.listdir(by_lib_dir))]
+        log.info('SPLIT BY LIB %s into %s: %s', in_bam, by_lib_dir, lib_bams)
+
+        # by_lib2_dir = os.path.join(t_dir, 'by_lib2')
+        # log.info('NOW SPLITTING BY LIB %s into %s', in_bam, by_lib2_dir)
+        # util.file.mkdir_p(by_lib2_dir)
+        # lib2_bams = read_utils.split_bam_by_lib(in_bam, by_lib2_dir)
+        # #util.cmd.run_cmd(read_utils, 'split_bam_by_lib', [in_bam, by_lib2_dir])
+        # log.info('NOW SPLIT BY LIB %s into %s: %s', in_bam, by_lib_dir, lib2_bams)
+
+        #lib_bams = lib2_bams
+
         preproc_bams = [lib_bam+'.preproc.bam' for lib_bam in lib_bams]
         with concurrent.futures.ThreadPoolExecutor(max_workers=util.misc.available_cpu_count()) as executor:
             results = list(executor.map(functools.partial(trim_rmdup_subsamp_reads,
@@ -391,6 +403,8 @@ def assemble_spades(
                                                                                             includeUnpaired=True,
                                                                                             illuminaClipping=True)))
                     for preproc_bam in preproc_bams]
+
+            log.info('LIBS ARE: %s', libs)
 
             try:
                 tools.spades.SpadesTool().assemble(libraries=libs, mode=mode,
@@ -415,7 +429,7 @@ def parser_assemble_spades(parser=argparse.ArgumentParser()):
     parser.add_argument('out_fasta', help='Output assembled contigs. Note that, since this is RNA-seq assembly, '
                         'for each assembled genomic region there may be several contigs representing different variants '
                         'of that region.')
-    parser.add_argument('--mode', choices=('rna', 'meta'), default='meta', help='rnaSPAdes or metaSPAdes')
+    parser.add_argument('--mode', choices=('rna', 'meta'), default='rna', help='rnaSPAdes or metaSPAdes')
     parser.add_argument('--contigsTrusted', dest='contigs_trusted', 
                         help='Optional input contigs of high quality, previously assembled from the same sample')
     parser.add_argument('--contigsUntrusted', dest='contigs_untrusted', 

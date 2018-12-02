@@ -285,6 +285,7 @@ class MummerTool(tools.Tool):
                 # construct scaffolded sequence for this chromosome
                 seq = []
                 for _, left, right, n_features, features in fs.get_intervals(c):
+                    log.info('REGION: %s:%d-%d (len %d) - %d features', _, left, right, right-left, n_features)
                     # get all proposed sequences for this specific region
                     alt_seqs = []
                     for f in features:
@@ -293,6 +294,8 @@ class MummerTool(tools.Tool):
                         except AmbiguousAlignmentException:
                             log.warn("dropping ambiguous alignment to ref seq {} at [{},{}]".format(c, f[1], f[2]))
                             pass
+
+                    log.info('for region %s:%d-%d (len %d) got %d seqs', _, left, right, right-left, len(alt_seqs))
 
                     # pick the "right" one and glue together into a chromosome
                     ranked_unique_seqs = contig_chooser(alt_seqs, right-left+1, "%s:%d-%d" % (c, left, right))
@@ -569,38 +572,65 @@ class AlignsReader(object):
                 self.seq_ids[0], start, stop, self.seq_ids[1], len(aln))
             for x in aln:
                 log.debug("alignment: %s", str(x[:6]))
-            raise AmbiguousAlignmentException()
-        aln = aln[0]
-        ref_l, ref_r, ref_seq, alt_seq = (aln[1], aln[2], aln[-2], aln[-1])
+            #raise AmbiguousAlignmentException()
+        
+        alns = aln
+        alt_seqs = []
+        for aln in alns:
 
-        # convert desired start/stop relative to this reference window
-        #  such that 0 <= start <= stop <= ref_r-ref_l+1
-        start = start - ref_l
-        stop = stop - ref_l
+            #aln = aln[0]
+            ref_l, ref_r, ref_seq, alt_seq = (aln[1], aln[2], aln[-2], aln[-1])
 
-        # travel down alignment until we've reached the left edge
-        #  (because of gaps, you must check each position one by one)
-        #  end loop when ref_seq[:i_left] contains {start} bases
-        n_ref_bases = 0
-        i_left = 0
-        while n_ref_bases < start:
-            if ref_seq[i_left] != '-':
-                n_ref_bases += 1
-            i_left += 1
+            # convert desired start/stop relative to this reference window
+            #  such that 0 <= start <= stop <= ref_r-ref_l+1
+            start_aln = start - ref_l
+            stop_aln = stop - ref_l
 
-        # travel down alignment until we've reached the right edge
-        #  (because of gaps, you must check each position one by one)
-        #  end loop when ref_seq[:i_right] contains {stop} bases
-        i_right = i_left
-        while n_ref_bases < stop:
-            if ref_seq[i_right] != '-':
-                n_ref_bases += 1
-            i_right += 1
-        # consume and include any trailing gaps
-        while i_right < len(ref_seq) and ref_seq[i_right] == '-':
-            i_right += 1
+            # travel down alignment until we've reached the left edge
+            #  (because of gaps, you must check each position one by one)
+            #  end loop when ref_seq[:i_left] contains {start} bases
+            n_ref_bases = 0
+            i_left = 0
+            while n_ref_bases < start_aln:
+                if ref_seq[i_left] != '-':
+                    n_ref_bases += 1
+                i_left += 1
 
-        # grab the alternate sequence and strip gaps
-        alt_seq = alt_seq[i_left:i_right+1].replace('-','')
-        return alt_seq
+            # travel down alignment until we've reached the right edge
+            #  (because of gaps, you must check each position one by one)
+            #  end loop when ref_seq[:i_right] contains {stop} bases
+            i_right = i_left
+            while n_ref_bases < stop_aln:
+                if ref_seq[i_right] != '-':
+                    n_ref_bases += 1
+                i_right += 1
+            # consume and include any trailing gaps
+            while i_right < len(ref_seq) and ref_seq[i_right] == '-':
+                i_right += 1
+
+            # grab the alternate sequence and strip gaps
+            alt_seq = alt_seq[i_left:i_right+1].replace('-','')
+            alt_seqs.append(alt_seq)
+
+        if len(set(alt_seqs)) == 1:
+            if len(alt_seqs) > 1:
+                log.info('FIXED AN AMBIGUITY! %d:%d len=%d', start, stop, stop-start)
+            return alt_seqs[0]
+        
+        log.info('DIFFERING ALT_SEQS')
+        log.info('SEQ 0: %s (len %d)', alt_seqs[0], len(alt_seqs[0]))
+        log.info('SEQ 1: %s (len %d)', alt_seqs[1], len(alt_seqs[1]))
+        if len(alt_seqs) == 2 and len(alt_seqs[0]) == len(alt_seqs[1]):
+            n_diffs = 0
+            for i in range(len(alt_seqs[0])):
+                if alt_seqs[0][i] != alt_seqs[1][i]:
+                    n_diffs += 1
+            log.info('differ at %d of %d bases', n_diffs, len(alt_seqs[0]))
+            log.info('type is %s', type(alt_seqs[0]))
+            if float(n_diffs) / float(len(alt_seqs[0])) < 0.01:
+                log.info('Just choosing sequence 0 for now')
+                return alt_seqs[0]
+
+        raise AmbiguousAlignmentException()
+
 
