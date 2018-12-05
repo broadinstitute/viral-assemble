@@ -2005,7 +2005,8 @@ def gather_analyses(dirs):
 # * compare_analysis_pairs
 
 def _load_analysis_metadata(analysis_dir, git_links_abspaths=False):
-    """Read the analysis metadata from an analysis dir"""
+    """Read the analysis metadata from an analysis dir.  If `git_links_abspath` is True,
+    paths in git links will be made absolute."""
     md = _json_loadf(os.path.join(analysis_dir, 'metadata.json'))
     md['analysis_dir'] = analysis_dir
     if git_links_abspaths:
@@ -2013,6 +2014,7 @@ def _load_analysis_metadata(analysis_dir, git_links_abspaths=False):
     return md
 
 def _flatten_analysis_metadata(val, pfx=''):
+    """Convert analysis metadata to a flat list of key-value pairs"""
     if _is_git_link(val):
         return _flatten_analysis_metadata('md5:'+_git_link_md5(val), pfx)
 
@@ -2040,7 +2042,8 @@ def diff_analyses(analysis_dirs, key_prefixes=()):
 
 def parser_diff_analyses(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dirs', nargs=2, help='the two analysis dirs')
-    parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+')
+    parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+',
+                        help='only consider metadata items starting with these prefixes')
     util.cmd.attach_main(parser, diff_analyses, split_args=True)
 
 __commands__.append(('diff_analyses', parser_diff_analyses))
