@@ -115,7 +115,7 @@ def objectify_remote(file_address, *args, **kwargs):
         raise IOError("%s is None" % file_address)
 
     # if this is a string, make it a list, otherwise use it as an iterable
-    file_list = file_address if util.misc.is_nonstr_iterable(file_address) else [file_address]
+    file_list = file_address if util.misc.is_nonatom_iterable(file_address) else [file_address]
 
     for index, uri in enumerate(file_list):
         if uri.lower().startswith('s3://'):
