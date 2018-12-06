@@ -80,18 +80,38 @@ def cleanup_misc():
     _commit_caches()
 
 def memoize_persist(to_picklable=identity, from_picklable=identity):
+
     def memoize_persist_do(obj):
         cache_dir = os.path.join(util.file.get_cache_dir(), 'vngs', get_module_name(obj))
         util.file.mkdir_p(cache_dir)
-        cache = obj.cache = sqlitedict.SqliteDict(os.path.join(cache_dir, obj.__name__))
-        _caches.append(cache)
+        key_hash2cache = {}
+
+        def get_cache(key):
+            key_hash = '{:03d}'.format(hash(key) % 1000)
+
+            if key_hash not in key_hash2cache:
+                db_dir = os.path.join(cache_dir, obj.__name__, key_hash[0], key_hash[1])
+                util.file.mkdir_p(db_dir)
+                cache = sqlitedict.SqliteDict(os.path.join(db_dir, key_hash[2]))
+                _caches.append(cache)
+                key_hash2cache[key_hash] = cache
+            return key_hash2cache.get[key_hash]
 
         @wraps(obj)
         def memoizer(*args, **kwargs):
-            key = "".join([str(args),str(kwargs)])
-            if key not in cache:
-                cache[key] = to_picklable(obj(*args, **kwargs))
-            return from_picklable(cache[key])
+            key = "".join([str(args),str(sorted(kwargs))])
+            try:
+                cache = get_cache(key)
+            except Exception:
+                cache = {}
+            if key in cache:
+                return from_picklable(cache[key])
+            result = obj(*args, **kwargs)
+            try:
+                cache[key] = to_picklable(result)
+            except Exception:
+                pass
+            return result
         return memoizer
     return memoize_persist_do
 
