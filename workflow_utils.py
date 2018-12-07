@@ -1754,7 +1754,7 @@ def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
     return functools.reduce(operator.concat, map(_get_analysis_dirs, util.misc.make_seq(analysis_dirs_roots)), [])
 
 # ** finalize_analysis_dirs impl
-def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None):
+def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None, status_only=False):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
@@ -1773,6 +1773,10 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                 continue
         else:
             processing_stats['noAnalysisDirForWorkflow'] += 1
+            continue
+
+        if status_only:
+            print(wf['id'], mdata['status'])
             continue
 
         util.file.mkdir_p(analysis_dir)
@@ -1800,6 +1804,7 @@ def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
                         help='only consider workflows submitted this or fewer hours ago')
     parser.add_argument('--analysisDirsRoots', dest='analysis_dirs_roots', nargs='+',
                         help='only consider analyses whose analysis dirs are in one of these trees')
+    parser.add_argument('--statusOnly', dest='status_only', default=False, action='store_true', help='print status and quit')
     util.cmd.attach_main(parser, finalize_analysis_dirs, split_args=True)
 
 __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
