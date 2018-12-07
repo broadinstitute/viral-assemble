@@ -221,7 +221,7 @@ def _transform_parsed_json(val, node_handler, path=()):
         node_handler_args['path'] = path
     handled_val = node_handler(val, **node_handler_args)
     if handled_val is not val:
-        _log.debug('resolved %s to %s', val, handled_val)
+        #_log.debug('resolved %s to %s', val, handled_val)
         return handled_val
     if isinstance(val, list):
         return [recurse(val=v, path=path+(i,)) for i, v in enumerate(val)]
@@ -594,11 +594,11 @@ def _resolve_link_dx(val, git_file_dir, dx_analysis_id, _cache=None):
         assert dx_file_id.startswith('file-')
         if _maps(_cache, dx_file_id):
             val_resolved = copy.deepcopy(_cache[dx_file_id])
-            _log.debug('RESOLVED %s TO %s FROM CACHE', val, val_resolved)
+            #_log.debug('RESOLVED %s TO %s FROM CACHE', val, val_resolved)
         else:
             util.file.mkdir_p(git_file_dir)
             val_resolved = {'$git_link': import_from_url(url='dx://' + dx_file_id, git_file_path=git_file_dir, fast=False)}
-            _log.debug('RESOLVED %s TO %s', val, val_resolved)
+            #_log.debug('RESOLVED %s TO %s', val, val_resolved)
             if _cache is not None:
                 _cache[dx_file_id] = val_resolved
     return val_resolved
