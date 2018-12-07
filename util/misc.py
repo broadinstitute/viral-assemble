@@ -702,9 +702,9 @@ def as_type(val, types):
 
 def subdict(d, keys):
     """Return a newly allocated shallow copy of a mapping `d` restricted to keys in `keys`."""
-    d = dict(d)
+    d = collections.OrderedDict(d)
     keys = set(keys)
-    return {k: v for k, v in d.items() if k in keys}
+    return collections.OrderedDict([(k, v) for k, v in d.items() if k in keys])
 
 def chk(condition, message='Check failed', exc=RuntimeError):
     """Check a condition, raise an exception if condition is False."""
