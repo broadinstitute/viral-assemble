@@ -546,6 +546,7 @@ def parser_json_to_org(parser=argparse.ArgumentParser()):
     parser.add_argument('json_fname', help='json file to import')
     parser.add_argument('org_fname', help='org file to output', nargs='?')
     util.cmd.attach_main(parser, json_to_org, split_args=True)
+    return parser
 
 __commands__.append(('json_to_org', parser_json_to_org))
 
@@ -852,6 +853,7 @@ def parser_import_dx_analyses(parser=argparse.ArgumentParser(fromfile_prefix_cha
     parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/dxan-',
                         help='analysis dir prefix; analysis id will be added to it.')
     util.cmd.attach_main(parser, import_dx_analyses, split_args=True)
+    return parser
 
 __commands__.append(('import_dx_analyses', parser_import_dx_analyses))
 
@@ -938,13 +940,18 @@ def _analysis_inputs_from_analysis_dir_do(args, **kw):
 
     return _make_git_links_absolute(inps, os.path.abspath(args.analysis_dir))
 
-def _get_analysis_dirs_under(analysis_dir_roots, recurse=True):
-    """Yield the analysis dirs under `analysis_dir_roots`.  If `recurse` is False, only `analysis_dir_roots`
-    themselves are yielded."""
+def _yield_analysis_dirs_under(analysis_dirs_roots, recurse=True):
+    """Yield the analysis dirs under `analysis_dirs_roots`.  If `recurse` is False, only `analysis_dirs_roots`
+    themselves are yielded.
+
+    Note that, if new analysis dirs are added under the roots during iteration, some of them may be yielded;
+    to return a list representing a snapshot of the analysis dirs at the current time, use
+    _list_analysis_dirs_under() defined below.
+    """
     dirs_seen = set()
     def _walk_error(e):
         raise e
-    for root_dir in util.misc.make_seq(analysis_dir_roots):
+    for root_dir in util.misc.make_seq(analysis_dirs_roots):
         for dirpath, subdirs, files in os.walk(root_dir, followlinks=True, onerror=_walk_error):
             dirpath = os.path.realpath(dirpath)
             if dirpath in dirs_seen:
@@ -956,10 +963,23 @@ def _get_analysis_dirs_under(analysis_dir_roots, recurse=True):
                 break
             dirs_seen.add(dirpath)
 
-def _analysis_inputs_from_analysis_dir_roots(args, **kw):
+
+def _get_analysis_dirs_under(analysis_dirs_roots, recurse=True):
+    """Returns a tuple of the analysis dirs under `analysis_dirs_roots`, as they exist at the time of the call.
+    If `recurse` is False, only `analysis_dirs_roots`themselves are yielded."""
+    return tuple(_yield_analysis_dirs_under(analysis_dirs_roots, recurse=recurse))
+
+def _analysis_inputs_from_analysis_dirs_roots(args, **kw):
     analysis_dirs_inputs = []
-    for analysis_dir in _get_analysis_dirs_under(args.analysis_dir_roots, recurse=args.recurse):
+    for analysis_dir in list(_get_analysis_dirs_under(args.analysis_dirs_roots, recurse=args.recurse)):
+        if args.failed_only:
+            mdata_fname = os.path.join(analysis_dir, 'metadata.json')
+            mdata = _json_loadf(mdata_fname)
+            if mdata['status'] == 'Success':
+                continue
+
         args.analysis_dir = analysis_dir
+
         analysis_dirs_inputs.append(_analysis_inputs_from_analysis_dir_do(args, **kw))
     return analysis_dirs_inputs
 
@@ -975,12 +995,14 @@ def _construct_analysis_inputs_parser():
 
     parser_analysis_dir = subparsers.add_parser('analysisDirsUnder',
                                                 help='analysis dirs for past analyses', prefix_chars='+')
-    parser_analysis_dir.add_argument('analysis_dir_roots', metavar='ANALYSIS_DIR_ROOT', nargs='+')
+    parser_analysis_dir.add_argument('analysis_dirs_roots', metavar='ANALYSIS_DIR_ROOT', nargs='+')
     parser_analysis_dir.add_argument('++inputNameSubst', dest='input_name_subst', nargs=2, action='append',
                                     help='substitute strings in input names')
     parser_analysis_dir.add_argument('+r', '++recurse', default=False, action='store_true',
                                      help='include all analysis dirs under each root')
-    parser_analysis_dir.set_defaults(func=_analysis_inputs_from_analysis_dir_roots)
+    parser_analysis_dir.add_argument('+f', '++failedOnly', dest='failed_only', default=False, action='store_true',
+                                     help='only take analysis dirs for failed analyses')
+    parser_analysis_dir.set_defaults(func=_analysis_inputs_from_analysis_dirs_roots)
 
     return parser
 
@@ -1554,6 +1576,7 @@ def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
                         help='labels to attach to the analysis')
     parser.add_argument('--backend', default='Local', help='backend on which to run')
     util.cmd.attach_main(parser, submit_analysis_wdl, split_args=True)
+    return parser
 
 __commands__.append(('submit_analysis_wdl', parser_submit_analysis_wdl))
 
@@ -1668,6 +1691,7 @@ def parser_run_cloud_object_url_server(parser=argparse.ArgumentParser()):
     parser.add_argument('--validPaths', dest='valid_paths', required=True, help='paths that may be accessed',
                         nargs='+')
     util.cmd.attach_main(parser, run_cloud_object_url_server, split_args=True)
+    return parser
 
 __commands__.append(('run_cloud_object_url_server', parser_run_cloud_object_url_server))
 
@@ -1760,8 +1784,8 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
     cromwell_server = CromwellServer(host=cromwell_host)
     processing_stats = collections.Counter()
 
-    for wf in cromwell_server.get_workflows(query=[('submission', _isoformat_ago(hours=hours_ago)),
-                                                   ('status', 'Succeeded'), ('status', 'Failed')]):
+    for wf in cromwell_server.get_workflows(query=[('submission', _isoformat_ago(hours=hours_ago))]+ \
+                                            ([] if status_only else [('status', 'Succeeded'), ('status', 'Failed')])):
         processing_stats['workflowsFromCromwell'] += 1
         mdata = cromwell_server.get_metadata(wf['id'])
         assert mdata['id'] == wf['id']
@@ -1806,6 +1830,7 @@ def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
                         help='only consider analyses whose analysis dirs are in one of these trees')
     parser.add_argument('--statusOnly', dest='status_only', default=False, action='store_true', help='print status and quit')
     util.cmd.attach_main(parser, finalize_analysis_dirs, split_args=True)
+    return parser
 
 __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
 
@@ -1902,6 +1927,7 @@ def parser_import_from_url(parser=argparse.ArgumentParser()):
     parser.add_argument('--fast', default=False, action='store_true', help='do not immediately download the file')
     parser.add_argument('--importDirs', dest='import_dirs', default=False, action='store_true', help='import directories')
     util.cmd.attach_main(parser, import_from_url, split_args=True)
+    return parser
 
 __commands__.append(('import_from_url', parser_import_from_url))
 
@@ -2012,53 +2038,75 @@ def gather_analyses(dirs):
 def _load_analysis_metadata(analysis_dir, git_links_abspaths=False):
     """Read the analysis metadata from an analysis dir.  If `git_links_abspath` is True,
     paths in git links will be made absolute."""
+    _log.info('loading analysis metadata from %s', analysis_dir)
     md = _json_loadf(os.path.join(analysis_dir, 'metadata.json'))
     md['analysis_dir'] = analysis_dir
     if git_links_abspaths:
         md = _make_git_links_absolute(md, base_dir=os.path.abspath(analysis_dir))
     return md
 
-def _flatten_analysis_metadata(val, pfx=''):
+def _flatten_analysis_metadata_list(val, pfx=''):
     """Convert analysis metadata to a flat list of key-value pairs"""
     if _is_git_link(val):
-        return _flatten_analysis_metadata('md5:'+_git_link_md5(val), pfx)
+        return _flatten_analysis_metadata_list('md5:'+_git_link_md5(val), pfx)
 
     def _concat(iters): return list(itertools.chain.from_iterable(iters))
 
     if isinstance(val, list):
-        return _concat(_flatten_analysis_metadata(v, pfx+('.' if pfx else '')+str(i))
+        return _concat(_flatten_analysis_metadata_list(v, pfx+('.' if pfx else '')+str(i))
                        for i, v in enumerate(val))
     if _is_mapping(val):
-        return _concat(_flatten_analysis_metadata(v, pfx+('.' if pfx else '')+k)
+        return _concat(_flatten_analysis_metadata_list(v, pfx+('.' if pfx else '')+k)
                        for k, v in val.items())
     return [(pfx, val)]
 
+def _key_matches_prefixes(key, key_prefixes):
+    return not key_prefixes or any(key.startswith(key_prefix)
+                                   for key_prefix in key_prefixes)
+
+def _flatten_analysis_metadata(mdata, key_prefixes=()):
+    _log.info('mdata=%s', len(mdata))
+    flat_mdata = _ord_dict(*_flatten_analysis_metadata_list(mdata))
+    _log.info('flat_mdata=%s', len(flat_mdata))
+    flat_mdata['succeeded'] = int(flat_mdata['status'] == 'Succeeded')
+    if key_prefixes:
+        flat_mdata = _ord_dict(*[(key, val) for key, val in flat_mdata.items()
+                                 if key=='analysis_dir' or _key_matches_prefixes(key, key_prefixes)])
+    return flat_mdata
+
 def diff_analyses(analysis_dirs, key_prefixes=()):
+    """Print differences between two analysis dirs."""
     assert len(analysis_dirs)==2, 'currently can only compare two analyses'
 
-    flat_mdatas = [dict(_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir, git_links_abspaths=True)))
+    flat_mdatas = [_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir,
+                                                                      git_links_abspaths=True),
+                                              key_prefixes=key_prefixes)
                    for analysis_dir in analysis_dirs]
     all_keys = sorted(set(itertools.chain.from_iterable(flat_mdatas)))
     for key in all_keys:
-        if not key_prefixes or any(key.startswith(key_prefix) for key_prefix in (key_prefixes or ())):
-            vals = [flat_mdatas[i].get(key, None) for i in (0, 1)]
-            if vals[0] != vals[1]:
-                print(key, vals[0], vals[1])
+        vals = [flat_mdatas[i].get(key, None) for i in (0, 1)]
+        if vals[0] != vals[1]:
+            print(key, vals[0], vals[1])
 
 def parser_diff_analyses(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dirs', nargs=2, help='the two analysis dirs')
     parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+',
                         help='only consider metadata items starting with these prefixes')
     util.cmd.attach_main(parser, diff_analyses, split_args=True)
+    return parser
 
 __commands__.append(('diff_analyses', parser_diff_analyses))
     
 
-def compare_analysis_pairs(workflow_name, analysis_dirs, filter_A, filter_B, metrics):
-    """Compare pairs of analyses from `analysis_dirs` where the two analyses of a pair have
-    identical values of `common_fields`, the first analysis of the pair matches the criteria in `filter_A` and
-    the second matches the criteria in `filter_B`.  For such pairs, show the distribution of output 
-    `metrics`.
+def compare_analysis_pairs(analysis_dirs_roots, filter_A, filter_B, metrics,
+                           key_prefixes=('inputs.', 'labels.docker_img_hash', 'status', 'succeeded'),
+                           common_keys_prefixes=()):
+    """Compare pairs of analyses from `analysis_dirs` where  the first analysis of the pair matches the criteria in `filter_A`,
+    the second matches the criteria in `filter_B`, and the remaining fields are equal.
+    For such pairs, show the distribution of output `metrics`.
+
+    Terms:
+       analysis group -- a group of analyses that have the same identical values at keys not in filter_A or filter_B
     """
 
     # For each distinct combination of `common_fields` values, gather the analyses with that combination.
@@ -2068,53 +2116,82 @@ def compare_analysis_pairs(workflow_name, analysis_dirs, filter_A, filter_B, met
     _log.info('filter_B=%s', filter_B)
     metrics = metrics or ()
 
-    flat_analyses = [_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir))
-                     for analysis_dir in _get_analysis_dirs_under(analysis_dirs)]
-    flat_analyses = [ f for f in flat_analyses if dict(f)['status'] == 'Succeeded' ]
-    _log.info('len(analysis_dirs)=%d', len(analysis_dirs))
+    flat_analyses = [_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir, git_links_abspaths=True),
+                                                key_prefixes=key_prefixes)
+                     for analysis_dir in _get_analysis_dirs_under(analysis_dirs_roots)]
+    flat_analyses = [ f for f in flat_analyses if f['status'] in ('Succeeded', 'Failed')]
+    _log.info('len(analysis_dirs)=%d', len(analysis_dirs_roots))
     _log.info('len(flat_analyses)=%d', len(flat_analyses))
 
     assert filter_A.keys() == filter_B.keys(), 'Atypical usage -- probably error?'
     
-    filter_fields = set(set(filter_A.keys()) | set(filter_B.keys()))
+    filter_keys = set(set(filter_A.keys()) | set(filter_B.keys()))
 
-    def _get_common_fields(flat_analysis):
-        return tuple(sorted([(k, v) for k, v in flat_analysis \
-                             if k not in filter_fields and \
-                             (k.startswith('inputs.') or k.startswith('labels.docker_img_hash'))]))
+    print('COMMON_KEYS=', common_keys_prefixes)
+
+    def _get_analysis_group_key(flat_analysis):
+        """Get key-value pairs that should be identical for any pairs we compare"""
+        return tuple(sorted([(k, v) for k, v in flat_analysis.items() \
+                             if (common_keys_prefixes and _key_matches_prefixes(k, common_keys_prefixes))
+                             or (not common_keys_prefixes and k not in filter_keys)]))
 
     analysis_groups = collections.defaultdict(list)
     for a in flat_analyses:
-        analysis_groups[_get_common_fields(a)].append(a)
+        group_key = _get_analysis_group_key(a)
+        if not group_key:
+            print('NO GROUP KEY')
+            print('\n'.join(map(str,a)))
+            raise RuntimeException('no group key')
+            continue
+        analysis_groups[group_key].append(a)
 
-    def _matches(a, filt):
-        return all([k not in filt or filt[k] == v for k, v in a])
+    def _analysis_matches_filter(flat_analysis, filt):
+        return all([k not in filt or v=='*' or flat_analysis.get(k, None) == v for k, v in flat_analysis.items()])
 
     metric2diffs = collections.defaultdict(list)
 
+    _log.info('filter_A=%s', filter_A)
+    _log.info('filter_B=%s', filter_B)
+
     found_pairs = 0
     for ag, analyses in analysis_groups.items():
-        ag_A = [a for a in analyses if _matches(a, filter_A)]
-        ag_B = [a for a in analyses if _matches(a, filter_B)]
+        ag_A = [a for a in analyses if _analysis_matches_filter(a, filter_A)]
+        ag_B = [a for a in analyses if _analysis_matches_filter(a, filter_B)]
         if ag_A and ag_B:
-            an_A = collections.OrderedDict(ag_A[0])
-            an_B = collections.OrderedDict(ag_B[0])
-            #print('\nag=', ag, '\nan_A=', an_A, '\nan_B=', an_B)
             found_pairs += 1
-            for metric in metrics:
-                metric2diffs[metric].append((an_B[metric] - an_A[metric], an_A['analysis_dir'], an_B['analysis_dir']))
+            for an_A, an_B in itertools.product(ag_A, ag_B):
+                print('\nag=', ag, '\nan_A=', an_A, '\nan_B=', an_B)
+                assert _analysis_matches_filter(an_A, filter_A)
+                assert _analysis_matches_filter(an_B, filter_B)
+                #if an_A['analysis_dir'] == an_B['analysis_dir']: continue
+                for metric in metrics:
+                    if an_A['analysis_dir'] != an_B['analysis_dir']:
+                        metric2diffs[metric].append((an_B[metric] - an_A[metric], an_A['analysis_dir'], an_B['analysis_dir']))
+                        print('AN_A is')
+                        print('\n'.join(map(str,an_A.items())))
+                        print('AN_B is')
+                        print('\n'.join(map(str,an_B.items())))
+
+                    else:
+                        _log.info('skip: %s', (an_B[metric] - an_A[metric], an_A['analysis_dir'], an_B['analysis_dir']))
     _log.info('found_pairs=%s', found_pairs)
     for metric in metrics:
         print('metric=', metric, 'diffs=\n')
         print('\n'.join(map(str, sorted(metric2diffs[metric]))))
 
 def parser_compare_analysis_pairs(parser=argparse.ArgumentParser()):
-    parser.add_argument('--workflowName', dest='workflow_name', required=True)
+    parser.add_argument('--analysisDirsRoots', dest='analysis_dirs_roots', nargs='+', required=True,
+                        help='dir roots containing analysis dirs')
     parser.add_argument('--filterA', dest='filter_A', nargs=2, action='append', required=True)
     parser.add_argument('--filterB', dest='filter_B', nargs=2, action='append', required=True)
     parser.add_argument('--metrics', action='append')
-    parser.add_argument('--analysisDirs', dest='analysis_dirs', default='pipelines', help='dir containing analysis dirs')
+    parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+',
+                        default=['inputs.', 'outputs.', 'labels.docker_img_hash', 'status', 'succeeded'],
+                        help='only consider metadata items starting with these prefixes')
+    parser.add_argument('--commonKeysPrefixes', dest='common_keys_prefixes', nargs='+',
+                        help='only compare pairs of analyses that agree on keys starting with these prefixes')
     util.cmd.attach_main(parser, compare_analysis_pairs, split_args=True)
+    return parser
 
 __commands__.append(('compare_analysis_pairs', parser_compare_analysis_pairs))
 
