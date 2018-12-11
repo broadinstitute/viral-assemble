@@ -540,7 +540,7 @@ class CondaPackage(InstallMethod):
         #    return
 
         # try to create the environment and install the package
-        run_cmd = ["conda", "create", "-y", "--json", "-c", self.channel, "-p", self.env_path, self._package_str]
+        run_cmd = ["conda", "create", "-q", "-y", "--json", "-c", self.channel, "-p", self.env_path, self._package_str]
 
         _log.debug("Creating conda environment and installing package {package}".format(package=self._package_str))
 
