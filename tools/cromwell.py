@@ -40,5 +40,5 @@ class CromwellTool(tools.Tool):
         _log.debug(' '.join(tool_cmd))
         subprocess.check_call(tool_cmd)
 
-    
+
 
