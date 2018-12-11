@@ -623,10 +623,12 @@ def _resolve_link_local_path(val, git_file_dir):
     link_into_annex, link_target_in_annex = tools.git_annex.GitAnnexTool()._get_link_into_annex(val)
     if link_target_in_annex:
         os.symlink(link_into_annex, fname)
-    else:
+    elif os.path.isfile(val):
         shutil.copyfile(val, fname)
         assert os.path.isfile(fname)
         _git_annex_add(fname)
+    else:
+        return val
     _log.debug('GIT LINK TO %s', fname)
     return {'$git_link': fname}
     
