@@ -1,3 +1,0 @@
-[submodule "cromwell-tools"]
-	path = cromwell-tools
-	url = https://github.com/broadinstitute/cromwell-tools.git
