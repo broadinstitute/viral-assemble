@@ -61,6 +61,10 @@ def test_git_annex_get(tmpdir_function):
             ga.get(file_A)
             assert os.path.isfile(file_A)
 
+            ga.drop(file_A)
+            assert not os.path.isfile(file_A)
+
+
 
 
 
