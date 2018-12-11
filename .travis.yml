@@ -11,7 +11,7 @@ env:
   - PIP_DIR="$HOME/virtualenv"
   - GATK_PATH="$CACHE_DIR"
   - PYTHONIOENCODING=UTF8
-  - PYTEST_ADDOPTS="-rsxX --durations=25 --fixture-durations=10 --junit-xml=pytest.xml --cov-report= --cov broad_utils --cov illumina --cov assembly --cov interhost --cov intrahost --cov metagenomics --cov ncbi --cov read_utils --cov kmer_utils --cov reports --cov taxon_filter --cov tools --cov util --cov file_utils"
+  - PYTEST_ADDOPTS="-rsxX -n 2 --durations=25 --fixture-durations=10 --junit-xml=pytest.xml --cov-report= --cov broad_utils --cov illumina --cov assembly --cov interhost --cov intrahost --cov metagenomics --cov ncbi --cov read_utils --cov kmer_utils --cov reports --cov taxon_filter --cov tools --cov util --cov file_utils"
   
   - DOCKER_REGISTRY="quay.io"
   - DOCKER_REPO_PROD="quay.io/broadinstitute/viral-ngs"
@@ -166,7 +166,7 @@ jobs:
         - source travis/activate-conda.sh
       script:
         - travis/tests-unit.sh
-        #- travis/tests-long.sh
+        - travis/tests-long.sh
       before_cache:
         - conda clean --all --yes
 
@@ -183,7 +183,7 @@ jobs:
         - travis/install-tools.sh
         - source travis/activate-conda.sh
       script:
-        #- travis/tests-long.sh
+        - travis/tests-long.sh
         - travis/tests-unit.sh
       after_success:
         - coveralls
