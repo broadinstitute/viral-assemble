@@ -86,7 +86,6 @@ import binascii
 import dxpy
 import dxpy.bindings.dxfile_functions
 
-import boto3
 import uritools
 import pytz
 from googleapiclient import discovery

@@ -317,7 +317,7 @@ class CondaPackage(InstallMethod):
         old_envs_path = os.environ.get('CONDA_DEFAULT_ENV')
         self.conda_env["CONDA_ENVS_PATH"] = conda_cache_path+":"+os.path.dirname(self.env_path)
 
-        #_log.info("Tool install conda env path: %s", self.env_path)
+        _log.info("Tool install conda env path: %s", self.env_path)
         self.installed = False
         self._is_attempted = False
 
@@ -540,7 +540,7 @@ class CondaPackage(InstallMethod):
         #    return
 
         # try to create the environment and install the package
-        run_cmd = ["conda", "create", "-q", "-y", "--json", "-c", self.channel, "-p", self.env_path, self._package_str]
+        run_cmd = ["conda", "create", "-y", "--json", "-c", self.channel, "-p", self.env_path, self._package_str]
 
         _log.debug("Creating conda environment and installing package {package}".format(package=self._package_str))
 
