@@ -64,6 +64,22 @@ def test_git_annex_get(tmpdir_function):
             ga.drop(file_A)
             assert not os.path.isfile(file_A)
 
+            file_A_abs = os.path.abspath(file_A)
+            save_cwd = os.getcwd()
+            with util.file.pushd_popd('/'):
+                ga.get(file_A_abs)
+                assert os.path.isfile(file_A_abs)
+                ga.drop(file_A_abs)
+                assert not os.path.isfile(file_A_abs)
+                
+                file_A_rel = os.path.relpath(file_A_abs)
+                ga.get(file_A_rel)
+                assert os.path.isfile(file_A_abs)
+                
+                ga.get(file_A_rel)
+                assert os.path.isfile(file_A_abs)
+                
+
 
 
 
