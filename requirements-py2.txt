@@ -1,2 +1,2 @@
-futures==3.0.4
+futures==3.2.0
 dxpy=0.261.1
