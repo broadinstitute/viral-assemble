@@ -59,9 +59,12 @@ class GitAnnexTool(tools.Tool):
         return TOOL_VERSION
 
     def execute(self, args, tool='git-annex'):    # pylint: disable=W0221
-        tool_cmd = [os.path.join(os.path.dirname(self.install_and_get_path()), tool)] + list(map(str, args))
+        bin_dir = os.path.dirname(self.install_and_get_path())
+        tool_cmd = [os.path.join(bin_dir, tool)] + list(map(str, args))
         _log.debug(' '.join(tool_cmd))
-        subprocess.check_call(tool_cmd)
+        env = dict(os.environ)
+        env['PATH'] = bin_dir + ':' + env['PATH']
+        subprocess.check_call(tool_cmd, env=env)
 
     def execute_git(self, args):
         self.execute(args, tool='git')
