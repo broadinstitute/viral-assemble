@@ -99,6 +99,18 @@ def test_git_annex_get(tmpdir_function):
                 assert not isfile(file_A_abs)
                 assert not isfile(file_A_link_abs)
 
+                file_A_rel = relpath(file_A_abs)
+                file_A_link_rel = 'file_A_link_rel'
+                os.symlink(file_A_rel, file_A_link_rel)
+                assert not isfile(file_A_rel)
+                ga.get(file_A_link_rel)
+                assert isfile(file_A_rel)
+                assert isfile(file_A_link_rel)
+                ga.drop(file_A_link_rel)
+                assert not isfile(file_A_rel)
+                assert not isfile(file_A_link_rel)
+
+
 
                 
                 

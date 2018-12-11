@@ -101,6 +101,7 @@ class GitAnnexTool(tools.Tool):
         # TODO: what if f is a dir, or list of dirs?  including symlinks?
         # then, to preserve git-annex-get semantics, need to 
 
+        _log.debug('git-annex get %s (cwd=%s)', f, os.getcwd())
         assert os.path.islink(f)
         f, link_target = self._get_link_into_annex(f)
         if not os.path.isfile(f):
@@ -110,6 +111,7 @@ class GitAnnexTool(tools.Tool):
 
     def drop(self, f):
         """Drop the file from its repo"""
+        _log.debug('git-annex drop %s (cwd=%s)', f, os.getcwd())
         assert os.path.islink(f)
         f, link_target = self._get_link_into_annex(f)
         if os.path.isfile(f):
