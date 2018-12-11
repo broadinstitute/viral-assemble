@@ -81,7 +81,30 @@ class GitAnnexTool(tools.Tool):
     def move(self, fname, to_remote_name):
         self.execute(['move', fname, '--to', to_remote_name])
 
+    def _get_link_into_annex(self, f):
+        """Follow symlinks as needed, to find the final symlink pointing into the annex"""
+        link_target = None
+        while os.path.islink(f):
+            link_target = os.readlink(f)
+            if '.git/annex/objects/' in link_target:
+                break
+            if os.path.isabs(link_target):
+                f = link_target
+            else:
+                f = os.path.join(os.path.dirname(f), link_target)
+        return f, link_target
 
+    def get(self, f):
+        """Ensure the file exists in the local annex.  Unlike git-annex-get, follows symlinks and 
+        will get the file regardless of what the current dir is."""
 
+        # TODO: what if f is a dir, or list of dirs?  including symlinks?
+        # then, to preserve git-annex-get semantics, need to 
 
-        
+        assert os.path.islink(f)
+        f, link_target = self._get_link_into_annex(f)
+        if not os.path.isfile(f):
+            with util.file.pushd_popd(os.path.dirname(os.path.abspath(f))):
+                self.execute(['get', os.path.basename(f)])
+        assert os.path.isfile(f)
+

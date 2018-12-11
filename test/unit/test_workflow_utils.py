@@ -50,12 +50,17 @@ def test_git_annex_get(tmpdir_function):
             ga.add(file_A)
             ga.commit('one file')
             assert os.path.isfile(file_A)
+            assert ga._get_link_into_annex(file_A)[0] == file_A
             
             dir_remote_name = 'my_dir_remote'
             ga.initremote(dir_remote_name, 'directory', directory=dir_remote)
             
             ga.move(file_A, to_remote_name=dir_remote_name)
             assert not os.path.isfile(file_A)
+            assert ga._get_link_into_annex(file_A)[0] == file_A
+            ga.get(file_A)
+            assert os.path.isfile(file_A)
+
 
 
 

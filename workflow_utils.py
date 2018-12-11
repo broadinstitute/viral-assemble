@@ -493,7 +493,7 @@ def _git_annex_get(f):
     assert os.path.islink(f)
     f, link_target = _git_annex_get_link_into_annex(f)
     if not os.path.isfile(f):
-        with util.file.pushd_popd(os.path.dirname(f)):
+        with util.file.pushd_popd(os.path.dirname(os.path.abspath(f))):
             _run('git', 'annex', 'get', os.path.basename(f))
     assert os.path.isfile(f)
 
