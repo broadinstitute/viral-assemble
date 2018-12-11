@@ -35,7 +35,7 @@ class TestCommandHelp(unittest.TestCase):
 
 def test_git_annex_basic():
     ga = tools.git_annex.GitAnnexTool()
-    ga.execute(['version'])
+    ga.print_version()
 
 def test_git_annex_get(tmpdir_function):
 

@@ -51,8 +51,7 @@ class GitAnnexTool(tools.Tool):
         if install_methods is None:
             install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, channel='conda-forge',
                                                   executable='git-annex',
-                                                  env='vngs-git-annex-env',
-                                                  verifycmd='git-annex version')]
+                                                  env='vngs-git-annex-env')]
         tools.Tool.__init__(self, install_methods=install_methods)
 
     def version(self):
@@ -61,13 +60,17 @@ class GitAnnexTool(tools.Tool):
     def execute(self, args, tool='git-annex'):    # pylint: disable=W0221
         bin_dir = os.path.dirname(self.install_and_get_path())
         tool_cmd = [os.path.join(bin_dir, tool)] + list(map(str, args))
-        _log.debug(' '.join(tool_cmd))
         env = dict(os.environ)
         env['PATH'] = bin_dir + ':' + env['PATH']
+        _log.debug(' '.join(tool_cmd))
+        _log.debug('PATH=%s', env['PATH'])
         subprocess.check_call(tool_cmd, env=env)
 
     def execute_git(self, args):
         self.execute(args, tool='git')
+
+    def print_version(self):
+	self.execute(['version'])
 
     def init_repo(self):
         self.execute_git(['init'])
