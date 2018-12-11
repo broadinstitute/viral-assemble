@@ -58,20 +58,23 @@ class GitAnnexTool(tools.Tool):
     def version(self):
         return TOOL_VERSION
 
-    def execute(self, args):    # pylint: disable=W0221
-        tool_cmd = [self.install_and_get_path()] + list(map(str, args))
+    def execute(self, args, tool='git-annex'):    # pylint: disable=W0221
+        tool_cmd = [os.path.join(os.path.dirname(self.install_and_get_path()), tool)] + list(map(str, args))
         _log.debug(' '.join(tool_cmd))
         subprocess.check_call(tool_cmd)
 
+    def execute_git(self, args):
+        self.execute(args, tool='git')
+
     def init_repo(self):
-        _run('git', 'init')
+        self.execute_git(['init'])
         self.execute(['init'])
 
     def add(self, fname):
         self.execute(['add', fname])
 
     def commit(self, msg):
-        _run('git', 'commit', '-m', '"{}"'.format(msg))
+        self.execute_git(['commit', '-m', '"{}"'.format(msg)])
 
     def initremote(self, name, remote_type, **kw):
         remote_attrs = dict(kw)
@@ -82,17 +85,30 @@ class GitAnnexTool(tools.Tool):
         self.execute(['move', fname, '--to', to_remote_name])
 
     def _get_link_into_annex(self, f):
-        """Follow symlinks as needed, to find the final symlink pointing into the annex"""
-        link_target = None
-        while os.path.islink(f):
-            link_target = os.readlink(f)
+        """If `f` points into the annex through a chain of symlinks, returns the pair
+        (link_into_annex, target_of_link_into_annex); else return (f, None).
+        """
+        annex_link_target = None
+        f_cur = f
+        paths_seen = set()
+        while os.path.islink(f_cur):
+            _log.debug('_get_link_into_annex: f_cur=%s cwd=%s', f_cur, os.getcwd())
+            f_cur_abs = os.path.abspath(f_cur)
+            if f_cur_abs in paths_seen:
+                _log.warning('Circular symlinks! %s', f_cur_abs)
+                break
+            paths_seen.add(f_cur_abs)
+
+            link_target = os.readlink(f_cur)
             if '.git/annex/objects/' in link_target:
+                annex_link_target = link_target
+                f = f_cur
                 break
             if os.path.isabs(link_target):
-                f = link_target
+                f_cur = link_target
             else:
-                f = os.path.join(os.path.dirname(f), link_target)
-        return f, link_target
+                f_cur = os.path.join(os.path.dirname(f_cur), link_target)
+        return f, annex_link_target
 
     def get(self, f):
         """Ensure the file exists in the local annex.  Unlike git-annex-get, follows symlinks and 

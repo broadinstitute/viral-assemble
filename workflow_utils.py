@@ -95,6 +95,7 @@ from oauth2client.client import GoogleCredentials
 import util.cmd
 import util.file
 import util.misc
+import tools.git_annex
 
 _log = logging.getLogger(__name__)
 
@@ -612,15 +613,20 @@ def _resolve_link_gs(val, git_file_dir, fast=True):
     return val_resolved
 
 def _resolve_link_local_path(val, git_file_dir):
-    if not (_is_str(val) and os.path.isfile(val) and os.access(val, os.R_OK)):
+    if not (_is_str(val) and os.path.lexists(val)):
         return val
     util.file.mkdir_p(git_file_dir)
     fname = os.path.join(git_file_dir, os.path.basename(val))
     if os.path.lexists(fname):
         os.unlink(fname)
-    shutil.copyfile(val, fname)
-    assert os.path.isfile(fname)
-    _git_annex_add(fname)
+        
+    link_into_annex, link_target_in_annex = tools.git_annex.GitAnnexTool()._get_link_into_annex(val)
+    if link_target_in_annex:
+        os.symlink(link_into_annex, fname)
+    else:
+        shutil.copyfile(val, fname)
+        assert os.path.isfile(fname)
+        _git_annex_add(fname)
     _log.debug('GIT LINK TO %s', fname)
     return {'$git_link': fname}
     
@@ -2013,7 +2019,7 @@ def _stage_file_for_backend(git_file_path, backend):
     """Ensure file exists in filesystem of the given Cromwell backend, and return the path to the file
     (local or cloud, depending on the backend)."""
     if backend == 'Local':
-        _git_annex_get(git_file_path)
+        tools.git_annex.GitAnnexTool().get(git_file_path)
         return os.path.abspath(git_file_path)
     elif backend == 'JES':
         return _copy_to_gs(git_file_path)
