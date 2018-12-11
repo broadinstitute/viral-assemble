@@ -725,3 +725,9 @@ def chk(condition, message='Check failed', exc=RuntimeError):
     """Check a condition, raise an exception if condition is False."""
     if not condition:
         raise exc(message)
+
+def from_module(module, names):
+    """Shorthand for assigning several functions from a module to local vars,
+    to avoid code littered with full module paths."""
+    return [getattr(module, name) for name in names.split()]
+

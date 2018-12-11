@@ -91,8 +91,14 @@ class GitAnnexTool(tools.Tool):
         self.execute(['move', fname, '--to', to_remote_name])
 
     def _get_link_into_annex(self, f):
-        """If `f` points into the annex through a chain of symlinks, returns the pair
-        (link_into_annex, target_of_link_into_annex); else return (f, None).
+        """If `f` points to an annexed file, possibly through a chain of symlinks, return
+        information about the symlink actually pointing into the annex (details below).
+        If `f` does not point to an annexed file, return (f, None).
+
+        Details: if `f` points into the annex through a chain of symlinks, returns the pair
+        (link_into_annex, target_of_link_into_annex), where link_into_annex is the path to the
+        symlink that points directly into the annex (i.e. the penultimate link in a chain of symlinks),
+        while target_of_link_into_annex is the path within the annex to which link_into_annex points.
         """
         annex_link_target = None
         f_cur = f
