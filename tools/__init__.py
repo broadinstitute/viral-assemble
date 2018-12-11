@@ -393,6 +393,8 @@ class CondaPackage(InstallMethod):
         if os.access(self.executable_path(), (os.X_OK | os.R_OK) if self.require_executability else os.R_OK):
             # optionally use the verify command, if specified
             if self.verifycmd:
+                if self.verifycmd.split()[0] == os.path.basename(self.executable_path()):
+                    self.verifycmd = os.path.dirname(self.executable_path()) + os.sep + self.verifycmd
                 if os.system(self.verifycmd) == self.verifycode:
                     _log.debug("Validating with cmd: {}".format(self.verifycmd))
                     self.installed = installed_version
