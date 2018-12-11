@@ -38,46 +38,70 @@ def test_git_annex_basic():
     ga.execute(['version'])
 
 def test_git_annex_get(tmpdir_function):
+
+    join = os.path.join
+    isfile = os.path.isfile
+    abspath = os.path.abspath
+    relpath = os.path.relpath
+    mkdir_p = util.file.mkdir_p
+    pushd_popd = util.file.pushd_popd
+
     ga = tools.git_annex.GitAnnexTool()
-    with util.file.pushd_popd(tmpdir_function):
-        dir_remote = os.path.join(tmpdir_function, 'dir_remote')
-        util.file.mkdir_p(dir_remote)
-        util.file.mkdir_p('ga_repo')
-        with util.file.pushd_popd('ga_repo'):
+    with pushd_popd(tmpdir_function):
+        dir_remote = join(tmpdir_function, 'dir_remote')
+        mkdir_p(dir_remote)
+        mkdir_p('ga_repo')
+        with pushd_popd('ga_repo'):
             ga.init_repo()
             file_A = 'testfile.txt'
             util.file.dump_file(file_A, 'some contents')
             ga.add(file_A)
             ga.commit('one file')
-            assert os.path.isfile(file_A)
+            assert isfile(file_A)
             assert ga._get_link_into_annex(file_A)[0] == file_A
             
             dir_remote_name = 'my_dir_remote'
             ga.initremote(dir_remote_name, 'directory', directory=dir_remote)
             
             ga.move(file_A, to_remote_name=dir_remote_name)
-            assert not os.path.isfile(file_A)
+            assert not isfile(file_A)
             assert ga._get_link_into_annex(file_A)[0] == file_A
             ga.get(file_A)
-            assert os.path.isfile(file_A)
+            assert isfile(file_A)
 
             ga.drop(file_A)
-            assert not os.path.isfile(file_A)
+            assert not isfile(file_A)
 
-            file_A_abs = os.path.abspath(file_A)
-            save_cwd = os.getcwd()
-            with util.file.pushd_popd('/'):
+            file_A_abs = abspath(file_A)
+            with pushd_popd('/'):
                 ga.get(file_A_abs)
-                assert os.path.isfile(file_A_abs)
+                assert isfile(file_A_abs)
                 ga.drop(file_A_abs)
-                assert not os.path.isfile(file_A_abs)
+                assert not isfile(file_A_abs)
                 
-                file_A_rel = os.path.relpath(file_A_abs)
+                file_A_rel = relpath(file_A_abs)
                 ga.get(file_A_rel)
-                assert os.path.isfile(file_A_abs)
+                assert isfile(file_A_abs)
                 
                 ga.get(file_A_rel)
-                assert os.path.isfile(file_A_abs)
+                assert isfile(file_A_abs)
+                ga.drop(file_A_rel)
+                assert not isfile(file_A_abs)
+
+            with pushd_popd('..'):
+                file_A_link_abs = 'file_A_link_abs'
+                os.symlink(file_A_abs, file_A_link_abs)
+                assert not isfile(file_A_abs)
+                ga.get(file_A_link_abs)
+                assert isfile(file_A_abs)
+                assert isfile(file_A_link_abs)
+                ga.drop(file_A_link_abs)
+                assert not isfile(file_A_abs)
+                assert not isfile(file_A_link_abs)
+
+
+                
+                
                 
 
 

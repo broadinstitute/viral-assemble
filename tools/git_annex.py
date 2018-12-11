@@ -111,6 +111,7 @@ class GitAnnexTool(tools.Tool):
     def drop(self, f):
         """Drop the file from its repo"""
         assert os.path.islink(f)
+        f, link_target = self._get_link_into_annex(f)
         if os.path.isfile(f):
             with util.file.pushd_popd(os.path.dirname(os.path.abspath(f))):
                 self.execute(['drop', os.path.basename(f)])
