@@ -70,7 +70,7 @@ class GitAnnexTool(tools.Tool):
         self.execute(args, tool='git')
 
     def print_version(self):
-	self.execute(['version'])
+        self.execute(['version'])
 
     def init_repo(self):
         self.execute_git(['init'])
