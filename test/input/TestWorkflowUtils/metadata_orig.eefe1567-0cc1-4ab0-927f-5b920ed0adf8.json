@@ -1,0 +1,590 @@
+{
+    "workflowName": "assemble_denovo",
+    "actualWorkflowLanguageVersion": "draft-2",
+    "submittedFiles": {
+        "workflow": "import \"tasks_taxon_filter.wdl\" as taxon_filter\nimport \"tasks_assembly.wdl\" as assembly\n\nworkflow assemble_denovo {\n  \n  File reads_unmapped_bam\n\n  call taxon_filter.filter_to_taxon {\n    input:\n      reads_unmapped_bam = reads_unmapped_bam\n  }\n\n  call assembly.assemble {\n    input:\n      reads_unmapped_bam = filter_to_taxon.taxfilt_bam\n  }\n\n  call assembly.scaffold {\n    input:\n      contigs_fasta = assemble.contigs_fasta,\n      reads_bam = filter_to_taxon.taxfilt_bam\n  }\n\n  call assembly.refine_2x_and_plot {\n    input:\n      assembly_fasta = scaffold.scaffold_fasta,\n      reads_unmapped_bam = reads_unmapped_bam\n  }\n}",
+        "workflowType": "wdl",
+        "root": "None",
+        "options": "{\n  \"final_call_logs_dir\": \"/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/output/call_logs\",\n  \"final_workflow_outputs_dir\": \"/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/output/outputs\",\n  \"final_workflow_log_dir\": \"/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/output/logs\"\n}",
+        "inputs": "{\"assemble_denovo.refine_2x_and_plot.gatk_jar\":\"/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-By20P600jy1JY9q634Yq5PQQ-GenomeAnalysisTK-3.6.tar.bz2\",\"assemble_denovo.scaffold.reference_genome_fasta\":[\"/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F3vQbFj0pfgp30JzPPqz9Qb6-ref-rabies-EU311738.fasta\",\"/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F50bgfj0gVvx56xV165K45BX-ref-rabies-JQ685920.fasta\"],\"assemble_denovo.assemble.assembler\":\"spades\",\"assemble_denovo.reads_unmapped_bam\":\"/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.cleaned.bam\",\"assemble_denovo.refine_2x_and_plot.novocraft_license\":\"/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F1zkVGQ0jy1P68J88kyJ8zVF-novoalign.lic\",\"assemble_denovo.filter_to_taxon.lastal_db_fasta\":\"/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F3vFv6Q0pfgVKF07ByybBvJQ-all-rabies-ncbi-679-genomes.fasta\",\"assemble_denovo.assemble.trim_clip_db\":\"/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-BXF0vYQ0QyBF509G9J12g927-contaminants.fasta\"}",
+        "labels": "{\"docker_img\":\"quay.io/broadinstitute/viral-ngs\",\"inputs_from_dx_analysis\":\"analysis-FK7B96j0761pjGZkFXgBxPy7\",\"docker_img_hash\":\"quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79\",\"analysis_descr\":\"test benchmark with spades\",\"analysis_id\":\"analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo\"}",
+        "imports": {
+            "tasks_assembly.wdl": "task assemble {\n    File    reads_unmapped_bam\n    File    trim_clip_db\n\n    Int?    trinity_n_reads=250000\n    Int?    spades_n_reads=10000000\n\n    String? assembler=\"trinity\"  # trinity, spades, or trinity-spades\n\n    String  cleaned_assembler = select_first([assembler, \"\"]) # workaround for https://gatkforums.broadinstitute.org/wdl/discussion/10462/string-type-in-output-section\n    # do this in two steps in case the input doesn't actually have \"taxfilt\" in the name\n    String  sample_name = basename(basename(reads_unmapped_bam, \".bam\"), \".taxfilt\")\n\n\n    command {\n        set -ex -o pipefail\n\n        # find 90% memory\n        mem_in_mb=`/opt/viral-ngs/source/docker/mem_in_mb_90.sh`\n        mem_in_gb=`/opt/viral-ngs/source/docker/mem_in_gb_90.sh`\n\n        if [[ \"${assembler}\" == \"trinity\" ]]; then\n          assembly.py assemble_trinity \\\n            ${reads_unmapped_bam} \\\n            ${trim_clip_db} \\\n            ${sample_name}.assembly1-trinity.fasta \\\n            ${'--n_reads=' + trinity_n_reads} \\\n            --JVMmemory \"$mem_in_mb\"m \\\n            --outReads=${sample_name}.subsamp.bam \\\n            --loglevel=DEBUG\n\n        elif [[ \"${assembler}\" == \"spades\" ]]; then\n          assembly.py assemble_spades \\\n            ${reads_unmapped_bam} \\\n            ${trim_clip_db} \\\n            ${sample_name}.assembly1-spades.fasta \\\n            ${'--nReads=' + spades_n_reads} \\\n            --memLimitGb $mem_in_gb \\\n            --outReads=${sample_name}.subsamp.bam \\\n            --loglevel=DEBUG\n\n        elif [[ \"${assembler}\" == \"trinity-spades\" ]]; then\n          assembly.py assemble_trinity \\\n            ${reads_unmapped_bam} \\\n            ${trim_clip_db} \\\n            ${sample_name}.assembly1-trinity.fasta \\\n            ${'--n_reads=' + trinity_n_reads} \\\n            --JVMmemory \"$mem_in_mb\"m \\\n            --outReads=${sample_name}.subsamp.bam \\\n            --loglevel=DEBUG\n          assembly.py assemble_spades \\\n            ${reads_unmapped_bam} \\\n            ${trim_clip_db} \\\n            ${sample_name}.assembly1-spades.fasta \\\n            --contigsUntrusted=${sample_name}.assembly1-trinity.fasta \\\n            ${'--nReads=' + spades_n_reads} \\\n            --memLimitGb $mem_in_gb \\\n            --loglevel=DEBUG\n\n        else\n          echo \"unrecognized assembler ${assembler}\" >&2\n          exit 1\n        fi\n\n        samtools view -c ${sample_name}.subsamp.bam | tee subsample_read_count >&2\n    }\n\n    output {\n        File contigs_fasta        = \"${sample_name}.assembly1-${cleaned_assembler}.fasta\"\n        File subsampBam           = \"${sample_name}.subsamp.bam\"\n        Int  subsample_read_count = read_int(\"subsample_read_count\")\n    }\n\n    runtime {\n        docker: \"quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79\"\n        memory: \"15 GB\"\n        cpu: 4\n        dx_instance_type: \"mem1_ssd1_x8\"\n    }\n\n}\n\ntask scaffold {\n    File         contigs_fasta\n    File         reads_bam\n    Array[File]+ reference_genome_fasta\n\n    String? aligner\n    Float?  min_length_fraction\n    Float?  min_unambig\n    Int?    replace_length=55\n\n    Int?    nucmer_max_gap\n    Int?    nucmer_min_match\n    Int?    nucmer_min_cluster\n    Int?    scaffold_min_pct_contig_aligned\n\n    # do this in multiple steps in case the input doesn't actually have \"assembly1-x\" in the name\n    String  sample_name = basename(basename(basename(contigs_fasta, \".fasta\"), \".assembly1-trinity\"), \".assembly1-spades\")\n\n    command {\n        set -ex -o pipefail\n\n        # find 90% memory\n        mem_in_gb=`/opt/viral-ngs/source/docker/mem_in_gb_90.sh`\n\n        assembly.py order_and_orient \\\n          ${contigs_fasta} \\\n          ${sep=' ' reference_genome_fasta} \\\n          ${sample_name}.intermediate_scaffold.fasta \\\n          ${'--maxgap=' + nucmer_max_gap} \\\n          ${'--minmatch=' + nucmer_min_match} \\\n          ${'--mincluster=' + nucmer_min_cluster} \\\n          ${'--min_pct_contig_aligned=' + scaffold_min_pct_contig_aligned} \\\n          --outReference ${sample_name}.scaffolding_chosen_ref.fasta \\\n          --outStats ${sample_name}.scaffolding_stats.txt \\\n          --outAlternateContigs ${sample_name}.scaffolding_alt_contigs.fasta \\\n          --loglevel=DEBUG\n\n        grep '^>' ${sample_name}.scaffolding_chosen_ref.fasta | cut -c 2- | tr '\\n' '\\t' > ${sample_name}.scaffolding_chosen_ref.txt\n\n        assembly.py gapfill_gap2seq \\\n          ${sample_name}.intermediate_scaffold.fasta \\\n          ${reads_bam} \\\n          ${sample_name}.intermediate_gapfill.fasta \\\n          --memLimitGb $mem_in_gb \\\n          --maskErrors \\\n          --loglevel=DEBUG\n\n        grep -v '^>' ${sample_name}.intermediate_gapfill.fasta | tr -d '\\n' | wc -c | tee assembly_preimpute_length\n        grep -v '^>' ${sample_name}.intermediate_gapfill.fasta | tr -d '\\nNn' | wc -c | tee assembly_preimpute_length_unambiguous\n\n        assembly.py impute_from_reference \\\n          ${sample_name}.intermediate_gapfill.fasta \\\n          ${sample_name}.scaffolding_chosen_ref.fasta \\\n          ${sample_name}.scaffolded_imputed.fasta \\\n          --newName ${sample_name} \\\n          ${'--replaceLength=' + replace_length} \\\n          ${'--minLengthFraction=' + min_length_fraction} \\\n          ${'--minUnambig=' + min_unambig} \\\n          ${'--aligner=' + aligner} \\\n          --loglevel=DEBUG\n    }\n\n    output {\n        File   scaffold_fasta              = \"${sample_name}.scaffolded_imputed.fasta\"\n        File   intermediate_scaffold_fasta = \"${sample_name}.intermediate_scaffold.fasta\"\n        File   intermediate_gapfill_fasta  = \"${sample_name}.intermediate_gapfill.fasta\"\n        Int    assembly_preimpute_length             = read_int(\"assembly_preimpute_length\")\n        Int    assembly_preimpute_length_unambiguous = read_int(\"assembly_preimpute_length_unambiguous\")\n        String scaffolding_chosen_ref_name = read_string(\"${sample_name}.scaffolding_chosen_ref.txt\")\n        File   scaffolding_chosen_ref      = \"${sample_name}.scaffolding_chosen_ref.fasta\"\n        File   scaffolding_stats           = \"${sample_name}.scaffolding_stats.txt\"\n        File   scaffolding_alt_contigs     = \"${sample_name}.scaffolding_alt_contigs.fasta\"\n    }\n\n    runtime {\n        docker: \"quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79\"\n        memory: \"15 GB\"\n        cpu: 4\n        dx_instance_type: \"mem1_ssd1_x8\"\n    }\n}\n\ntask refine {\n    File    assembly_fasta\n    File    reads_unmapped_bam\n\n    File    gatk_jar\n    File?   novocraft_license\n\n    String? novoalign_options=\"-r Random -l 40 -g 40 -x 20 -t 100\"\n    Float?  major_cutoff=0.5\n    Int?    min_coverage=1\n\n    String  assembly_basename=basename(basename(assembly_fasta, \".fasta\"), \".scaffold\")\n\n    command {\n        set -ex -o pipefail\n\n        # find 90% memory\n        mem_in_mb=`/opt/viral-ngs/source/docker/mem_in_mb_90.sh`\n\n        # prep GATK\n        mkdir gatk\n        if [[ ${gatk_jar} == *.tar.bz2 ]]; then\n          tar -xjvof ${gatk_jar} -C gatk\n        else\n          ln -s ${gatk_jar} gatk/GenomeAnalysisTK.jar\n        fi\n\n        ln -s ${assembly_fasta} assembly.fasta\n        read_utils.py novoindex assembly.fasta --loglevel=DEBUG\n\n        assembly.py refine_assembly \\\n          assembly.fasta \\\n          ${reads_unmapped_bam} \\\n          ${assembly_basename}.refined.fasta \\\n          --outVcf ${assembly_basename}.sites.vcf.gz \\\n          --min_coverage ${min_coverage} \\\n          --major_cutoff ${major_cutoff} \\\n          --GATK_PATH gatk/ \\\n          --novo_params=\"${novoalign_options}\" \\\n          --JVMmemory \"$mem_in_mb\"m \\\n          --loglevel=DEBUG\n    }\n\n    output {\n        File refined_assembly_fasta = \"${assembly_basename}.refined.fasta\"\n        File sites_vcf_gz           = \"${assembly_basename}.sites.vcf.gz\"\n    }\n\n    runtime {\n        docker: \"quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79\"\n        memory: \"7 GB\"\n        cpu: 8\n        dx_instance_type: \"mem1_ssd1_x8\"\n    }\n}\n\n\ntask refine_2x_and_plot {\n    # This combined task exists just to streamline the two calls to\n    # assembly.refine and one call to reports.plot_coverage that almost\n    # every assembly workflow uses. It saves on instance spin up and\n    # docker pull times, file staging time, and all steps contained\n    # here have similar hardware requirements. It is also extremely\n    # rare for analyses to branch off of intermediate products between\n    # these three steps.\n    # The more atomic WDL tasks are still available for custom workflows.\n    File    assembly_fasta\n    File    reads_unmapped_bam\n\n    File    gatk_jar  # can alternatively be the .tar.bz2\n    File?   novocraft_license\n\n    String? refine1_novoalign_options=\"-r Random -l 30 -g 40 -x 20 -t 502\"\n    Float?  refine1_major_cutoff=0.5\n    Int?    refine1_min_coverage=2\n\n    String? refine2_novoalign_options=\"-r Random -l 40 -g 40 -x 20 -t 100\"\n    Float?  refine2_major_cutoff=0.5\n    Int?    refine2_min_coverage=3\n\n    String? plot_coverage_novoalign_options=\"-r Random -l 40 -g 40 -x 20 -t 100 -k\"\n\n    # do this in two steps in case the input doesn't actually have \"cleaned\" in the name\n    String  sample_name = basename(basename(reads_unmapped_bam, \".bam\"), \".cleaned\")\n    command {\n        set -ex -o pipefail\n\n        # find 90% memory\n        mem_in_mb=`/opt/viral-ngs/source/docker/mem_in_mb_90.sh`\n\n        # prep GATK\n        mkdir gatk\n        if [[ ${gatk_jar} == *.tar.bz2 ]]; then\n          tar -xjvof ${gatk_jar} -C gatk\n        else\n          ln -s ${gatk_jar} gatk/GenomeAnalysisTK.jar\n        fi\n\n        ln -s ${assembly_fasta} assembly.fasta\n        read_utils.py novoindex assembly.fasta --loglevel=DEBUG\n\n        # refine 1\n        assembly.py refine_assembly \\\n          assembly.fasta \\\n          ${reads_unmapped_bam} \\\n          ${sample_name}.refine1.fasta \\\n          --outVcf ${sample_name}.refine1.pre_fasta.vcf.gz \\\n          --min_coverage ${refine1_min_coverage} \\\n          --major_cutoff ${refine1_major_cutoff} \\\n          --GATK_PATH gatk/ \\\n          --novo_params=\"${refine1_novoalign_options}\" \\\n          --JVMmemory \"$mem_in_mb\"m \\\n          --loglevel=DEBUG\n\n        # refine 2\n        assembly.py refine_assembly \\\n          ${sample_name}.refine1.fasta \\\n          ${reads_unmapped_bam} \\\n          ${sample_name}.fasta \\\n          --outVcf ${sample_name}.refine2.pre_fasta.vcf.gz \\\n          --min_coverage ${refine2_min_coverage} \\\n          --major_cutoff ${refine2_major_cutoff} \\\n          --GATK_PATH gatk/ \\\n          --novo_params=\"${refine2_novoalign_options}\" \\\n          --JVMmemory \"$mem_in_mb\"m \\\n          --loglevel=DEBUG\n\n        # final alignment\n        read_utils.py align_and_fix \\\n          ${reads_unmapped_bam} \\\n          ${sample_name}.fasta \\\n          --outBamAll ${sample_name}.all.bam \\\n          --outBamFiltered ${sample_name}.mapped.bam \\\n          --GATK_PATH gatk/ \\\n          --aligner_options \"${plot_coverage_novoalign_options}\" \\\n          --JVMmemory \"$mem_in_mb\"m \\\n          --loglevel=DEBUG\n\n        # collect figures of merit\n        grep -v '^>' ${sample_name}.fasta | tr -d '\\n' | wc -c | tee assembly_length\n        grep -v '^>' ${sample_name}.fasta | tr -d '\\nNn' | wc -c | tee assembly_length_unambiguous\n        samtools view -c ${sample_name}.mapped.bam | tee reads_aligned\n        samtools flagstat ${sample_name}.all.bam | tee ${sample_name}.all.bam.flagstat.txt\n        grep properly ${sample_name}.all.bam.flagstat.txt | cut -f 1 -d ' ' | tee read_pairs_aligned\n        samtools view ${sample_name}.mapped.bam | cut -f10 | tr -d '\\n' | wc -c | tee bases_aligned\n        #echo $(( $(cat bases_aligned) / $(cat assembly_length) )) | tee mean_coverage\n        python -c \"print (float(\"`cat bases_aligned`\")/\"`cat assembly_length`\") if \"`cat assembly_length`\">0 else 0\" > mean_coverage\n\n        # fastqc mapped bam\n        reports.py fastqc ${sample_name}.mapped.bam ${sample_name}.mapped_fastqc.html\n\n        # plot coverage\n        if [ $(cat reads_aligned) != 0 ]; then\n          reports.py plot_coverage \\\n            ${sample_name}.mapped.bam \\\n            ${sample_name}.coverage_plot.pdf \\\n            --plotFormat pdf \\\n            --plotWidth 1100 \\\n            --plotHeight 850 \\\n            --plotDPI 100 \\\n            --plotTitle \"${sample_name} coverage plot\" \\\n            --loglevel=DEBUG\n        else\n          touch ${sample_name}.coverage_plot.pdf\n        fi\n    }\n\n    output {\n        File refine1_sites_vcf_gz        = \"${sample_name}.refine1.pre_fasta.vcf.gz\"\n        File refine1_assembly_fasta      = \"${sample_name}.refine1.fasta\"\n        File refine2_sites_vcf_gz        = \"${sample_name}.refine2.pre_fasta.vcf.gz\"\n        File final_assembly_fasta        = \"${sample_name}.fasta\"\n        File aligned_bam                 = \"${sample_name}.all.bam\"\n        File aligned_bam_idx             = \"${sample_name}.all.bai\"\n        File aligned_bam_flagstat        = \"${sample_name}.all.bam.flagstat.txt\"\n        File aligned_only_reads_bam      = \"${sample_name}.mapped.bam\"\n        File aligned_only_reads_bam_idx  = \"${sample_name}.mapped.bai\"\n        File aligned_only_reads_fastqc   = \"${sample_name}.mapped_fastqc.html\"\n        File coverage_plot               = \"${sample_name}.coverage_plot.pdf\"\n        Int  assembly_length             = read_int(\"assembly_length\")\n        Int  assembly_length_unambiguous = read_int(\"assembly_length_unambiguous\")\n        Int  reads_aligned               = read_int(\"reads_aligned\")\n        Int  read_pairs_aligned          = read_int(\"read_pairs_aligned\")\n        Int  bases_aligned               = read_int(\"bases_aligned\")\n        Float mean_coverage              = read_float(\"mean_coverage\")\n    }\n\n    runtime {\n        docker: \"quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79\"\n        memory: \"7 GB\"\n        cpu: 8\n        dx_instance_type: \"mem1_ssd1_x8\"\n    }\n}\n\n",
+            "tasks_taxon_filter.wdl": "\n# ======================================================================\n# deplete: \n#   Runs a full human read depletion pipeline and removes PCR duplicates\n# ======================================================================\ntask deplete_taxa {\n  File         raw_reads_unmapped_bam\n  Array[File]? bmtaggerDbs  # .tar.gz, .tgz, .tar.bz2, .tar.lz4, .fasta, or .fasta.gz\n  Array[File]? blastDbs  # .tar.gz, .tgz, .tar.bz2, .tar.lz4, .fasta, or .fasta.gz\n  Array[File]? bwaDbs  # .tar.gz, .tgz, .tar.bz2, .tar.lz4, .fasta, or .fasta.gz\n  Int?         query_chunk_size\n  Boolean?     clear_tags = false\n  String? tags_to_clear_space_separated = \"XT X0 X1 XA AM SM BQ CT XN OC OP\"\n\n  String      bam_basename = basename(raw_reads_unmapped_bam, \".bam\")\n\n  command {\n    set -ex -o pipefail\n\n    if [ -d /mnt/tmp ]; then\n      TMPDIR=/mnt/tmp\n    fi\n\n    # find memory thresholds\n    mem_in_mb_50=`/opt/viral-ngs/source/docker/mem_in_mb_50.sh`\n    mem_in_mb_90=`/opt/viral-ngs/source/docker/mem_in_mb_90.sh`\n\n    # bmtagger and blast db args\n    DBS_BMTAGGER=\"${sep=' ' bmtaggerDbs}\"\n    DBS_BLAST=\"${sep=' ' blastDbs}\"\n    DBS_BWA=\"${sep=' ' bwaDbs}\"\n    if [ -n \"$DBS_BMTAGGER\" ]; then DBS_BMTAGGER=\"--bmtaggerDbs $DBS_BMTAGGER\"; fi\n    if [ -n \"$DBS_BLAST\" ]; then DBS_BLAST=\"--blastDbs $DBS_BLAST\"; fi\n    if [ -n \"$DBS_BWA\" ]; then DBS_BWA=\"--bwaDbs $DBS_BWA\"; fi\n    \n    if [[ \"${clear_tags}\" == \"true\" ]]; then\n      TAGS_TO_CLEAR=\"--clearTags\"\n      if [[ -n \"$tags_to_clear_space_separated\" ]]; then\n        TAGS_TO_CLEAR=\"$TAGS_TO_CLEAR ${'--tagsToClear=' + tags_to_clear_space_separated}\"\n      fi\n    fi\n\n    # run depletion\n    taxon_filter.py deplete \\\n      ${raw_reads_unmapped_bam} \\\n      tmpfile.raw.bam \\\n      tmpfile.bwa.bam \\\n      tmpfile.bmtagger_depleted.bam \\\n      tmpfile.rmdup.bam \\\n      ${bam_basename}.cleaned.bam \\\n      $DBS_BMTAGGER $DBS_BLAST $DBS_BWA \\\n      ${'--chunkSize=' + query_chunk_size} \\\n      $TAGS_TO_CLEAR \\\n      --JVMmemory=\"$mem_in_mb_50\"m \\\n      --srprismMemory=$mem_in_mb_90 \\\n      --loglevel=DEBUG\n\n    samtools view -c ${raw_reads_unmapped_bam} | tee depletion_read_count_pre\n    samtools view -c ${bam_basename}.cleaned.bam | tee depletion_read_count_post\n    reports.py fastqc ${bam_basename}.cleaned.bam ${bam_basename}.cleaned_fastqc.html\n  }\n\n  output {\n    File cleaned_bam               = \"${bam_basename}.cleaned.bam\"\n    File cleaned_fastqc            = \"${bam_basename}.cleaned_fastqc.html\"\n    Int  depletion_read_count_pre  = read_int(\"depletion_read_count_pre\")\n    Int  depletion_read_count_post = read_int(\"depletion_read_count_post\")\n  }\n  runtime {\n    docker: \"quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79\"\n    memory: \"14 GB\"\n    cpu: 8\n    dx_instance_type: \"mem1_ssd1_x16\"\n    preemptible: 0\n  }\n}\n\n\n# ======================================================================\n# filter_to_taxon: \n#   This step reduces the read set to a specific taxon (usually the genus\n#   level or greater for the virus of interest)\n# ======================================================================\ntask filter_to_taxon {\n  File reads_unmapped_bam\n  File lastal_db_fasta\n\n  # do this in two steps in case the input doesn't actually have \"cleaned\" in the name\n  String bam_basename = basename(basename(reads_unmapped_bam, \".bam\"), \".cleaned\")\n\n  command {\n    set -ex -o pipefail\n\n    # find 90% memory\n    mem_in_mb=`/opt/viral-ngs/source/docker/mem_in_mb_90.sh`\n\n    taxon_filter.py filter_lastal_bam \\\n      ${reads_unmapped_bam} \\\n      ${lastal_db_fasta} \\\n      ${bam_basename}.taxfilt.bam \\\n      --JVMmemory=\"$mem_in_mb\"m \\\n      --loglevel=DEBUG\n\n    samtools view -c ${bam_basename}.taxfilt.bam | tee filter_read_count_post\n    reports.py fastqc ${bam_basename}.taxfilt.bam ${bam_basename}.taxfilt_fastqc.html\n  }\n\n  output {\n    File taxfilt_bam            = \"${bam_basename}.taxfilt.bam\"\n    File taxfilt_fastqc         = \"${bam_basename}.taxfilt_fastqc.html\"\n    Int  filter_read_count_post = read_int(\"filter_read_count_post\")\n  }\n  runtime {\n    docker: \"quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79\"\n    memory: \"14 GB\"\n    cpu: 16\n    dx_instance_type: \"mem1_ssd1_x8\"\n  }\n}\n\ntask build_lastal_db {\n  File    sequences_fasta\n  String  db_name = basename(sequences_fasta, \".fasta\")\n\n  command {\n    set -ex -o pipefail\n    taxon_filter.py lastal_build_db ${sequences_fasta} ./ --loglevel=DEBUG\n    tar -c ${db_name}* | lz4 -9 > ${db_name}.tar.lz4\n  }\n\n  output {\n    File lastal_db = \"${db_name}.tar.lz4\"\n  }\n\n  runtime {\n    docker: \"quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79\"\n    memory: \"7 GB\"\n    cpu: 2\n    dx_instance_type: \"mem1_ssd1_x4\"\n  }\n}\n\ntask merge_one_per_sample {\n  String       out_bam_basename\n  Array[File]+ inputBams\n  Boolean?     rmdup=false\n\n  command {\n    set -ex -o pipefail\n\n    # find 90% memory\n    mem_in_mb=`/opt/viral-ngs/source/docker/mem_in_mb_90.sh`\n\n    read_utils.py merge_bams \\\n      \"${sep=' ' inputBams}\" \\\n      \"${out_bam_basename}.bam\" \\\n      --picardOptions SORT_ORDER=queryname \\\n      --JVMmemory \"$mem_in_mb\"m \\\n      --loglevel=DEBUG\n\n    if [[ \"${rmdup}\" == \"true\" ]]; then\n      mv \"${out_bam_basename}.bam\" tmp.bam\n      read_utils.py rmdup_mvicuna_bam \\\n        tmp.bam \\\n        ${out_bam_basename}.bam \\\n        --JVMmemory \"$mem_in_mb\"m \\\n        --loglevel=DEBUG\n    fi\n  }\n\n  output {\n    File mergedBam = \"${out_bam_basename}.bam\"\n  }\n\n  runtime{\n    memory: \"7 GB\"\n    cpu: 4\n    docker: \"quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79\"\n    dx_instance_type: \"mem1_ssd2_x4\"\n  }\n}\n\n\n"
+        }
+    },
+    "calls": {
+        "assemble_denovo.refine_2x_and_plot": [
+            {
+                "executionStatus": "Done",
+                "stdout": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/stdout",
+                "backendStatus": "Done",
+                "shardIndex": -1,
+                "outputs": {
+                    "refine1_sites_vcf_gz": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.refine1.pre_fasta.vcf.gz",
+                    "bases_aligned": 43825718,
+                    "aligned_only_reads_fastqc": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.mapped_fastqc.html",
+                    "reads_aligned": 433918,
+                    "mean_coverage": 3679.432289480312,
+                    "aligned_only_reads_bam": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.mapped.bam",
+                    "assembly_length_unambiguous": 11911,
+                    "aligned_bam_flagstat": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.all.bam.flagstat.txt",
+                    "coverage_plot": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.coverage_plot.pdf",
+                    "refine2_sites_vcf_gz": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.refine2.pre_fasta.vcf.gz",
+                    "assembly_length": 11911,
+                    "read_pairs_aligned": 373508,
+                    "aligned_bam_idx": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.all.bai",
+                    "aligned_bam": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.all.bam",
+                    "aligned_only_reads_bam_idx": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.mapped.bai",
+                    "final_assembly_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.fasta",
+                    "refine1_assembly_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.refine1.fasta"
+                },
+                "runtimeAttributes": {
+                    "docker": "quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79",
+                    "failOnStderr": "false",
+                    "maxRetries": "0",
+                    "continueOnReturnCode": "0"
+                },
+                "callCaching": {
+                    "allowResultReuse": true,
+                    "hit": false,
+                    "result": "Cache Miss",
+                    "hashes": {
+                        "output count": "70EFDF2EC9B086079795C442636B55FB",
+                        "runtime attribute": {
+                            "docker": "7E519447B19855DFAC4B6AE013A04F29",
+                            "continueOnReturnCode": "CFCD208495D565EF66E7DFF9F98764DA",
+                            "failOnStderr": "68934A3E9455FA72420237EB05902327"
+                        },
+                        "output expression": {
+                            "Int assembly_length": "7039E98B0B462F61BB6B1524BED4E6E1",
+                            "File aligned_only_reads_bam_idx": "4BB02511F54873585854B128C6DBBFE9",
+                            "Float mean_coverage": "0907C63331D2ACF3599A705A982C5409",
+                            "Int read_pairs_aligned": "E35D2288219422F4EFE54F38CEC1C490",
+                            "File aligned_bam_idx": "C223B140FA92A181DD9A70A533A143CB",
+                            "Int bases_aligned": "DA18F259E194F78C80193792EB93E207",
+                            "File aligned_only_reads_fastqc": "812AEA2ECB0F84A96C0C39A2294C6F05",
+                            "File aligned_bam": "35C5E7855892CCAAE0F2EC4ABB9A1A35",
+                            "File coverage_plot": "6C8C5FE7854B6752B62F6A3D1CFF2C30",
+                            "File refine1_assembly_fasta": "23222C99C220D30D9501BF8FE4832250",
+                            "File refine1_sites_vcf_gz": "37BF79886214FD7EDB67ACC4BC62E929",
+                            "File final_assembly_fasta": "9E9D489EB0BE1F260AF1C91FADE856C5",
+                            "Int assembly_length_unambiguous": "AC8E0B6F9DEBC026584162E0C8862AA3",
+                            "File aligned_bam_flagstat": "EA86E6498FC39CF2603D451A250ADFA0",
+                            "File refine2_sites_vcf_gz": "A7861BD5833E9BA174E5A641417E3B8D",
+                            "Int reads_aligned": "D523F7199BC9F787109FB0AE9DB1F56E",
+                            "File aligned_only_reads_bam": "C9388ED859F28D33524F3CCD24665EE4"
+                        },
+                        "input count": "C20AD4D76FE97759AA27A0C99BFF6710",
+                        "backend name": "509820290D57F333403F490DDE7316F4",
+                        "command template": "3367498A27FC8C21BAE3ABD32A501748",
+                        "input": {
+                            "Int refine2_min_coverage": "ECCBC87E4B5CE2FE28308FD9F2A7BAF3",
+                            "String sample_name": "1C11E8850624EED1BB32543C6B5C9BCA",
+                            "Float refine1_major_cutoff": "D310CB367D993FB6FB584B198A2FD72C",
+                            "String refine2_novoalign_options": "A0E9EBC40D029F1A0418CEDB2120B5F4",
+                            "File reads_unmapped_bam": "8af47607e8d96da7b6c103b4111542bf",
+                            "String plot_coverage_novoalign_options": "05693F6B91FE1C9430E847BDE4DB0C95",
+                            "File assembly_fasta": "e573beedc0b7d13ebfe2bd6a3bd0b9a1",
+                            "Int refine1_min_coverage": "C81E728D9D4C2F636F067F89CC14862C",
+                            "Float refine2_major_cutoff": "D310CB367D993FB6FB584B198A2FD72C",
+                            "String refine1_novoalign_options": "D92E72CA1F36D0A8E7935060C14B2FDC",
+                            "File novocraft_license": "64ecd53ef35b0feb1fdf74d5b19d4292",
+                            "File gatk_jar": "6cf4c08f203c724a6d6521981c7b7324"
+                        }
+                    },
+                    "effectiveCallCachingMode": "ReadAndWriteCache"
+                },
+                "inputs": {
+                    "novocraft_license": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F1zkVGQ0jy1P68J88kyJ8zVF-novoalign.lic",
+                    "reads_unmapped_bam": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.cleaned.bam",
+                    "plot_coverage_novoalign_options": "-r Random -l 40 -g 40 -x 20 -t 100 -k",
+                    "refine1_major_cutoff": 0.5,
+                    "assembly_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolded_imputed.fasta",
+                    "refine2_novoalign_options": "-r Random -l 40 -g 40 -x 20 -t 100",
+                    "refine2_major_cutoff": 0.5,
+                    "refine2_min_coverage": 3,
+                    "refine1_min_coverage": 2,
+                    "sample_name": "file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017",
+                    "refine1_novoalign_options": "-r Random -l 30 -g 40 -x 20 -t 502",
+                    "gatk_jar": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-By20P600jy1JY9q634Yq5PQQ-GenomeAnalysisTK-3.6.tar.bz2"
+                },
+                "returnCode": 0,
+                "jobId": "3193",
+                "backend": "Local",
+                "end": "2018-10-03T01:35:05.877-04:00",
+                "dockerImageUsed": "quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79",
+                "stderr": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/stderr",
+                "callRoot": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot",
+                "attempt": 1,
+                "executionEvents": [
+                    {
+                        "startTime": "2018-10-03T01:00:39.363-04:00",
+                        "description": "CheckingCallCache",
+                        "endTime": "2018-10-03T01:00:39.835-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T01:00:39.835-04:00",
+                        "description": "RunningJob",
+                        "endTime": "2018-10-03T01:35:03.775-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T01:35:03.775-04:00",
+                        "description": "UpdatingCallCache",
+                        "endTime": "2018-10-03T01:35:05.085-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T01:35:05.085-04:00",
+                        "description": "UpdatingJobStore",
+                        "endTime": "2018-10-03T01:35:05.877-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T01:00:39.362-04:00",
+                        "description": "WaitingForValueStore",
+                        "endTime": "2018-10-03T01:00:39.362-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:53:22.192-04:00",
+                        "description": "RequestingExecutionToken",
+                        "endTime": "2018-10-03T01:00:39.362-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:53:22.192-04:00",
+                        "description": "Pending",
+                        "endTime": "2018-10-03T00:53:22.192-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T01:00:39.362-04:00",
+                        "description": "PreparingJob",
+                        "endTime": "2018-10-03T01:00:39.363-04:00"
+                    }
+                ],
+                "start": "2018-10-03T00:53:22.192-04:00"
+            }
+        ],
+        "assemble_denovo.scaffold": [
+            {
+                "executionStatus": "Done",
+                "stdout": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/stdout",
+                "backendStatus": "Done",
+                "shardIndex": -1,
+                "outputs": {
+                    "scaffold_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolded_imputed.fasta",
+                    "assembly_preimpute_length_unambiguous": 7420,
+                    "intermediate_scaffold_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.intermediate_scaffold.fasta",
+                    "scaffolding_stats": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolding_stats.txt",
+                    "scaffolding_chosen_ref": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolding_chosen_ref.fasta",
+                    "intermediate_gapfill_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.intermediate_gapfill.fasta",
+                    "assembly_preimpute_length": 7420,
+                    "scaffolding_chosen_ref_name": "EU311738_as_DNA",
+                    "scaffolding_alt_contigs": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolding_alt_contigs.fasta"
+                },
+                "runtimeAttributes": {
+                    "maxRetries": "0",
+                    "docker": "quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79",
+                    "continueOnReturnCode": "0",
+                    "failOnStderr": "false"
+                },
+                "callCaching": {
+                    "allowResultReuse": true,
+                    "hit": false,
+                    "result": "Cache Miss",
+                    "hashes": {
+                        "output count": "45C48CCE2E2D7FBDEA1AFC51C7C6AD26",
+                        "runtime attribute": {
+                            "docker": "7E519447B19855DFAC4B6AE013A04F29",
+                            "continueOnReturnCode": "CFCD208495D565EF66E7DFF9F98764DA",
+                            "failOnStderr": "68934A3E9455FA72420237EB05902327"
+                        },
+                        "output expression": {
+                            "Int assembly_preimpute_length_unambiguous": "15977E9AF6C26F114813D48069D27A41",
+                            "File scaffolding_chosen_ref": "F0E5BAE5DACF081E995DE98969A430C5",
+                            "File intermediate_gapfill_fasta": "8D801416DA3418924A34DA8ECF09D7AC",
+                            "File scaffold_fasta": "242C1507AE04402356DD53DE401F876D",
+                            "File scaffolding_alt_contigs": "83CE97A681CF28E1681380533A716C91",
+                            "File intermediate_scaffold_fasta": "CC1F766E3BB782106B88B92A0B319070",
+                            "String scaffolding_chosen_ref_name": "6581BCFFCC044FEB706245AFEB75AEF9",
+                            "Int assembly_preimpute_length": "CD15C8D949486E0B240458E46A1F8F4B",
+                            "File scaffolding_stats": "C434F3EBB07B070C03BDF0A085406B65"
+                        },
+                        "input count": "1679091C5A880FAF6FB5E6087EB1B2DC",
+                        "backend name": "509820290D57F333403F490DDE7316F4",
+                        "command template": "06985093B3F79AE92192D05693A67111",
+                        "input": {
+                            "String sample_name": "1C11E8850624EED1BB32543C6B5C9BCA",
+                            "File reference_genome_fasta": [
+                                "984caa80d9cf4eccd2a3f4c82a18049c",
+                                "bfa3c1cc2a3b17544fa6289a8231de59"
+                            ],
+                            "File contigs_fasta": "9b01a110383c9eb56ed8f052cb944350",
+                            "Int replace_length": "B53B3A3D6AB90CE0268229151C9BDE11",
+                            "File reads_bam": "0f45418d33cd67eceaf04155fecf51ec"
+                        }
+                    },
+                    "effectiveCallCachingMode": "ReadAndWriteCache"
+                },
+                "inputs": {
+                    "nucmer_min_match": null,
+                    "scaffold_min_pct_contig_aligned": null,
+                    "contigs_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-assemble/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.assembly1-spades.fasta",
+                    "min_length_fraction": null,
+                    "reads_bam": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-filter_to_taxon/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.taxfilt.bam",
+                    "nucmer_max_gap": null,
+                    "nucmer_min_cluster": null,
+                    "aligner": null,
+                    "reference_genome_fasta": [
+                        "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F3vQbFj0pfgp30JzPPqz9Qb6-ref-rabies-EU311738.fasta",
+                        "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F50bgfj0gVvx56xV165K45BX-ref-rabies-JQ685920.fasta"
+                    ],
+                    "replace_length": 55,
+                    "sample_name": "file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017",
+                    "min_unambig": null
+                },
+                "returnCode": 0,
+                "jobId": "17944",
+                "backend": "Local",
+                "end": "2018-10-03T00:53:20.877-04:00",
+                "dockerImageUsed": "quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79",
+                "stderr": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/stderr",
+                "callRoot": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold",
+                "attempt": 1,
+                "executionEvents": [
+                    {
+                        "startTime": "2018-10-03T00:53:19.880-04:00",
+                        "description": "UpdatingJobStore",
+                        "endTime": "2018-10-03T00:53:20.877-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:53:03.374-04:00",
+                        "description": "CheckingCallCache",
+                        "endTime": "2018-10-03T00:53:03.426-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:45:13.583-04:00",
+                        "description": "Pending",
+                        "endTime": "2018-10-03T00:45:13.583-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:53:03.372-04:00",
+                        "description": "PreparingJob",
+                        "endTime": "2018-10-03T00:53:03.374-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:53:03.372-04:00",
+                        "description": "WaitingForValueStore",
+                        "endTime": "2018-10-03T00:53:03.372-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:45:13.583-04:00",
+                        "description": "RequestingExecutionToken",
+                        "endTime": "2018-10-03T00:53:03.372-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:53:19.665-04:00",
+                        "description": "UpdatingCallCache",
+                        "endTime": "2018-10-03T00:53:19.880-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:53:03.426-04:00",
+                        "description": "RunningJob",
+                        "endTime": "2018-10-03T00:53:19.665-04:00"
+                    }
+                ],
+                "start": "2018-10-03T00:45:13.583-04:00"
+            }
+        ],
+        "assemble_denovo.assemble": [
+            {
+                "executionStatus": "Done",
+                "stdout": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-assemble/execution/stdout",
+                "backendStatus": "Done",
+                "shardIndex": -1,
+                "outputs": {
+                    "subsampBam": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-assemble/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.subsamp.bam",
+                    "contigs_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-assemble/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.assembly1-spades.fasta",
+                    "subsample_read_count": 171125
+                },
+                "runtimeAttributes": {
+                    "docker": "quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79",
+                    "failOnStderr": "false",
+                    "maxRetries": "0",
+                    "continueOnReturnCode": "0"
+                },
+                "callCaching": {
+                    "allowResultReuse": true,
+                    "hit": false,
+                    "result": "Cache Miss",
+                    "hashes": {
+                        "output count": "ECCBC87E4B5CE2FE28308FD9F2A7BAF3",
+                        "runtime attribute": {
+                            "docker": "7E519447B19855DFAC4B6AE013A04F29",
+                            "continueOnReturnCode": "CFCD208495D565EF66E7DFF9F98764DA",
+                            "failOnStderr": "68934A3E9455FA72420237EB05902327"
+                        },
+                        "output expression": {
+                            "Int subsample_read_count": "444732C670EF241311F25BF8757552F3",
+                            "File subsampBam": "651197AB494D44D97ABD2E7216358A5E",
+                            "File contigs_fasta": "B652DF4C1EB012C5FFB5D2DAE0E21E63"
+                        },
+                        "input count": "8F14E45FCEEA167A5A36DEDD4BEA2543",
+                        "backend name": "509820290D57F333403F490DDE7316F4",
+                        "command template": "023597AB6FC6AF282DFA4FE9FCECA394",
+                        "input": {
+                            "String sample_name": "1C11E8850624EED1BB32543C6B5C9BCA",
+                            "File reads_unmapped_bam": "0f45418d33cd67eceaf04155fecf51ec",
+                            "String cleaned_assembler": "784656C890D61AC6DB096D5427905B7A",
+                            "File trim_clip_db": "663e2e38c829d7b3fff12fce3a6fdb6d",
+                            "String assembler": "784656C890D61AC6DB096D5427905B7A",
+                            "Int spades_n_reads": "D1CA3AAF52B41ACD68EBB3BF69079BD1",
+                            "Int trinity_n_reads": "A5D4555E038C1D845402A8F4098AF78B"
+                        }
+                    },
+                    "effectiveCallCachingMode": "ReadAndWriteCache"
+                },
+                "inputs": {
+                    "reads_unmapped_bam": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-filter_to_taxon/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.taxfilt.bam",
+                    "assembler": "spades",
+                    "cleaned_assembler": "spades",
+                    "trim_clip_db": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-BXF0vYQ0QyBF509G9J12g927-contaminants.fasta",
+                    "sample_name": "file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017",
+                    "spades_n_reads": 10000000,
+                    "trinity_n_reads": 250000
+                },
+                "returnCode": 0,
+                "jobId": "9444",
+                "backend": "Local",
+                "end": "2018-10-03T00:45:11.879-04:00",
+                "dockerImageUsed": "quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79",
+                "stderr": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-assemble/execution/stderr",
+                "callRoot": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-assemble",
+                "attempt": 1,
+                "executionEvents": [
+                    {
+                        "startTime": "2018-10-03T00:43:45.362-04:00",
+                        "description": "WaitingForValueStore",
+                        "endTime": "2018-10-03T00:43:45.362-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:43:45.364-04:00",
+                        "description": "CheckingCallCache",
+                        "endTime": "2018-10-03T00:43:45.365-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:43:45.365-04:00",
+                        "description": "RunningJob",
+                        "endTime": "2018-10-03T00:45:08.834-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:37:52.243-04:00",
+                        "description": "Pending",
+                        "endTime": "2018-10-03T00:37:52.243-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:45:10.954-04:00",
+                        "description": "UpdatingJobStore",
+                        "endTime": "2018-10-03T00:45:11.878-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:45:08.834-04:00",
+                        "description": "UpdatingCallCache",
+                        "endTime": "2018-10-03T00:45:10.954-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:37:52.243-04:00",
+                        "description": "RequestingExecutionToken",
+                        "endTime": "2018-10-03T00:43:45.362-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:43:45.362-04:00",
+                        "description": "PreparingJob",
+                        "endTime": "2018-10-03T00:43:45.364-04:00"
+                    }
+                ],
+                "start": "2018-10-03T00:37:52.243-04:00"
+            }
+        ],
+        "assemble_denovo.filter_to_taxon": [
+            {
+                "executionStatus": "Done",
+                "stdout": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-filter_to_taxon/execution/stdout",
+                "shardIndex": -1,
+                "outputs": {
+                    "taxfilt_fastqc": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-filter_to_taxon/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.taxfilt_fastqc.html",
+                    "taxfilt_bam": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-filter_to_taxon/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.taxfilt.bam",
+                    "filter_read_count_post": 171260
+                },
+                "runtimeAttributes": {
+                    "docker": "quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79",
+                    "failOnStderr": "false",
+                    "maxRetries": "0",
+                    "continueOnReturnCode": "0"
+                },
+                "callCaching": {
+                    "allowResultReuse": true,
+                    "hit": true,
+                    "result": "Cache Hit: 6a8341d8-76a5-466c-b95d-52571a4022ee:assemble_denovo.filter_to_taxon:-1",
+                    "hashes": {
+                        "output count": "ECCBC87E4B5CE2FE28308FD9F2A7BAF3",
+                        "runtime attribute": {
+                            "docker": "7E519447B19855DFAC4B6AE013A04F29",
+                            "continueOnReturnCode": "CFCD208495D565EF66E7DFF9F98764DA",
+                            "failOnStderr": "68934A3E9455FA72420237EB05902327"
+                        },
+                        "output expression": {
+                            "File taxfilt_bam": "C135A6F507EDA710B37C5887EED8EB86",
+                            "File taxfilt_fastqc": "DECC86238300E775344972A8CAB13EF1",
+                            "Int filter_read_count_post": "373F1C3C691B6D7E4035AC1E7220A4FC"
+                        },
+                        "input count": "ECCBC87E4B5CE2FE28308FD9F2A7BAF3",
+                        "backend name": "509820290D57F333403F490DDE7316F4",
+                        "command template": "45258CB0F5B4D07E82EEE817040A5114",
+                        "input": {
+                            "File lastal_db_fasta": "9050a236fa58612b66f550ff98bd46cd",
+                            "String bam_basename": "1C11E8850624EED1BB32543C6B5C9BCA",
+                            "File reads_unmapped_bam": "8af47607e8d96da7b6c103b4111542bf"
+                        }
+                    },
+                    "effectiveCallCachingMode": "ReadAndWriteCache"
+                },
+                "inputs": {
+                    "lastal_db_fasta": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F3vFv6Q0pfgVKF07ByybBvJQ-all-rabies-ncbi-679-genomes.fasta",
+                    "reads_unmapped_bam": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.cleaned.bam",
+                    "bam_basename": "file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017"
+                },
+                "returnCode": 0,
+                "backend": "Local",
+                "end": "2018-10-03T00:37:50.887-04:00",
+                "stderr": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-filter_to_taxon/execution/stderr",
+                "callRoot": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-filter_to_taxon",
+                "attempt": 1,
+                "executionEvents": [
+                    {
+                        "startTime": "2018-10-03T00:33:11.063-04:00",
+                        "description": "Pending",
+                        "endTime": "2018-10-03T00:33:11.063-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:37:46.901-04:00",
+                        "description": "FetchingCachedOutputsFromDatabase",
+                        "endTime": "2018-10-03T00:37:46.903-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:33:11.063-04:00",
+                        "description": "RequestingExecutionToken",
+                        "endTime": "2018-10-03T00:37:46.352-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:37:46.903-04:00",
+                        "description": "BackendIsCopyingCachedOutputs",
+                        "endTime": "2018-10-03T00:37:46.912-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:37:46.912-04:00",
+                        "description": "UpdatingCallCache",
+                        "endTime": "2018-10-03T00:37:49.980-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:37:46.353-04:00",
+                        "description": "PreparingJob",
+                        "endTime": "2018-10-03T00:37:46.363-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:37:46.352-04:00",
+                        "description": "WaitingForValueStore",
+                        "endTime": "2018-10-03T00:37:46.353-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:37:49.980-04:00",
+                        "description": "UpdatingJobStore",
+                        "endTime": "2018-10-03T00:37:50.887-04:00"
+                    },
+                    {
+                        "startTime": "2018-10-03T00:37:46.363-04:00",
+                        "description": "CheckingCallCache",
+                        "endTime": "2018-10-03T00:37:46.901-04:00"
+                    }
+                ],
+                "start": "2018-10-03T00:33:11.063-04:00"
+            }
+        ]
+    },
+    "outputs": {
+        "assemble_denovo.scaffold.intermediate_gapfill_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.intermediate_gapfill.fasta",
+        "assemble_denovo.refine_2x_and_plot.refine2_sites_vcf_gz": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.refine2.pre_fasta.vcf.gz",
+        "assemble_denovo.refine_2x_and_plot.read_pairs_aligned": 373508,
+        "assemble_denovo.refine_2x_and_plot.aligned_only_reads_fastqc": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.mapped_fastqc.html",
+        "assemble_denovo.refine_2x_and_plot.refine1_assembly_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.refine1.fasta",
+        "assemble_denovo.refine_2x_and_plot.mean_coverage": 3679.432289480312,
+        "assemble_denovo.scaffold.intermediate_scaffold_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.intermediate_scaffold.fasta",
+        "assemble_denovo.scaffold.scaffolding_chosen_ref_name": "EU311738_as_DNA",
+        "assemble_denovo.assemble.subsample_read_count": 171125,
+        "assemble_denovo.scaffold.assembly_preimpute_length_unambiguous": 7420,
+        "assemble_denovo.scaffold.assembly_preimpute_length": 7420,
+        "assemble_denovo.refine_2x_and_plot.assembly_length": 11911,
+        "assemble_denovo.refine_2x_and_plot.coverage_plot": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.coverage_plot.pdf",
+        "assemble_denovo.refine_2x_and_plot.aligned_bam_flagstat": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.all.bam.flagstat.txt",
+        "assemble_denovo.scaffold.scaffolding_alt_contigs": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolding_alt_contigs.fasta",
+        "assemble_denovo.scaffold.scaffolding_chosen_ref": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolding_chosen_ref.fasta",
+        "assemble_denovo.refine_2x_and_plot.assembly_length_unambiguous": 11911,
+        "assemble_denovo.scaffold.scaffolding_stats": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolding_stats.txt",
+        "assemble_denovo.assemble.subsampBam": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-assemble/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.subsamp.bam",
+        "assemble_denovo.assemble.contigs_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-assemble/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.assembly1-spades.fasta",
+        "assemble_denovo.refine_2x_and_plot.bases_aligned": 43825718,
+        "assemble_denovo.refine_2x_and_plot.aligned_bam": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.all.bam",
+        "assemble_denovo.filter_to_taxon.filter_read_count_post": 171260,
+        "assemble_denovo.refine_2x_and_plot.reads_aligned": 433918,
+        "assemble_denovo.refine_2x_and_plot.aligned_only_reads_bam_idx": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.mapped.bai",
+        "assemble_denovo.refine_2x_and_plot.refine1_sites_vcf_gz": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.refine1.pre_fasta.vcf.gz",
+        "assemble_denovo.filter_to_taxon.taxfilt_bam": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-filter_to_taxon/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.taxfilt.bam",
+        "assemble_denovo.refine_2x_and_plot.aligned_only_reads_bam": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.mapped.bam",
+        "assemble_denovo.refine_2x_and_plot.aligned_bam_idx": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.all.bai",
+        "assemble_denovo.scaffold.scaffold_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolded_imputed.fasta",
+        "assemble_denovo.refine_2x_and_plot.final_assembly_fasta": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.fasta",
+        "assemble_denovo.filter_to_taxon.taxfilt_fastqc": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-filter_to_taxon/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.taxfilt_fastqc.html"
+    },
+    "workflowRoot": "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9",
+    "actualWorkflowLanguage": "WDL",
+    "id": "eb4dbac0-b978-480d-877d-bf003e8095c9",
+    "inputs": {
+        "assemble_denovo.refine_2x_and_plot.gatk_jar": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-By20P600jy1JY9q634Yq5PQQ-GenomeAnalysisTK-3.6.tar.bz2",
+        "assemble_denovo.scaffold.reference_genome_fasta": [
+            "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F3vQbFj0pfgp30JzPPqz9Qb6-ref-rabies-EU311738.fasta",
+            "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F50bgfj0gVvx56xV165K45BX-ref-rabies-JQ685920.fasta"
+        ],
+        "assemble_denovo.scaffold.nucmer_min_cluster": null,
+        "assemble_denovo.refine_2x_and_plot.refine2_novoalign_options": "-r Random -l 40 -g 40 -x 20 -t 100",
+        "assemble_denovo.assemble.assembler": "spades",
+        "assemble_denovo.assemble.trinity_n_reads": 250000,
+        "assemble_denovo.reads_unmapped_bam": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.cleaned.bam",
+        "assemble_denovo.refine_2x_and_plot.plot_coverage_novoalign_options": "-r Random -l 40 -g 40 -x 20 -t 100 -k",
+        "assemble_denovo.scaffold.aligner": null,
+        "assemble_denovo.refine_2x_and_plot.refine2_min_coverage": 3,
+        "assemble_denovo.scaffold.nucmer_min_match": null,
+        "assemble_denovo.refine_2x_and_plot.refine2_major_cutoff": 0.5,
+        "assemble_denovo.refine_2x_and_plot.novocraft_license": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F1zkVGQ0jy1P68J88kyJ8zVF-novoalign.lic",
+        "assemble_denovo.refine_2x_and_plot.refine1_novoalign_options": "-r Random -l 30 -g 40 -x 20 -t 502",
+        "assemble_denovo.refine_2x_and_plot.refine1_major_cutoff": 0.5,
+        "assemble_denovo.assemble.spades_n_reads": 10000000,
+        "assemble_denovo.scaffold.replace_length": 55,
+        "assemble_denovo.scaffold.min_unambig": null,
+        "assemble_denovo.scaffold.scaffold_min_pct_contig_aligned": null,
+        "assemble_denovo.scaffold.min_length_fraction": null,
+        "assemble_denovo.filter_to_taxon.lastal_db_fasta": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-F3vFv6Q0pfgVKF07ByybBvJQ-all-rabies-ncbi-679-genomes.fasta",
+        "assemble_denovo.scaffold.nucmer_max_gap": null,
+        "assemble_denovo.assemble.trim_clip_db": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/input_files/file-BXF0vYQ0QyBF509G9J12g927-contaminants.fasta",
+        "assemble_denovo.refine_2x_and_plot.refine1_min_coverage": 2
+    },
+    "labels": {
+        "docker_img": "quay.io/broadinstitute/viral-ngs",
+        "inputs_from_dx_analysis": "analysis-FK7B96j0761pjGZkFXgBxPy7",
+        "cromwell-workflow-id": "cromwell-eb4dbac0-b978-480d-877d-bf003e8095c9",
+        "docker_img_hash": "quay.io/broadinstitute/viral-ngs@sha256:da03f379dc14b838cabb6a2947da7921cbb8e25b15b79e0d6a3654d2e2479a79",
+        "analysis_descr": "test benchmark with spades",
+        "analysis_id": "analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo"
+    },
+    "submission": "2018-10-03T00:33:04.110-04:00",
+    "status": "Succeeded",
+    "workflowLog": "/data/ilya-work/pipelines/an-analysis-181003-003250-eefe1567-0cc1-4ab0-927f-5b920ed0adf8-assemble_denovo/output/logs/workflow.eb4dbac0-b978-480d-877d-bf003e8095c9.log",
+    "end": "2018-10-03T01:35:07.570-04:00",
+    "start": "2018-10-03T00:33:08.878-04:00"
+}

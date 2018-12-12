@@ -122,6 +122,12 @@ class GitAnnexTool(tools.Tool):
                 f_cur = os.path.join(os.path.dirname(f_cur), link_target)
         return f, annex_link_target
 
+    def is_annexed_file(self, f):
+        return os.path.lexists(f) and not os.path.isdir(f) and self._get_link_into_annex(f)[1]
+
+    def get_annexed_file_attrs(self, f):
+        raise NotImplemented()
+
     def get(self, f):
         """Ensure the file exists in the local annex.  Unlike git-annex-get, follows symlinks and 
         will get the file regardless of what the current dir is."""
