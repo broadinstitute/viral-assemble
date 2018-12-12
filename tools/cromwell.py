@@ -2,6 +2,8 @@
     Tool wrapper for the Cromwell workflow manager.
 '''
 
+# * imports
+
 import logging
 import os
 import os.path
@@ -23,10 +25,13 @@ TOOL_VERSION = '0.36'
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
 
+# * class CromwellTool
+
 class CromwellTool(tools.Tool):
 
     '''Tool wrapper for Cromwell workflow manager'''
 
+# ** init, execute
     def __init__(self, install_methods=None):
         if install_methods is None:
             install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION)]
@@ -40,5 +45,8 @@ class CromwellTool(tools.Tool):
         _log.debug(' '.join(tool_cmd))
         subprocess.check_call(tool_cmd)
 
+# ** Metadata handling
 
 
+# * end
+# end: class CromwellTool(tools.Tool)
