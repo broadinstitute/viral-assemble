@@ -1801,9 +1801,11 @@ def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
 # ** finalize_analysis_dirs impl
 
 def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
-    """Gather file metadata such as md5 hashes for files referenced in the metadata.
+    """For files referenced in `analysis_metadata` (as strings denoting local or cloud paths),
+    gather file metadata such as md5 hashes and sizes.
+
     We can gather them from:
-       - call caching info
+       - Cromwell's callCaching info
        - for files on gs, gsutil stat calls
        - for local files under git-annex control, the symlink.
     """
@@ -1811,13 +1813,17 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
     chk, make_seq = util.misc.from_module(util.misc, 'chk make_seq')
 
     # var: file_path_to_metadata - maps file path string (as used in workflow metadata, either local or cloud path)
-    #    to a 
+    #    to a dict mapping metadata item name (md5, size, etc) to value.
     file_path_to_metadata = _ord_dict()
 
     def _file_mdata(file_path):
+        """Return the dictionary representing the metadata for the file denoted by `file_path`"""
         return file_path_to_metadata.setdefault(file_path, {})
 
     def _set_file_mdata(file_path, key, val):
+        """For the file denoted by `file_path`, set metadata field `key` to `val`.
+        If the field is already set, check that it has not changed.
+        """
         file_md = _file_mdata(file_path)
         if key in file_md:
             chk(file_md[key] == val)
