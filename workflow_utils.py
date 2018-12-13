@@ -30,7 +30,9 @@ Terms:
        version of vira-ngs.
    analysis:
        particular execution of a particular workflow.  same concept as a DNAnexus analysis
-       (https://wiki.dnanexus.com/API-Specification-v1.0.0/Workflows-and-Analyses)
+       (https://wiki.dnanexus.com/API-Specification-v1.0.0/Workflows-and-Analyses).
+       Note that Cromwell documentation uses 'workflow' for both workflow definitions and their
+       instantiations; we'll keep to DNAnexus' usage for better clarity.
    specified inputs: 
        inputs explicitly provided to a given analysis.  together with the workflow's default inputs, the form `full inputs`.
        corresponds to DNAnexus notion of 'runInputs'
@@ -134,6 +136,8 @@ def _dict_subset(d, keys):
     return {k: v for k, v in d.items() if k in keys}
 
 def _ord_dict(*args):
+    """Constructs a collections.OrderedDict from `args`.  Using ordered dicts gives better
+    reproducibility."""
     return collections.OrderedDict(args)
 
 def _ord_dict_merge(dicts):
@@ -213,12 +217,12 @@ def _json_loadf(fname):
 def _run_get_json(cmd, *args):
     return _json_loads(_run_get_output(cmd, *args))
 
-def _transform_deepdict(val, node_handler, path=()):
+def _transform_json_data(val, node_handler, path=()):
     """Transform a parsed json structure, by replacing nodes for which `node_handler` returns
     an object different from `val`, with that object.  If `node_handler` has a named arg `path`,
     the path from the root will be passed via that arg (as a tuple).
     """
-    recurse = functools.partial(_transform_deepdict, node_handler=node_handler)
+    recurse = functools.partial(_transform_json_data, node_handler=node_handler)
     node_handler_named_args = util.misc.getnamedargs(node_handler)
     node_handler_args = {}
     if 'path' in node_handler_named_args:
@@ -233,7 +237,7 @@ def _transform_deepdict(val, node_handler, path=()):
         return _ord_dict(*[(k, recurse(val=v, path=path+(k,)))
                            for k, v in val.items()])
     return val
-# end: def _transform_deepdict(val, node_handler, path=())
+# end: def _transform_json_data(val, node_handler, path=())
 
 def _json_to_org(val, org_file, depth=1, heading='root'):
     """Transform a parsed json structure to org.
@@ -651,7 +655,7 @@ def _resolve_link(val, git_file_dir, methods):
         if result is not val: return result
     return val
 
-def _resolve_links_in_deepdict(val, rel_to_dir, methods, relpath='files'):
+def _resolve_links_in_json_data(val, rel_to_dir, methods, relpath='files'):
     """Given a parsed json structure, replace in it references to files (in various forms) with one uniform
     representation, a 'git link'.  A git link contains a relative path (relative to `analysis_dir`)
     pointing to a git file, typically a git-annex file.
@@ -664,7 +668,7 @@ def _resolve_links_in_deepdict(val, rel_to_dir, methods, relpath='files'):
             maybe_resolve_link = {'$git_link': os.path.relpath(maybe_resolve_link['$git_link'], rel_to_dir)}
         return maybe_resolve_link
         
-    return _transform_deepdict(val, node_handler=handle_node)
+    return _transform_json_data(val, node_handler=handle_node)
 
 # ** deleted code
 
@@ -672,7 +676,7 @@ def _resolve_links_in_deepdict(val, rel_to_dir, methods, relpath='files'):
 #     analysis_descr = _dx_describe(dx_analysis_id)
 #     del analysis_descr['originalInput']
 #     methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id)]
-#     resolved = _resolve_links_in_deepdict(val=analysis_descr, rel_to_dir=analysis_dir, methods=methods)
+#     resolved = _resolve_links_in_json_data(val=analysis_descr, rel_to_dir=analysis_dir, methods=methods)
 #     _write_json(os.path.join(analysis_dir, 'dx_resolved.json'), **resolved)
 
 # def _resolve_link_dx_old(val, dx_analysis_id):
@@ -820,7 +824,7 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
     mdata = _dx_describe(dx_analysis_id)
 
     methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id, _cache={})]
-    mdata = _resolve_links_in_deepdict(val=mdata, rel_to_dir=analysis_dir, methods=methods)
+    mdata = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir, methods=methods)
 
     # 
     # Convert DNAnexus analysis metadata to Cromwell's metadata format,
@@ -921,7 +925,7 @@ def _make_git_links_absolute(d, base_dir):
             return val
         assert not os.path.isabs(val['$git_link'])
         return {'$git_link': os.path.join(base_dir, val['$git_link'])}
-    return _transform_deepdict(d, _make_git_link_absolute)
+    return _transform_json_data(d, _make_git_link_absolute)
 
 def _make_git_links_relative(d, base_dir):
     def _make_git_link_relative(val):
@@ -929,7 +933,7 @@ def _make_git_links_relative(d, base_dir):
             return val
         assert os.path.isabs(val['$git_link'])
         return {'$git_link': os.path.relpath(val['$git_link'], base_dir)}
-    return _transform_deepdict(d, _make_git_link_relative)
+    return _transform_json_data(d, _make_git_link_relative)
 
 def _apply_input_renamings(inps, input_name_subst, orig_workflow_name):
     for orig, repl in (input_name_subst or ()):
@@ -1077,7 +1081,7 @@ def _construct_analysis_inputs_parser():
 #                 return val
 #             return {'$git_link': os.path.relpath(os.path.join(inputs_source_dir, val['$git_link']),
 #                                                  analysis_dir)}
-#         return _transform_deepdict(inps, reroute_git_link)
+#         return _transform_json_data(inps, reroute_git_link)
 
 #     inp_srcs = list(map(_load_inputs, inputs_sources))
 #     run_inputs = _ord_dict()
@@ -1096,7 +1100,7 @@ def _stage_inputs_for_backend(inputs, backend):
         if not _maps(inp, '$git_link'):
             return inp
         return _stage_file_for_backend(git_file_path=inp['$git_link'], backend=backend)
-    return _transform_deepdict(inputs, _stage_git_link)
+    return _transform_json_data(inputs, _stage_git_link)
 
 # ** _get_dx_val
 def _get_dx_val(val, dx_files_dir):
@@ -1804,63 +1808,62 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
        - for local files under git-annex control, the symlink.
     """
 
-    path2md5 = _ord_dict()
+    chk, make_seq = util.misc.from_module(util.misc, 'chk make_seq')
 
-    def _path_matches(path, *pattern):
-        def _elt_mismatch(elt, p):
-            return (isinstance(p, type) and not isinstance(elt, p)) or \
-                (p is not None and elt != p)
-        return not any(itertools.starmap(_elt_mismatch,
-                                         itertools.izip_longest(path, pattern)))
+    # var: file_path_to_metadata - maps file path string (as used in workflow metadata, either local or cloud path)
+    #    to a 
+    file_path_to_metadata = _ord_dict()
 
-    # path2hash = _ord_dict()
+    def _file_mdata(file_path):
+        return file_path_to_metadata.setdefault(file_path, {})
 
-    # def gather_call_caching_hashes(val, path):
-    #     if _path_matches(path, 'calls', str, int, 'callCaching', 'hashes', 'input', str) and path[-1].startswith('File '):
-    #         if _is_str(val):
-    #             path2hash[path]
+    def _set_file_mdata(file_path, key, val):
+        file_md = _file_mdata(file_path)
+        if key in file_md:
+            chk(file_md[key] == val)
+        else:
+            file_md[key] = val
 
-    def _qry_json(deepdict, expr, dflt=None):
-        res =  jmespath.search(expr, deepdict, jmespath.Options(dict_cls=collections.OrderedDict))
+    def _qry_json(json_data, jmespath_expr, dflt=None):
+        """Return the result of a jmespath query `jmespath_expr` on `json_data`,
+        or `dflt` if the query returns None."""
+        res =  jmespath.search(jmespath_expr, json_data,
+                               jmespath.Options(dict_cls=collections.OrderedDict))
         return res if res is not None else dflt
 
     def _is_valid_md5(s):
         return _is_str(s) and len(s) == 32 and set(s) <= set('0123456789ABCDEF')
 
-    chk, make_seq = util.misc.from_module(util.misc, 'chk make_seq')
 
     for call_name, call_attempts in analysis_metadata['calls'].items():
         for call_attempt in call_attempts:
             for call_attempts_field, hashes_field in (('inputs', 'input'), ('outputs', 'output expression')):
+                # 'inp' within this loop refers to inputs on first pass and to outputs on the second pass
                 inp2hashes = {}
                 file_type_inputs = set()
                 inp_type_and_name_to_hashes = _qry_json(call_attempt,
                                                         'callCaching.hashes."{}"'.format(hashes_field), {})
-                print(inp_type_and_name_to_hashes)
+                #print(inp_type_and_name_to_hashes)
                 for inp_type_and_name, inp_hashes in inp_type_and_name_to_hashes.items():
                     inp_type, inp_name = inp_type_and_name.split()
                     if inp_type == 'File':
                         file_type_inputs.add(inp_name)
-                        print('inp_hashes', inp_hashes)
                         chk(isinstance(inp_hashes, (_str_type, list)))
                         inp2hashes[inp_name] = make_seq(inp_hashes)
                 inp_name_to_val = _qry_json(call_attempt, call_attempts_field, {})
-                print('inp_name_to_val', inp_name_to_val)
                 for inp_name, inp_val in inp_name_to_val.items():
                     if inp_name in file_type_inputs:
                         chk(isinstance(inp_val, (_str_type, list)))
                         inp_vals = make_seq(inp_val)
-                        print('inp_name=', inp_name, 'inp_val=', inp_val, 'inp_vals=', inp_vals, 
-                              'inp2hashes=', inp2hashes)
+                        # print('inp_name=', inp_name, 'inp_val=', inp_val, 'inp_vals=', inp_vals, 
+                        #       'inp2hashes=', inp2hashes)
                         chk(len(inp_vals) == len(inp2hashes[inp_name]))
                         for inp_one_val, inp_one_hash in zip(inp_vals, inp2hashes[inp_name]):
                             if _is_valid_md5(inp_one_hash):
-                                if inp_one_val in path2md5:
-                                    chk(path2md5[inp_one_val] == inp_one_hash)
-                                else:
-                                    path2md5[inp_one_val] = inp_one_hash
+                                _set_file_mdata(inp_one_val, 'md5', inp_one_hash)
 
-    print('\n'.join(map(str, path2md5.items())))
+    print('RESULT-----------')
+    print('\n'.join(map(str, file_path_to_metadata.items())))
                                 
 
     # file_path_to_obj = _ord_dict()
@@ -1880,7 +1883,7 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
     #         dict_path_to_obj[path] = file_obj
     #         return file_obj
 
-    # analysis_metadata_with_file_objs = _transform_deepdict(analysis_metadata, file_node_to_obj)
+    # analysis_metadata_with_file_objs = _transform_json_data(analysis_metadata, file_node_to_obj)
     
     
         
@@ -1924,8 +1927,8 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                 os.unlink(mdata_fname)
             _write_json(mdata_fname, **mdata)
             #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
-            mdata_rel = _resolve_links_in_deepdict(val=mdata, rel_to_dir=analysis_dir, methods=[_resolve_link_local_path,
-                                                                                                _resolve_link_gs])
+            mdata_rel = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir, methods=[_resolve_link_local_path,
+                                                                                                 _resolve_link_gs])
             _write_json(mdata_rel_fname, **mdata_rel)
             _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
             processing_stats['saved_metata'] += 1
