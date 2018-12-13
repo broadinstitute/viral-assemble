@@ -566,11 +566,12 @@ def is_nonatom_iterable(x, atom_types=(str,)):
     '''Tests whether `x` is an Iterable other than a string'''
     return isinstance(x, collections.Iterable) and not isinstance(x,atom_types)
 
-_str_type = getattr(builtins, 'basestring', 'str')
+_str_type = getattr(builtins, 'basestring', getattr(builtins, 'str'))
+
 def make_seq(x, atom_types=(_str_type,)):
-    '''Return a tuple containing the items in `x`, or containing just `x` if `x` is a non-string iterable.  Convenient
+    '''Return a tuple containing the items in `x`, or containing just `x` if `x` is a non-atomic iterable.  Convenient
     for uniformly writing iterations over parameters that may be passed in as either an item or a tuple/list of items.
-    Note that if `x` is an iterator, it will be concretized.  `str_types` gives the type(s) to treat as strings.'
+    Note that if `x` is an iterator, it will be concretized.  `atom_types` gives the type(s) to treat as atomic.'
     '''
     return tuple(x) if is_nonatom_iterable(x, atom_types) else (x,)
 
