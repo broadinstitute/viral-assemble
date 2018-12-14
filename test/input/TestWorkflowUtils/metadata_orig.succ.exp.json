@@ -1,0 +1,65 @@
+{
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-assemble/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.assembly1-spades.fasta": {
+        "md5": "B652DF4C1EB012C5FFB5D2DAE0E21E63"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-assemble/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.subsamp.bam": {
+        "md5": "651197AB494D44D97ABD2E7216358A5E"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-filter_to_taxon/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.taxfilt.bam": {
+        "md5": "C135A6F507EDA710B37C5887EED8EB86"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-filter_to_taxon/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.taxfilt_fastqc.html": {
+        "md5": "DECC86238300E775344972A8CAB13EF1"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.all.bai": {
+        "md5": "C223B140FA92A181DD9A70A533A143CB"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.all.bam": {
+        "md5": "35C5E7855892CCAAE0F2EC4ABB9A1A35"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.all.bam.flagstat.txt": {
+        "md5": "EA86E6498FC39CF2603D451A250ADFA0"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.coverage_plot.pdf": {
+        "md5": "6C8C5FE7854B6752B62F6A3D1CFF2C30"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.fasta": {
+        "md5": "9E9D489EB0BE1F260AF1C91FADE856C5"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.mapped.bai": {
+        "md5": "4BB02511F54873585854B128C6DBBFE9"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.mapped.bam": {
+        "md5": "C9388ED859F28D33524F3CCD24665EE4"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.mapped_fastqc.html": {
+        "md5": "812AEA2ECB0F84A96C0C39A2294C6F05"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.refine1.fasta": {
+        "md5": "23222C99C220D30D9501BF8FE4832250"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.refine1.pre_fasta.vcf.gz": {
+        "md5": "37BF79886214FD7EDB67ACC4BC62E929"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-refine_2x_and_plot/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.refine2.pre_fasta.vcf.gz": {
+        "md5": "A7861BD5833E9BA174E5A641417E3B8D"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.intermediate_gapfill.fasta": {
+        "md5": "8D801416DA3418924A34DA8ECF09D7AC"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.intermediate_scaffold.fasta": {
+        "md5": "CC1F766E3BB782106B88B92A0B319070"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolded_imputed.fasta": {
+        "md5": "242C1507AE04402356DD53DE401F876D"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolding_alt_contigs.fasta": {
+        "md5": "83CE97A681CF28E1681380533A716C91"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolding_chosen_ref.fasta": {
+        "md5": "F0E5BAE5DACF081E995DE98969A430C5"
+    },
+    "/data/ilya-work/pipelines/cromwell-executions/assemble_denovo/eb4dbac0-b978-480d-877d-bf003e8095c9/call-scaffold/execution/file-FK7Bb3j0X5kPbFKK5XgZ7zFq-RBV017.scaffolding_stats.txt": {
+        "md5": "C434F3EBB07B070C03BDF0A085406B65"
+    }
+}

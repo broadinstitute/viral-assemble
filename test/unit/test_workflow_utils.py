@@ -33,3 +33,27 @@ class TestCommandHelp(unittest.TestCase):
             assert parser, 'No parser for command {}'.format(cmd_name)
             helpstring = parser.format_help()
 
+class TestGatherFileMetadataFromAnalysisMetadata():
+
+
+    def _test_fname(self, *path_elts):
+        return os.path.join(util.file.get_test_input_path(), 'TestWorkflowUtils', *path_elts)
+
+    def _call_for(self, test_data_id):
+        metadata_json_fname = self._test_fname('metadata_orig.{}.json'.format(test_data_id))
+        metadata_json_data = workflow_utils._json_loadf(metadata_json_fname)
+        return workflow_utils._gather_file_metadata_from_analysis_metadata(metadata_json_data)
+
+    def test_succ(self):
+        """Test case of metadata from an analysis that succeeded"""
+        succ_mdata = self._call_for('succ')
+        succ_exp = workflow_utils._json_loadf(self._test_fname('metadata_orig.succ.exp.json'))
+        assert sorted(succ_mdata.items()) == sorted(succ_exp.items())
+
+
+
+
+
+
+        
+        

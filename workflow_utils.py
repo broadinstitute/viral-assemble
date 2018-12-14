@@ -208,8 +208,11 @@ def _run_get_output(cmd, *args):
     _log.info('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
     return output.strip()
 
+def _load_dict_sorted(d):
+    return collections.OrderedDict(sorted(d.items()))
+
 def _json_loads(s):
-    return json.loads(s.strip(), object_pairs_hook=collections.OrderedDict)
+    return json.loads(s.strip(), object_hook=_load_dict_sorted, object_pairs_hook=collections.OrderedDict)
 
 def _json_loadf(fname):
     return _json_loads(util.file.slurp_file(fname))
@@ -1870,7 +1873,7 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
 
     print('RESULT-----------')
     print('\n'.join(map(str, file_path_to_metadata.items())))
-                                
+    return file_path_to_metadata
 
     # file_path_to_obj = _ord_dict()
     # dict_path_to_obj = _ord_dict()
