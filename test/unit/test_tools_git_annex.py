@@ -35,6 +35,9 @@ def test_git_annex_init_add_get_drop(tmpdir_function):
         mkdir_p('ga_repo')
         with pushd_popd('ga_repo'):
             ga.init_repo()
+            ga.execute_git(['config', 'annex.backend', 'MD5E'])
+            ga.execute_git(['config', '--type=int', 'annex.maxextensionlength', '5'])
+
             file_A = 'testfile.txt'
             util.file.dump_file(file_A, 'some contents')
             ga.add(file_A)
@@ -42,6 +45,7 @@ def test_git_annex_init_add_get_drop(tmpdir_function):
             assert isfile(file_A)
             assert ga._get_link_into_annex(file_A)[0] == file_A
             assert '.git/annex/objects/' in ga._get_link_into_annex(file_A)[1]
+            assert ga.lookupkey(file_A) == 'MD5E-s13--220c7810f41695d9a87d70b68ccf2aeb.txt'
             
             dir_remote_name = 'my_dir_remote'
             ga.initremote(dir_remote_name, 'directory', directory=dir_remote)

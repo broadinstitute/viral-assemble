@@ -5,6 +5,7 @@
 # * imports
 
 import logging
+import collections
 import os
 import os.path
 import subprocess
@@ -128,8 +129,22 @@ class GitAnnexTool(tools.Tool):
         """Test is `f` is a file controlled by git-annex."""
         return os.path.lexists(f) and not os.path.isdir(f) and self._get_link_into_annex(f)[1]
 
+    def lookupkey(self, f):
+        """Get the git-annex key of an annexed file.  Note that, unlike git-annex-lookupkey, this looks at the file in the
+        working copy, not in the index."""
+        
+        link_into_annex, target_of_link_into_annex = self._get_link_into_annex(f)
+        util.misc.chk(target_of_link_into_annex)
+        return os.path.basename(target_of_link_into_annex)
+
+    def examinekey(self, key):
+        """Return a dict of info that can be gleaned from the key itself"""
+        pass
+
     def get_annexed_file_attrs(self, f):
+        """Get annexed file info that can be determined quickly e.g. from the key"""
         raise NotImplemented()
+
 
     def get(self, f):
         """Ensure the file exists in the local annex, fetching it from a remote if necessary.
