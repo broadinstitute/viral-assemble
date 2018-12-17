@@ -54,11 +54,13 @@ def test_git_annex_init_add_get_drop(tmpdir_function):
             assert not isfile(file_A)
             assert ga._get_link_into_annex(file_A)[0] == file_A
             assert '.git/annex/objects/' in ga._get_link_into_annex(file_A)[1]
+            assert ga.lookupkey(file_A) == 'MD5E-s13--220c7810f41695d9a87d70b68ccf2aeb.txt'
             ga.get(file_A)
             assert isfile(file_A)
 
             ga.drop(file_A)
             assert not isfile(file_A)
+            assert ga.lookupkey(file_A) == 'MD5E-s13--220c7810f41695d9a87d70b68ccf2aeb.txt'
 
             file_A_abs = abspath(file_A)
             with pushd_popd('/'):
