@@ -55,13 +55,21 @@ def test_git_annex_init_add_get_drop(tmpdir_function):
             assert ga._get_link_into_annex(file_A)[0] == file_A
             assert '.git/annex/objects/' in ga._get_link_into_annex(file_A)[1]
             assert ga.lookupkey(file_A) == 'MD5E-s13--220c7810f41695d9a87d70b68ccf2aeb.txt'
+
             ga.get(file_A)
             assert isfile(file_A)
+
+            key_attrs = ga.examinekey(ga.lookupkey(file_A))
+            assert key_attrs['key_name'] == '220c7810f41695d9a87d70b68ccf2aeb.txt'
+            assert key_attrs['md5'] == '220c7810f41695d9a87d70b68ccf2aeb'
+            assert key_attrs['size'] == 13
+            assert key_attrs['size'] == os.path.getsize(file_A)
 
             ga.drop(file_A)
             assert not isfile(file_A)
             assert ga.lookupkey(file_A) == 'MD5E-s13--220c7810f41695d9a87d70b68ccf2aeb.txt'
 
+            # test operations when the current dir is outside the repo
             file_A_abs = abspath(file_A)
             with pushd_popd('/'):
                 ga.get(file_A_abs)

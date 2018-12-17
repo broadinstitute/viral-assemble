@@ -138,8 +138,19 @@ class GitAnnexTool(tools.Tool):
         return os.path.basename(target_of_link_into_annex)
 
     def examinekey(self, key):
-        """Return a dict of info that can be gleaned from the key itself"""
-        pass
+        """Return a dict of info that can be gleaned from the key itself.
+        Most accurate would be to run 'git annex examinekey', but for speed we do the
+        parsing ourselves.
+        """
+        attrs = collections.OrderedDict()
+        key_attrs_str, key_name = key.rsplit('--', 1)
+        attrs['key_name'] = key_name
+        if key.startswith('MD5'):
+            attrs['md5'] = key_name[:32]
+            key_attrs_parts = key_attrs_str.split('-')
+            key_attrs_size_part = [p for p in key_attrs_parts if p.startswith('s')][0]
+            attrs['size'] = int(key_attrs_size_part[1:])
+        return attrs
 
     def get_annexed_file_attrs(self, f):
         """Get annexed file info that can be determined quickly e.g. from the key"""
