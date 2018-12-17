@@ -41,6 +41,7 @@ def test_git_annex_init_add_get_drop(tmpdir_function):
             ga.commit('one file')
             assert isfile(file_A)
             assert ga._get_link_into_annex(file_A)[0] == file_A
+            assert '.git/annex/objects/' in ga._get_link_into_annex(file_A)[1]
             
             dir_remote_name = 'my_dir_remote'
             ga.initremote(dir_remote_name, 'directory', directory=dir_remote)
@@ -48,6 +49,7 @@ def test_git_annex_init_add_get_drop(tmpdir_function):
             ga.move(file_A, to_remote_name=dir_remote_name)
             assert not isfile(file_A)
             assert ga._get_link_into_annex(file_A)[0] == file_A
+            assert '.git/annex/objects/' in ga._get_link_into_annex(file_A)[1]
             ga.get(file_A)
             assert isfile(file_A)
 
