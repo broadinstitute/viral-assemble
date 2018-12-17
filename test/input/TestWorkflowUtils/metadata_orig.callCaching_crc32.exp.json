@@ -1,0 +1,65 @@
+{
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-assemble/RBV046.taxfilt.assembly1-trinity.fasta": {
+        "md5": "B652DF4C1EB012C5FFB5D2DAE0E21E63"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-assemble/RBV046.taxfilt.subsamp.bam": {
+        "md5": "651197AB494D44D97ABD2E7216358A5E"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-filter_to_taxon/attempt-2/RBV046.taxfilt.taxfilt.bam": {
+        "md5": "C135A6F507EDA710B37C5887EED8EB86"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-filter_to_taxon/attempt-2/RBV046.taxfilt.taxfilt_fastqc.html": {
+        "md5": "DECC86238300E775344972A8CAB13EF1"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-refine_2x_and_plot/RBV046.taxfilt.all.bai": {
+        "md5": "C223B140FA92A181DD9A70A533A143CB"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-refine_2x_and_plot/RBV046.taxfilt.all.bam": {
+        "md5": "35C5E7855892CCAAE0F2EC4ABB9A1A35"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-refine_2x_and_plot/RBV046.taxfilt.all.bam.flagstat.txt": {
+        "md5": "EA86E6498FC39CF2603D451A250ADFA0"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-refine_2x_and_plot/RBV046.taxfilt.coverage_plot.pdf": {
+        "md5": "6C8C5FE7854B6752B62F6A3D1CFF2C30"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-refine_2x_and_plot/RBV046.taxfilt.fasta": {
+        "md5": "9E9D489EB0BE1F260AF1C91FADE856C5"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-refine_2x_and_plot/RBV046.taxfilt.mapped.bai": {
+        "md5": "4BB02511F54873585854B128C6DBBFE9"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-refine_2x_and_plot/RBV046.taxfilt.mapped.bam": {
+        "md5": "C9388ED859F28D33524F3CCD24665EE4"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-refine_2x_and_plot/RBV046.taxfilt.mapped_fastqc.html": {
+        "md5": "812AEA2ECB0F84A96C0C39A2294C6F05"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-refine_2x_and_plot/RBV046.taxfilt.refine1.fasta": {
+        "md5": "23222C99C220D30D9501BF8FE4832250"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-refine_2x_and_plot/RBV046.taxfilt.refine1.pre_fasta.vcf.gz": {
+        "md5": "37BF79886214FD7EDB67ACC4BC62E929"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-refine_2x_and_plot/RBV046.taxfilt.refine2.pre_fasta.vcf.gz": {
+        "md5": "A7861BD5833E9BA174E5A641417E3B8D"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-scaffold/RBV046.taxfilt.intermediate_gapfill.fasta": {
+        "md5": "8D801416DA3418924A34DA8ECF09D7AC"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-scaffold/RBV046.taxfilt.intermediate_scaffold.fasta": {
+        "md5": "CC1F766E3BB782106B88B92A0B319070"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-scaffold/RBV046.taxfilt.scaffolded_imputed.fasta": {
+        "md5": "242C1507AE04402356DD53DE401F876D"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-scaffold/RBV046.taxfilt.scaffolding_alt_contigs.fasta": {
+        "md5": "83CE97A681CF28E1681380533A716C91"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-scaffold/RBV046.taxfilt.scaffolding_chosen_ref.fasta": {
+        "md5": "F0E5BAE5DACF081E995DE98969A430C5"
+    },
+    "gs://sabeti-ilya-cromwell/cromwell-execution/assemble_denovo/d31b6545-fa20-448c-bf16-87e6e8b66ce5/call-scaffold/RBV046.taxfilt.scaffolding_stats.txt": {
+        "md5": "C434F3EBB07B070C03BDF0A085406B65"
+    }
+}

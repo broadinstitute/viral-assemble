@@ -35,7 +35,6 @@ class TestCommandHelp(unittest.TestCase):
 
 class TestGatherFileMetadataFromAnalysisMetadata():
 
-
     def _test_fname(self, *path_elts):
         return os.path.join(util.file.get_test_input_path(), 'TestWorkflowUtils', *path_elts)
 
@@ -50,10 +49,10 @@ class TestGatherFileMetadataFromAnalysisMetadata():
         succ_exp = workflow_utils._json_loadf(self._test_fname('metadata_orig.succ.exp.json'))
         assert sorted(succ_mdata.items()) == sorted(succ_exp.items())
 
+    def test_callCaching_crc32(self):
+        """Test case of metadata from an analysis where some callCaching info is recorded with crc32 rather than md5"""
+        callCaching_crc32_mdata = self._call_for('callCaching_crc32')
+        callCaching_crc32_mdata_exp = workflow_utils._json_loadf(self._test_fname('metadata_orig.callCaching_crc32.exp.json'))
+        assert sorted(callCaching_crc32_mdata.items()) == sorted(callCaching_crc32_mdata_exp.items())
 
-
-
-
-
-        
-        
+# end: class TestGatherFileMetadataFromAnalysisMetadata()
