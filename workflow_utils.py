@@ -100,6 +100,7 @@ import util.cmd
 import util.file
 import util.misc
 import tools.git_annex
+import tools.gcloud
 
 _log = logging.getLogger(__name__)
 
@@ -326,6 +327,9 @@ def _running_on_aws():
     return 'VIRAL_NGS_ON_AWS' in os.environ or \
         run_succeeds('wget', 'http://169.254.169.254/latest/dynamic/instance-identity/document')
 
+
+
+
 def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy and git-annex."""
     _run('conda install cromwell dxpy git-annex')
@@ -374,6 +378,10 @@ def _standardize_dx_url(url):
 
 
 # ** GCS-related utils
+
+@util.misc.memoize
+def _gcloud_tool():
+    return tools.gcloud.GCloudTool()
 
 def _transfer_to_gcs(url, file_size, file_md5, bucket_name='sabeti-ilya-cromwell', project_id='viral-comp-dev'):
     """Transfer given files to GCS using Google's Data Transfer Service; return their URLs."""
@@ -454,11 +462,9 @@ def _transfer_to_gcs(url, file_size, file_md5, bucket_name='sabeti-ilya-cromwell
 
 # ** git and git-annex-related utils
 
-def _ga_tool(_ga_tool_ref=[]):
-    if not _ga_tool_ref:
-        _ga_tool_ref.append(tools.git_annex.GitAnnexTool())
-    util.misc.chk(len(_ga_tool_ref) == 1)
-    return _ga_tool_ref[0]
+@util.misc.memoize
+def _ga_tool():
+    return tools.git_annex.GitAnnexTool()
 
 def _git_annex_get_link_into_annex(f):
     """Follow symlinks as needed, to find the final symlink pointing into the annex"""
@@ -1803,6 +1809,7 @@ def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
 
 # ** finalize_analysis_dirs impl
 
+# *** _gather_file_metadata_from_analysis_metadata
 def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
     """For files referenced in `analysis_metadata` (as strings denoting local or cloud paths),
     gather file metadata such as md5 hashes and sizes.
@@ -1810,16 +1817,20 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
     We can gather them from:
        - Cromwell's callCaching info
        - for files on gs, gsutil stat calls
-       - for local files under git-annex control, the symlink.
+       - for local files under git-annex control, the symlink into the annex which includes the md5 and file size
+       - the local file itself
     """
 
     chk, make_seq = util.misc.from_module(util.misc, 'chk make_seq')
+
+    # var: file_paths_in_analysis_metadata - all file paths referenced in the analysis metadata.
+    file_paths_in_analysis_metadata = set()
 
     # var: file_path_to_metadata - maps file path string (as used in workflow metadata, either local or cloud path)
     #    to a dict mapping metadata item name (md5, size, etc) to value.
     file_path_to_metadata = _ord_dict()
 
-    def _file_mdata(file_path):
+    def _file_mdata_dict(file_path):
         """Return the dictionary representing the metadata for the file denoted by `file_path`"""
         return file_path_to_metadata.setdefault(file_path, {})
 
@@ -1827,7 +1838,7 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
         """For the file denoted by `file_path`, set metadata field `key` to `val`.
         If the field is already set, check that it has not changed.
         """
-        file_md = _file_mdata(file_path)
+        file_md = _file_mdata_dict(file_path)
         if key in file_md:
             chk(file_md[key] == val)
         else:
@@ -1843,7 +1854,10 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
     def _is_valid_md5(s):
         return _is_str(s) and len(s) == 32 and set(s) <= set('0123456789ABCDEF')
 
-
+    # Extract md5s of files from callCaching data
+    # Note: the exact API used here may not be fully official/permanent -
+    # https://github.com/broadinstitute/cromwell/issues/4498
+    # The code here should be written to work even if the API changes.
     for call_name, call_attempts in analysis_metadata['calls'].items():
         for call_attempt in call_attempts:
             for call_attempts_field, hashes_field in (('inputs', 'input'), ('outputs', 'output expression')):
@@ -1857,8 +1871,10 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
                     inp_type, inp_name = inp_type_and_name.split()
                     if inp_type == 'File':
                         file_type_inputs.add(inp_name)
+                        # actual input type might be File or Array[File]
                         chk(isinstance(inp_hashes, (_str_type, list)))
                         inp2hashes[inp_name] = make_seq(inp_hashes)
+
                 inp_name_to_val = _qry_json(call_attempt, call_attempts_field, {})
                 for inp_name, inp_val in inp_name_to_val.items():
                     if inp_name in file_type_inputs:
@@ -1868,8 +1884,37 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
                         #       'inp2hashes=', inp2hashes)
                         chk(len(inp_vals) == len(inp2hashes[inp_name]))
                         for inp_one_val, inp_one_hash in zip(inp_vals, inp2hashes[inp_name]):
+                            file_paths_in_analysis_metadata.add(inp_one_val)
                             if _is_valid_md5(inp_one_hash):
                                 _set_file_mdata(inp_one_val, 'md5', inp_one_hash)
+            # for call_attempts_field, hashes_field in (('inputs', 'input'), ('outputs', 'output expression'))
+        # for call_attempt in call_attempts
+    # for call_name, call_attempts in analysis_metadata['calls'].items()
+
+    #
+    # For inputs/output files for which we could not get an md5 from the callCaching metadata,
+    # try to get it from other sources.
+    #
+
+    files_to_gs_stat = set()
+    ga_tool = _ga_tool()
+    for file_path in sorted(file_paths_in_analysis_metadata - set(file_path_to_metadata.keys())):
+        if file_path.startswith('gs://'):
+            files_to_gs_stat.add(file_path)
+        elif ga_tool.is_annexed_file(file_path):
+            ga_key_attrs = ga_tool.examinekey(ga_tool.lookupkey(file_path))
+            for mdata_field in ('md5', 'size'):
+                if mdata_field in ga_key_attrs:
+                    _set_file_mdata(file_path, mdata_field, ga_key_attrs[field])
+
+    if not _gcloud_tool().is_anonymous():
+        gs_mdata = _gcloud_tool().get_metadata_for_objects(files_to_gs_stat)
+        for gs_uri in files_to_gs_stat:
+            for mdata_field in ('md5', 'size'):
+                _set_file_mdata(gs_uri, mdata_field, gs_mdata[gs_uri][mdata_field])
+
+    for file_path in sorted(file_paths_in_analysis_metadata - set(file_path_to_metadata.keys())):
+        _log.info('NO MD5: %s', file_path)
 
     print('RESULT-----------')
     print('\n'.join(map(str, file_path_to_metadata.items())))

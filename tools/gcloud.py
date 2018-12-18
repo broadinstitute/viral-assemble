@@ -43,24 +43,24 @@ class GCloudTool(tools.Tool):
         tools.Tool.__init__(self, install_methods=install_methods)
         try:
             self.storage_client = storage.Client()
+            self._is_anonymous = False
         except Exception:
-            self.storage_client = None
+            self.storage_client = storage.Client.create_anonymous_client()
+            self._is_anonymous = True
         self.bucket_name_to_bucket = {}
 
     def version(self):
         return TOOL_VERSION
+    
+    def is_anonymous(self):
+        return self._is_anonymous
 
     def get_storage_client(self):
-        if self.storage_client is None:
-            return storage.Client.create_anonymous_client()
         return self.storage_client
 
     def get_bucket(self, bucket_name):
         """Return the bucket object for given bucket name"""
-        if bucket_name not in self.bucket_name_to_bucket:
-            self.bucket_name_to_bucket[bucket_name] = self.get_storage_client().bucket(bucket_name)
-        util.misc.chk(self.bucket_name_to_bucket[bucket_name])
-        return self.bucket_name_to_bucket[bucket_name]
+        return self.get_storage_client().bucket(bucket_name)
 
     def get_blob(self, gs_uri):
         """Return the blob object for given gs:// uri"""
@@ -76,9 +76,11 @@ class GCloudTool(tools.Tool):
         """Get metadata for objects stored in Google Cloud Storage.
 
         TODO:
+          - cache results for given gs_uri (most of our URIs don't change)
+            (make sure to lock the shared cache before any update)
           - use batch request google.cloud.storage.batch.Batch
           - use 'fields' to get partial response with just the fields we want
-          - parallelize
+          - parallelize with threads
         """
         
         uri2attrs = {}
