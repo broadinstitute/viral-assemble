@@ -58,6 +58,7 @@ def test_git_annex_init_add_get_drop(tmpdir_function):
 
             ga.get(file_A)
             assert isfile(file_A)
+            assert ga.is_annexed_file(file_A)
 
             key_attrs = ga.examinekey(ga.lookupkey(file_A))
             assert key_attrs['key_name'] == '220c7810f41695d9a87d70b68ccf2aeb.txt'
@@ -67,6 +68,7 @@ def test_git_annex_init_add_get_drop(tmpdir_function):
 
             ga.drop(file_A)
             assert not isfile(file_A)
+            assert ga.is_annexed_file(file_A)
             assert ga.lookupkey(file_A) == 'MD5E-s13--220c7810f41695d9a87d70b68ccf2aeb.txt'
 
             # test operations when the current dir is outside the repo
