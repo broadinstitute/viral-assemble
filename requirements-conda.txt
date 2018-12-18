@@ -8,6 +8,7 @@ diamond=0.9.10
 jmespath=0.9.3
 kmc=3.1.1rc1
 gatk=3.8
+google-cloud-storage=1.12.0
 kraken=1.0.0_fork3
 krona=2.7
 last=876
