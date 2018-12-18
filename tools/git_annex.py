@@ -126,7 +126,7 @@ class GitAnnexTool(tools.Tool):
         return f, annex_link_target
 
     def is_annexed_file(self, f):
-        """Test is `f` is a file controlled by git-annex."""
+        """Test is `f` is a file controlled by git-annex (not necessarily present in local repo)."""
         return os.path.lexists(f) and not os.path.isdir(f) and self._get_link_into_annex(f)[1]
 
     def lookupkey(self, f):
