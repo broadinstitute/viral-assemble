@@ -237,10 +237,12 @@ class CondaPackage(InstallMethod):
         post_install_command=None,
         post_install_ret=0,
         post_verify_command=None,
-        post_verify_ret=0
+        post_verify_ret=0,
+        no_executable=False
     ):
         # if the executable name is specifed, use it; otherwise use the package name
         self.executable = executable or package
+        self.no_executable = no_executable
         self.package = package
         self.channel = channel
         if type(version) == CondaPackageVersion:
@@ -261,7 +263,7 @@ class CondaPackage(InstallMethod):
 
         self.verifycmd = verifycmd
         self.verifycode = verifycode
-        self.require_executability = require_executability
+        self.require_executability = not no_executable and require_executability
         self.patches = patches or []
 
         # if we have specified a conda env/root, use it
@@ -354,6 +356,8 @@ class CondaPackage(InstallMethod):
         return os.path.join(self.env_path, "bin")
 
     def executable_path(self):
+        if self.no_executable:
+            raise RuntimeError('no executable for this pkg!')
         return os.path.join(self.bin_path, self.executable)
 
     def apply_patches(self):
@@ -390,7 +394,7 @@ class CondaPackage(InstallMethod):
             return False
 
         # if the package is installed, check the binary for executability
-        if os.access(self.executable_path(), (os.X_OK | os.R_OK) if self.require_executability else os.R_OK):
+        if self.no_executable or (os.access(self.executable_path(), (os.X_OK | os.R_OK) if self.require_executability else os.R_OK)):
             # optionally use the verify command, if specified
             if self.verifycmd:
                 if self.verifycmd.split()[0] == os.path.basename(self.executable_path()):
