@@ -1938,11 +1938,6 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
     #         return file_obj
 
     # analysis_metadata_with_file_objs = _transform_json_data(analysis_metadata, file_node_to_obj)
-    
-    
-        
-
-
 
 def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None, status_only=False):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
