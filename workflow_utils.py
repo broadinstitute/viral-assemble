@@ -1907,7 +1907,7 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
                 if mdata_field in ga_key_attrs:
                     _set_file_mdata(file_path, mdata_field, ga_key_attrs[field])
 
-    if not _gcloud_tool().is_anonymous():
+    if not _gcloud_tool().is_anonymous_client():
         gs_mdata = _gcloud_tool().get_metadata_for_objects(files_to_gs_stat)
         for gs_uri in files_to_gs_stat:
             for mdata_field in ('md5', 'size'):

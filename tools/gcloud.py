@@ -48,7 +48,7 @@ class GCloudTool(tools.Tool):
             install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, channel='conda-forge',
                                                   executable=None)]
         tools.Tool.__init__(self, install_methods=install_methods)
-        self._use_anonymous_client = use_anonymous_client
+        self._use_anonymous_client = 'always' if 'PYTEST_CURRENT_TEST' in os.environ else use_anonymous_client
         self._storage_client = None
         self._is_anonymous = False
         self._bucket_name_to_bucket = {}
@@ -57,7 +57,8 @@ class GCloudTool(tools.Tool):
         return TOOL_VERSION
     
     def is_anonymous_client(self):
-        return self._storage_client and self._is_anonymous
+        self.get_storage_client()
+        return self._is_anonymous
 
     def get_storage_client(self):
         if not self._storage_client:
