@@ -36,27 +36,46 @@ class GCloudTool(tools.Tool):
     '''Tool wrapper for accessing the Google Cloud.
     '''
 
-    def __init__(self, install_methods=None):
+    def __init__(self, install_methods=None, use_anonymous_client=False):
+        """Initialize the GCloud tool wrapper.
+
+        Args:
+          use_anonymous_client: if False (default), never use anonymous client; if True, try anonymous
+            client if default auth fails; if 'always', always use anonymous client only.
+        """
         if install_methods is None:
             install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, channel='conda-forge',
                                                   executable=None)]
         tools.Tool.__init__(self, install_methods=install_methods)
-        try:
-            self.storage_client = storage.Client()
-            self._is_anonymous = False
-        except Exception:
-            self.storage_client = storage.Client.create_anonymous_client()
-            self._is_anonymous = True
-        self.bucket_name_to_bucket = {}
+        self._use_anonymous_client = use_anonymous_client
+        self._storage_client = None
+        self._is_anonymous = False
+        self._bucket_name_to_bucket = {}
 
     def version(self):
         return TOOL_VERSION
     
-    def is_anonymous(self):
-        return self._is_anonymous
+    def is_anonymous_client(self):
+        return self._storage_client and self._is_anonymous
 
     def get_storage_client(self):
-        return self.storage_client
+        if not self._storage_client:
+            if self._use_anonymous_client == 'always':
+                self._storage_client = storage.Client.create_anonymous_client()
+                self._is_anonymous = True
+            else:
+                try:
+                    self._storage_client = storage.Client()
+                    self._is_anonymous = False
+                except Exception:
+                    if self._use_anonymous_client:
+                        self._storage_client = storage.Client.create_anonymous_client()
+                        self._is_anonymous = True
+                    else:
+                        raise
+        util.misc.chk(self._storage_client)
+        _log.info('Initialized storage client, anonymous=%s', self._is_anonymous)
+        return self._storage_client
 
     def get_bucket(self, bucket_name):
         """Return the bucket object for given bucket name"""
@@ -64,14 +83,13 @@ class GCloudTool(tools.Tool):
 
     def get_blob(self, gs_uri):
         """Return the blob object for given gs:// uri"""
-        _log.info('getting blob from %s, anonymous? %s', gs_uri, self.is_anonymous())
+        _log.info('getting blob from %s', gs_uri)
         gs_uri_parts = uritools.urisplit(gs_uri)
         util.misc.chk(gs_uri_parts.scheme == 'gs' and gs_uri_parts.path.startswith('/') and \
                       gs_uri_parts.query is None and gs_uri_parts.fragment is None)
         bucket = self.get_bucket(gs_uri_parts.authority)
         blob = bucket.get_blob(gs_uri_parts.path[1:])
-        util.misc.chk(blob)
-        return blob
+        return util.misc.chk(blob)
 
     def get_metadata_for_objects(self, gs_uris):
         """Get metadata for objects stored in Google Cloud Storage.
