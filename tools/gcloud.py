@@ -16,6 +16,7 @@ import tempfile
 import pipes
 import time
 import binascii
+import base64
 
 import uritools
 from google.cloud import storage
@@ -101,11 +102,15 @@ class GCloudTool(tools.Tool):
           - use 'fields' to get partial response with just the fields we want
           - parallelize with threads
         """
+
+        def _maybe_decode(s):
+            return s.decode() if hasattr(s, 'decode') else s
         
         uri2attrs = {}
         for gs_uri in gs_uris:
             blob = self.get_blob(gs_uri)
-            uri2attrs[gs_uri] = collections.OrderedDict([('md5', binascii.hexlify(blob.md5_hash.decode('base64')).upper()),
+            md5_hex = binascii.hexlify(base64.b64decode(blob.md5_hash))
+            uri2attrs[gs_uri] = collections.OrderedDict([('md5', _maybe_decode(md5_hex).upper()),
                                                          ('size', blob.size)])
         return uri2attrs
 
