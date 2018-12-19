@@ -64,6 +64,7 @@ class GCloudTool(tools.Tool):
 
     def get_blob(self, gs_uri):
         """Return the blob object for given gs:// uri"""
+        _log.info('getting blob from %s, anonymous? %s', gs_uri, self.is_anonymous())
         gs_uri_parts = uritools.urisplit(gs_uri)
         util.misc.chk(gs_uri_parts.scheme == 'gs' and gs_uri_parts.path.startswith('/') and \
                       gs_uri_parts.query is None and gs_uri_parts.fragment is None)
