@@ -285,3 +285,22 @@ def test_chk():
         chk(2 == 3, 'Something wrong')
     with pytest.raises(TypeError):
         chk(isinstance(None, int), 'Expected an int', TypeError)
+
+def test_first_non_None(*args):
+    first_non_None = util.misc.first_non_None
+    assert first_non_None(1) == 1
+    assert first_non_None(1, None) == 1
+    assert first_non_None(None, False) == False
+    assert first_non_None(None, None, 0) == 0
+    assert first_non_None(None, '', None, True) == ''
+    for v in (False, (), '', 0):
+        assert first_non_None(v) == v
+
+    with pytest.raises(ValueError):
+        first_non_None()
+    with pytest.raises(ValueError):
+        first_non_None(None)
+    with pytest.raises(ValueError):
+        first_non_None(None, None)
+
+

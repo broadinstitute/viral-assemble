@@ -735,3 +735,9 @@ def from_module(module, names):
     to avoid code littered with full module paths."""
     return [getattr(module, name) for name in names.split()]
 
+def first_non_None(*args):
+    """Return the first of args that is not None; raise ValueError if all are None."""
+    for arg in args:
+        if arg is not None:
+            return arg
+    raise ValueError('No non-None args')
