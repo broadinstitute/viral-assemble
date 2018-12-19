@@ -118,6 +118,7 @@ class Tool(object):
         return self.exec_path
 
     def execute(self, *args):
+        util.chk(self.exec_path, 'This package has no executable!')
         assert not os.system(self.exec_path + ' ' + args)
 
     def install_and_get_path(self):
@@ -221,11 +222,13 @@ class CondaPackage(InstallMethod):
         conda.
     '''
 
+    USE_PACKAGE_NAME = '__USE_PACKAGE_NAME'
+
     def __init__(
         self,
         package,
         channel="bioconda",
-        executable=None,
+        executable=USE_PACKAGE_NAME,
         version="",
         verifycmd=None,
         verifycode=0,
@@ -237,12 +240,10 @@ class CondaPackage(InstallMethod):
         post_install_command=None,
         post_install_ret=0,
         post_verify_command=None,
-        post_verify_ret=0,
-        no_executable=False
+        post_verify_ret=0
     ):
-        # if the executable name is specifed, use it; otherwise use the package name
-        self.executable = executable or package
-        self.no_executable = no_executable
+        # if the executable name is specifed or is explicitly set to None, use that; otherwise use the package name.
+        self.executable = package if executable == USE_PACKAGE_NAME else executable
         self.package = package
         self.channel = channel
         if type(version) == CondaPackageVersion:
@@ -263,7 +264,7 @@ class CondaPackage(InstallMethod):
 
         self.verifycmd = verifycmd
         self.verifycode = verifycode
-        self.require_executability = not no_executable and require_executability
+        self.require_executability = self.executable and require_executability
         self.patches = patches or []
 
         # if we have specified a conda env/root, use it
@@ -356,9 +357,7 @@ class CondaPackage(InstallMethod):
         return os.path.join(self.env_path, "bin")
 
     def executable_path(self):
-        if self.no_executable:
-            raise RuntimeError('no executable for this pkg!')
-        return os.path.join(self.bin_path, self.executable)
+        return os.path.join(self.bin_path, self.executable) if self.executable else None
 
     def apply_patches(self):
         for path, patch in self.patches:
@@ -394,7 +393,7 @@ class CondaPackage(InstallMethod):
             return False
 
         # if the package is installed, check the binary for executability
-        if self.no_executable or (os.access(self.executable_path(), (os.X_OK | os.R_OK) if self.require_executability else os.R_OK)):
+        if not self.executable or (os.access(self.executable_path(), (os.X_OK | os.R_OK) if self.require_executability else os.R_OK)):
             # optionally use the verify command, if specified
             if self.verifycmd:
                 if self.verifycmd.split()[0] == os.path.basename(self.executable_path()):

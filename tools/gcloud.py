@@ -39,7 +39,7 @@ class GCloudTool(tools.Tool):
     def __init__(self, install_methods=None):
         if install_methods is None:
             install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, channel='conda-forge',
-                                                  no_executable=True)]
+                                                  executable=None)]
         tools.Tool.__init__(self, install_methods=install_methods)
         try:
             self.storage_client = storage.Client()
