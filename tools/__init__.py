@@ -216,19 +216,17 @@ class CondaPackageVersion(object):
         else:
             return self.version
 
-
 class CondaPackage(InstallMethod):
     ''' This is an install method for tools that can be installed via
         conda.
     '''
 
-    USE_PACKAGE_NAME = '__USE_PACKAGE_NAME'
 
     def __init__(
         self,
         package,
         channel="bioconda",
-        executable=USE_PACKAGE_NAME,
+        executable='_use_package_name',
         version="",
         verifycmd=None,
         verifycode=0,
@@ -243,7 +241,7 @@ class CondaPackage(InstallMethod):
         post_verify_ret=0
     ):
         # if the executable name is specifed or is explicitly set to None, use that; otherwise use the package name.
-        self.executable = package if executable == USE_PACKAGE_NAME else executable
+        self.executable = package if executable == '_use_package_name' else executable
         self.package = package
         self.channel = channel
         if type(version) == CondaPackageVersion:
