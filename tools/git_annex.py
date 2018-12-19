@@ -37,7 +37,7 @@ class GitAnnexTool(tools.Tool):
 
     def __init__(self, install_methods=None):
         if install_methods is None:
-            install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, channel='conda-forge']
+            install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, channel='conda-forge')]
         tools.Tool.__init__(self, install_methods=install_methods)
 
     def version(self):
