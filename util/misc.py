@@ -725,9 +725,10 @@ def subdict(d, keys):
     return collections.OrderedDict([(k, v) for k, v in d.items() if k in keys])
 
 def chk(condition, message='Check failed', exc=RuntimeError):
-    """Check a condition, raise an exception if condition is False."""
+    """Check a condition, raise an exception if bool(condition)==False, else return `condition`."""
     if not condition:
         raise exc(message)
+    return condition
 
 def from_module(module, names):
     """Shorthand for assigning several functions from a module to local vars,

@@ -275,8 +275,12 @@ def test_subdict(iter_d, iter_subset):
 def test_chk():
     chk = util.misc.chk
     chk(True, 'no error')
+    assert chk(1) == 1
+    assert chk('1', 'nonempty string') == '1'
     with pytest.raises(RuntimeError):
         chk(False)
+    with pytest.raises(RuntimeError):
+        chk('', "string is empty")
     with pytest.raises(RuntimeError):
         chk(2 == 3, 'Something wrong')
     with pytest.raises(TypeError):
