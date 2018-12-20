@@ -462,10 +462,6 @@ def _transfer_to_gcs(url, file_size, file_md5, bucket_name='sabeti-ilya-cromwell
 
 # ** git and git-annex-related utils
 
-@util.misc.memoize
-def _ga_tool():
-    return tools.git_annex.GitAnnexTool()
-
 def _git_annex_get_link_into_annex(f):
     """Follow symlinks as needed, to find the final symlink pointing into the annex"""
     link_target = None
