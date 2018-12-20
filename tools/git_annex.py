@@ -15,6 +15,8 @@ import shlex
 import tempfile
 import pipes
 import time
+import functools
+import contextlib
 
 import tools
 import util.file
@@ -26,34 +28,90 @@ TOOL_VERSION = '7.20181211'
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
 
+
+# class _Batcher(object):
+#     """Batches """
+
+# def _batcher(single_method, batch_method):
+#     single_method.argpacks = []
+#     def single_method_impl(self, *args):
+#         if not self._batching:
+#              batch_method([args])
+#         single_method.argpacks.append(args)
+
 # * class GitAnnexTool
 class GitAnnexTool(tools.Tool):
 
     '''Tool wrapper for git-annex.
 
-    TODO:
-       - support unlocked annexed files
     '''
+
+    # Implementation notes
+
+    # Fields:
+    #   _batching: if True, commands are batched rather then run immediately
+    #   _batched_cmds: map from git-annex command to input tuples to feed to the command in batch mode
+
+    # TODO:
+    #    - support unlocked annexed files
+
 
     def __init__(self, install_methods=None):
         if install_methods is None:
             install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, channel='conda-forge')]
         tools.Tool.__init__(self, install_methods=install_methods)
+        self._batching = False
+        self._batched_cmds = collections.defaultdict(list)
 
     def version(self):
         return TOOL_VERSION
 
-    def execute(self, args, tool='git-annex'):    # pylint: disable=W0221
-        """Run program `tool` with arguments `args`."""
-        bin_dir = os.path.dirname(self.install_and_get_path())
-        tool_cmd = [os.path.join(bin_dir, tool)] + list(map(str, args))
+    def _get_bin_dir(self):
+        return os.path.dirname(self.install_and_get_path())
 
-        # ensure that the git and git-annex binaries we installed are first in PATH.
-        env = dict(os.environ)
-        env['PATH'] = bin_dir + ':' + env['PATH']
+    def _get_run_env(self):
+        if not hasattr(self, '_run_env'):
+            # ensure that the git and git-annex binaries we installed are first in PATH.
+            self._run_env = dict(os.environ, PATH=':'.join((self._get_bin_dir(), os.environ['PATH'])))
+        return self._run_env
+
+    def _call_tool_cmd(self, tool_cmd, **kw):
+        subprocess.check_call(tool_cmd, env=self._get_run_env(), **kw)
+
+    def execute(self, args, tool='git-annex', batch_args=()):    # pylint: disable=W0221
+        """Run program `tool` with arguments `args`."""
+
+        tool_cmd = (os.path.join(self._get_bin_dir(), tool),) + tuple(map(str, args))
+
         _log.debug(' '.join(tool_cmd))
-        _log.debug('PATH=%s', env['PATH'])
-        subprocess.check_call(tool_cmd, env=env)
+
+        if not batch_args:
+            self._call_tool_cmd(tool_cmd)
+            return
+
+        self._batched_cmds[tool_cmd].append(batch_args)
+        if not self._batching:
+            self.execute_batched_commands()
+
+    def execute_batched_commands(self):
+        """Run any saved batched commands"""
+        for tool_cmd, batch_inputs in self._batched_cmds.items():
+            with util.file.tempfname(prefix='git-annex-batch-inputs') as batch_inps_fname:
+                util.file.dump_file(batch_inps_fname,
+                                    '\n'.join([' '.join(map(str, inps)) for inps in batch_inputs]))
+                with open(batch_inps_fname) as batch_inps_file:
+                    subprocess.check_call(tool_cmd, stdin=batch_inps_file)
+        self._batched_cmds.clear()
+
+    @contextlib.contextmanager
+    def batching(self):
+        save_batching = self._batching
+        self._batching = True
+        try:
+            yield
+            self.execute_batched_commands()
+        finally:
+            self._batching = save_batching
 
     def execute_git(self, args):
         """Run a git command"""
@@ -70,7 +128,7 @@ class GitAnnexTool(tools.Tool):
 
     def add(self, fname):
         """Add a file to git-annex"""
-        self.execute(['add', fname])
+        self.execute(['add', '--batch'], batch_args=(fname,))
 
     def commit(self, msg):
         """Execute git commit"""
@@ -85,6 +143,11 @@ class GitAnnexTool(tools.Tool):
     def move(self, fname, to_remote_name):
         """Move a file from local repo to a remote"""
         self.execute(['move', fname, '--to', to_remote_name])
+
+    def fromkey_batch(self, argpacks):
+        """Manually set up a symlink to a given key as a given file"""
+        for key, fname in argpacks:
+            self.execute(['fromkey', '--force', key, fname])
 
     def _get_link_into_annex(self, f):
         """If `f` points to an annexed file, possibly through a chain of symlinks, return
