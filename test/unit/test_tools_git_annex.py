@@ -175,4 +175,15 @@ def test_fromkey(ga_tool, git_annex_repo, file_A, file_B):
     ga_tool.fromkey(file_A_key, file_A_link2)
     assert os.path.samefile(file_A, file_A_link2)
 
+    with ga_tool.batching():
+        file_A_link3 = file_A+'.link3.txt'
+        file_A_link4 = file_A+'.link4.txt'
+        ga_tool.fromkey(file_A_key, file_A_link3)
+        assert not lexists(file_A_link3)
+        ga_tool.fromkey(file_A_key, file_A_link4)
+        assert not lexists(file_A_link4)
+    assert ga_tool.is_file_in_annex(file_A_link3)
+    assert ga_tool.is_file_in_annex(file_A_link4)
+
+
 
