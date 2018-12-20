@@ -54,7 +54,11 @@ class GitAnnexTool(tools.Tool):
 
     # TODO:
     #    - support unlocked annexed files
-
+    #    - add waiting for git index.lock to clear for some ops?  which ones?
+    #    - automatically decide what to batch together?
+    #    - support caching of metadata?
+    #    - check that batched commands are indeed independent?  (put names of affected repo paths in shared mem?)
+    #    - (option to) do opos on a separate checkout in a tmp  dir and then merge?  checkout first commit if only adding dirs
 
     def __init__(self, install_methods=None):
         if install_methods is None:
