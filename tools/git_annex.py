@@ -17,6 +17,7 @@ import pipes
 import time
 import functools
 import contextlib
+import copy
 
 import tools
 import util.file
@@ -100,9 +101,16 @@ class GitAnnexTool(tools.Tool):
             self.execute_batched_commands(instant=True)
 
     def execute_batched_commands(self, instant=False):
-        """Run any saved batched commands"""
+        """Run any saved batched commands.
+
+        Note that if one command fails, others won't be run.
+        """
+
+        # TODO: figure out correct behavior if some cmds fail
+
         _log.debug('RUNNING BATCH CMDS: instant=%s', instant)
-        for tool_cmd, batch_inputs in self._batched_cmds.items():
+        while self._batched_cmds:
+            tool_cmd, batch_inputs = self._batched_cmds.popitem()
             _log.debug('Running batch cmd %s with batched args %s', tool_cmd, batch_inputs)
             with util.file.tempfname(prefix='git-annex-batch-inputs') as batch_inps_fname:
                 util.file.dump_file(batch_inps_fname,
@@ -110,27 +118,32 @@ class GitAnnexTool(tools.Tool):
                 with open(batch_inps_fname) as batch_inps_file:
                     _log.debug('CALLING BATCH: %s batch_inps_file=%s', tool_cmd, batch_inps_file)
                     subprocess.check_call(tool_cmd, stdin=batch_inps_file)
-        self._batched_cmds.clear()
 
     @contextlib.contextmanager
     def batching(self):
+        """Commands run within this context will, on successful context exit, be run as a batch (if not already batching) or
+        added to currently accumulating batch (if already batching).  If an exception occurs within the context,
+        commands batched within the context will not be run or saved for later.
+        """
+
+        # TODO: figure out correct behavior if exception occurs within context
+        
         _log.debug('BATCHING enter context: self._batching was %s', self._batching)
         save_batching = self._batching
+        save_batched_cmds = copy.deepcopy(self._batched_cmds)
         self._batching = True
-        successfully_returned_from_yield = False
+
         try:
             yield
-            successfully_returned_from_yield = True
             _log.debug('BATCHING: successfully returned from yield')
-            self.execute_batched_commands()
-            _log.debug('BATCHING: successfully returned from yield')
+            self._batching = save_batching
+            if not self._batching:
+                self.execute_batched_commands()
         except Exception as e:
             _log.debug('BATCHING: exception %s', e)
-            raise
-        finally:
-            _log.debug('BATCHING: returned_from_yield=%s was %s restoring to %s',
-                       successfully_returned_from_yield, self._batching, save_batching)
             self._batching = save_batching
+            self._batched_cmds = save_batched_cmds
+            raise
 
     def execute_git(self, args):
         """Run a git command"""
