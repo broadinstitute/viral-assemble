@@ -167,3 +167,12 @@ def test_batch_add(ga_tool, git_annex_repo, file_A, file_B):
         assert not ga_tool.is_link_into_annex(file_B)
     assert ga_tool.is_link_into_annex(file_A)
     assert ga_tool.is_link_into_annex(file_B)
+
+def test_fromkey(ga_tool, git_annex_repo, file_A, file_B):
+    ga_tool.add(file_A)
+    file_A_key = ga_tool.lookupkey(file_A)
+    file_A_link2 = file_A+'.link2.txt'
+    ga_tool.fromkey(file_A_key, file_A_link2)
+    assert os.path.samefile(file_A, file_A_link2)
+
+

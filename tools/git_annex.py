@@ -165,10 +165,9 @@ class GitAnnexTool(tools.Tool):
         """Move a file from local repo to a remote"""
         self.execute(['move', fname, '--to', to_remote_name])
 
-    def fromkey_batch(self, argpacks):
+    def fromkey(self, key, fname):
         """Manually set up a symlink to a given key as a given file"""
-        for key, fname in argpacks:
-            self.execute(['fromkey', '--force', key, fname])
+        self.execute(['fromkey', '--force', '--batch'], batch_args=(key, fname))
 
     def _get_link_into_annex(self, f):
         """If `f` points to an annexed file, possibly through a chain of symlinks, return
