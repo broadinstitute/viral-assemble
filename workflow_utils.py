@@ -1901,7 +1901,7 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata, file_path_to
     for file_path in sorted(file_paths_in_analysis_metadata - set(file_path_to_metadata.keys())):
         if file_path.startswith('gs://'):
             files_to_gs_stat.add(file_path)
-        elif ga_tool.is_annexed_file(file_path):
+        elif ga_tool.is_link_into_annex(file_path):
             ga_key_attrs = ga_tool.examinekey(ga_tool.lookupkey(file_path))
             for mdata_field in ('md5', 'size'):
                 if mdata_field in ga_key_attrs:
@@ -1930,7 +1930,7 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata, file_path_to
     #     if val in file_path_to_obj:
     #         return file_path_to_obj[val]
 
-    #     if val.startswith('gs://') or os.path.is_file(val) or _ga_tool().is_annexed_file(f):
+    #     if val.startswith('gs://') or os.path.is_file(val) or _ga_tool().is_link_into_annex(f):
     #         file_path = val
     #         file_obj = _ord_dict(('_file', file_path))
     #         file_path_to_obj[file_path] = file_obj

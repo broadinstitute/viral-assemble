@@ -90,31 +90,46 @@ class GitAnnexTool(tools.Tool):
         _log.debug(' '.join(tool_cmd))
 
         if not batch_args:
+            _log.debug('Instant non-batched (no batch args): %s', tool_cmd)
             self._call_tool_cmd(tool_cmd)
             return
 
         self._batched_cmds[tool_cmd].append(batch_args)
         if not self._batching:
-            self.execute_batched_commands()
+            _log.debug('Instantly running cmd %s with batch args %s', tool_cmd, batch_args)
+            self.execute_batched_commands(instant=True)
 
-    def execute_batched_commands(self):
+    def execute_batched_commands(self, instant=False):
         """Run any saved batched commands"""
+        _log.debug('RUNNING BATCH CMDS: instant=%s', instant)
         for tool_cmd, batch_inputs in self._batched_cmds.items():
+            _log.debug('Running batch cmd %s with batched args %s', tool_cmd, batch_inputs)
             with util.file.tempfname(prefix='git-annex-batch-inputs') as batch_inps_fname:
                 util.file.dump_file(batch_inps_fname,
                                     '\n'.join([' '.join(map(str, inps)) for inps in batch_inputs]))
                 with open(batch_inps_fname) as batch_inps_file:
+                    _log.debug('CALLING BATCH: %s batch_inps_file=%s', tool_cmd, batch_inps_file)
                     subprocess.check_call(tool_cmd, stdin=batch_inps_file)
         self._batched_cmds.clear()
 
     @contextlib.contextmanager
     def batching(self):
+        _log.debug('BATCHING enter context: self._batching was %s', self._batching)
         save_batching = self._batching
         self._batching = True
+        successfully_returned_from_yield = False
         try:
             yield
+            successfully_returned_from_yield = True
+            _log.debug('BATCHING: successfully returned from yield')
             self.execute_batched_commands()
+            _log.debug('BATCHING: successfully returned from yield')
+        except Exception as e:
+            _log.debug('BATCHING: exception %s', e)
+            raise
         finally:
+            _log.debug('BATCHING: returned_from_yield=%s was %s restoring to %s',
+                       successfully_returned_from_yield, self._batching, save_batching)
             self._batching = save_batching
 
     def execute_git(self, args):
@@ -132,7 +147,9 @@ class GitAnnexTool(tools.Tool):
 
     def add(self, fname):
         """Add a file to git-annex"""
+        _log.debug('CALL TO ADD %s; batch status = %s', fname, self._batching)
         self.execute(['add', '--batch'], batch_args=(fname,))
+        _log.debug('RETURNED FROM CALL TO ADD %s; batch status = %s', fname, self._batching)
 
     def commit(self, msg):
         """Execute git commit"""
@@ -187,9 +204,14 @@ class GitAnnexTool(tools.Tool):
                 f_cur = os.path.join(os.path.dirname(f_cur), link_target)
         return f, annex_link_target
 
-    def is_annexed_file(self, f):
+    def is_link_into_annex(self, f):
         """Test is `f` is a file controlled by git-annex (not necessarily present in local repo)."""
         return os.path.lexists(f) and not os.path.isdir(f) and self._get_link_into_annex(f)[1]
+
+    def is_present(self, f):
+        """Given a link into annex, tests if the file is present in the local repo"""
+        util.misc.chk(self.is_link_into_annex(f))
+        return os.path.isfile(f)
 
     def lookupkey(self, f):
         """Get the git-annex key of an annexed file.  Note that, unlike git-annex-lookupkey, this looks at the file in the
