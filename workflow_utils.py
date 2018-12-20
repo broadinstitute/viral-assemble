@@ -1810,7 +1810,7 @@ def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
 # ** finalize_analysis_dirs impl
 
 # *** _gather_file_metadata_from_analysis_metadata
-def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
+def _gather_file_metadata_from_analysis_metadata(analysis_metadata, file_path_to_metadata=None):
     """For files referenced in `analysis_metadata` (as strings denoting local or cloud paths),
     gather file metadata such as md5 hashes and sizes.
 
@@ -1821,14 +1821,14 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata):
        - the local file itself
     """
 
-    chk, make_seq = util.misc.from_module(util.misc, 'chk make_seq')
+    chk, make_seq, first_non_None = util.misc.from_module(util.misc, 'chk make_seq first_non_None')
 
     # var: file_paths_in_analysis_metadata - all file paths referenced in the analysis metadata.
     file_paths_in_analysis_metadata = set()
 
     # var: file_path_to_metadata - maps file path string (as used in workflow metadata, either local or cloud path)
     #    to a dict mapping metadata item name (md5, size, etc) to value.
-    file_path_to_metadata = _ord_dict()
+    file_path_to_metadata = first_non_None(file_path_to_metadata, _ord_dict())
 
     def _file_mdata_dict(file_path):
         """Return the dictionary representing the metadata for the file denoted by `file_path`"""
