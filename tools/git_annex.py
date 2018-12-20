@@ -205,13 +205,12 @@ class GitAnnexTool(tools.Tool):
         return f, annex_link_target
 
     def is_link_into_annex(self, f):
-        """Test is `f` is a file controlled by git-annex (not necessarily present in local repo)."""
+        """Test if `f` is a file controlled by git-annex (not necessarily present in local repo)."""
         return os.path.lexists(f) and not os.path.isdir(f) and self._get_link_into_annex(f)[1]
 
-    def is_present(self, f):
-        """Given a link into annex, tests if the file is present in the local repo"""
-        util.misc.chk(self.is_link_into_annex(f))
-        return os.path.isfile(f)
+    def is_file_in_annex(self, f):
+        """Tests if `f` (possibly at the end of a chain of symlinks) is a file present in the local annex."""
+        return self.is_link_into_annex(f) and os.path.isfile(f)
 
     def lookupkey(self, f):
         """Get the git-annex key of an annexed file.  Note that, unlike git-annex-lookupkey, this looks at the file in the

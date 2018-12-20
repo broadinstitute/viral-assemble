@@ -139,7 +139,7 @@ def test_git_annex_init_add_get_drop(ga_tool, git_annex_repo, dir_remote, ga_fil
         os.symlink(ga_file_abs, ga_file_link_abs)
         assert not exists(ga_file_abs)
         ga_tool.get(ga_file_link_abs)
-        assert ga_tool.is_present(ga_file_abs)
+        assert ga_tool.is_file_in_annex(ga_file_abs)
         assert isfile(ga_file_abs)
         assert isfile(ga_file_link_abs)
         ga_tool.drop(ga_file_link_abs)
