@@ -1893,7 +1893,7 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata, file_path_to
     #
 
     files_to_gs_stat = set()
-    ga_tool = _ga_tool()
+    ga_tool = tools.git_annex.GitAnnexTool()
     for file_path in sorted(file_paths_in_analysis_metadata - set(file_path_to_metadata.keys())):
         if file_path.startswith('gs://'):
             files_to_gs_stat.add(file_path)
