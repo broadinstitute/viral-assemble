@@ -107,10 +107,12 @@ def test_git_annex_init_add_get_drop(ga_tool, git_annex_repo, dir_remote, ga_fil
     assert isfile(ga_file)
     assert ga_tool.is_link_into_annex(ga_file)
 
-    key_attrs = ga_tool.examinekey(ga_tool.lookupkey(ga_file))
+    assert ga_tool.lookupkey(ga_file) == ga_file_key
+    key_attrs = ga_tool.examinekey(ga_file_key)
     assert key_attrs['key_name'] == ga_file_key_name
     assert key_attrs['md5'] == ga_file_md5
     assert key_attrs['size'] == ga_file_size
+    assert ga_tool.construct_key(dict(key_attrs, fname=ga_file)) == ga_file_key
 
     ga_tool.drop(ga_file)
     assert not exists(ga_file)
@@ -184,6 +186,18 @@ def test_fromkey(ga_tool, git_annex_repo, file_A, file_B):
         assert not lexists(file_A_link4)
     assert ga_tool.is_file_in_annex(file_A_link3)
     assert ga_tool.is_file_in_annex(file_A_link4)
+
+def test_get_file_exts_for_key(ga_tool):
+    test_data = {'myfile.fasta': '.fasta',
+                 'myfile': '',
+                 'myfile.longext': '',
+                 'a': '',
+                 'a.b': '.b',
+                 'a.b.c': '.b.c'}
+    for fname, expected in test_data.items():
+        for pfx in ('', '/', '/a', '/a/b', 'a', 'b'):
+            fpath = os.path.join(pfx, fname)
+            assert ga_tool._get_file_exts_for_key(fpath) == expected, (fpath, expected)
 
 
 

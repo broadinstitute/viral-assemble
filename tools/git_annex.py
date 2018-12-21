@@ -237,15 +237,34 @@ class GitAnnexTool(tools.Tool):
         Most accurate would be to run 'git annex examinekey', but for speed we do the
         parsing ourselves.
         """
-        attrs = collections.OrderedDict()
+        key_attrs = collections.OrderedDict()
         key_attrs_str, key_name = key.rsplit('--', 1)
-        attrs['key_name'] = key_name
-        if key.startswith('MD5'):
-            attrs['md5'] = key_name[:32]
-            key_attrs_parts = key_attrs_str.split('-')
-            key_attrs_size_part = [p for p in key_attrs_parts if p.startswith('s')][0]
-            attrs['size'] = int(key_attrs_size_part[1:])
-        return attrs
+        key_attrs['key_name'] = key_name
+        key_attrs_parts = key_attrs_str.split('-')
+        key_attrs['backend'] = key_attrs_parts[0]
+        key_attrs_size_part = [p for p in key_attrs_parts if p.startswith('s')]
+        if key_attrs_size_part:
+            key_attrs['size'] = int(key_attrs_size_part[0][1:])
+        if key_attrs['backend'].startswith('MD5'):
+            key_attrs['md5'] = key_name[:32]
+        return key_attrs
+
+    @staticmethod
+    def _get_file_exts_for_key(fname, max_extension_length=5):
+        exts = ''
+        while True:
+            fname, ext = os.path.splitext(fname)
+            if not ext or len(ext) > (max_extension_length+1):
+                break
+            exts = ext + exts
+        return exts
+
+    @staticmethod
+    def construct_key(key_attrs, max_extension_length=5):
+        """Construct a git-annex key from its attributes.  Currently only MD5E keys are supported."""
+        util.misc.chk(key_attrs['backend'] == 'MD5E')
+        return '{backend}-s{size}--{md5}{exts}'.format(exts=GitAnnexTool._get_file_exts_for_key(key_attrs['fname']),
+                                                       **key_attrs)
 
     def get_annexed_file_attrs(self, f):
         """Get annexed file info that can be determined quickly e.g. from the key"""
