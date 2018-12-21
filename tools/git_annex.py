@@ -263,7 +263,9 @@ class GitAnnexTool(tools.Tool):
     def construct_key(key_attrs, max_extension_length=5):
         """Construct a git-annex key from its attributes.  Currently only MD5E keys are supported."""
         util.misc.chk(key_attrs['backend'] == 'MD5E')
-        return '{backend}-s{size}--{md5}{exts}'.format(exts=GitAnnexTool._get_file_exts_for_key(key_attrs['fname']),
+        _log.info('constuct_key from %s', key_attrs)
+        return '{backend}-s{size}--{md5}{exts}'.format(exts=GitAnnexTool._get_file_exts_for_key(key_attrs['fname'],
+                                                                                                max_extension_length),
                                                        **key_attrs)
 
     def get_annexed_file_attrs(self, f):
