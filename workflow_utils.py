@@ -161,6 +161,13 @@ def _is_under_dir(path, base_dir):
 def _md5_base64(s):
     return hashlib.md5(s).digest().encode('base64').strip()
 
+def _md5_for_file(fname):
+    hash_md5 = hashlib.md5()
+    with open(fname, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest().upper()
+
 def _pretty_print_json(json_dict, sort_keys=True):
     """Return a pretty-printed version of a dict converted to json, as a string."""
     return json.dumps(json_dict, indent=4, separators=(',', ': '), sort_keys=sort_keys)
@@ -526,8 +533,8 @@ def _git_annex_get_metadata(key, field):
 def _git_annex_set_metadata(key, field, val):
     _run('git', 'annex', 'metadata', '--key='+key, '-s', field + '=' + val)
 
-def _git_annex_checkpresentkey(key, remote):
-    return _run_succeeds('git annex checkpresentkey', key, remote)
+def _git_annex_checkpresentkey(key, remote=None):
+    return _run_succeeds('git annex checkpresentkey', key, remote) if remote else _run_succeeds('git annex checkpresentkey', key)
 
 def _git_annex_get_url_key(url):
     """Return the git-annex key for a url"""
