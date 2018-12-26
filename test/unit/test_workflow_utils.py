@@ -33,25 +33,33 @@ class TestCommandHelp(unittest.TestCase):
             assert parser, 'No parser for command {}'.format(cmd_name)
             helpstring = parser.format_help()
 
+
+@pytest.fixture(scope='module')
+def gcloud_tool():
+    return tools.gcloud.GCloudTool(use_anonymous_client='always')
+
 class TestGatherFileMetadataFromAnalysisMetadata():
 
     def _test_fname(self, *path_elts):
         return os.path.join(util.file.get_test_input_path(), 'TestWorkflowUtils', *path_elts)
 
-    def _call_for(self, test_data_id):
+    def _call_for(self, test_data_id, gcloud_tool):
         metadata_json_fname = self._test_fname('metadata_orig.{}.json'.format(test_data_id))
         metadata_json_data = workflow_utils._json_loadf(metadata_json_fname)
-        return workflow_utils._gather_file_metadata_from_analysis_metadata(metadata_json_data)
+        assert gcloud_tool.is_anonymous_client()
+        return workflow_utils._gather_file_metadata_from_analysis_metadata(metadata_json_data, gcloud_tool=gcloud_tool)
 
-    def test_succ(self):
+    def test_succ(self, gcloud_tool):
         """Test case of metadata from an analysis that succeeded"""
-        succ_mdata = self._call_for('succ')
+        succ_mdata = self._call_for('succ', gcloud_tool)
+        workflow_utils._write_json('/tmp/cmp.json', **succ_mdata)
         succ_exp = workflow_utils._json_loadf(self._test_fname('metadata_orig.succ.exp.json'))
-        assert sorted(succ_mdata.items()) == sorted(succ_exp.items())
+        for file_name, file_mdata in succ_exp.items():
+            assert set(file_mdata.items()) <= set(succ_mdata[file_name].items())
 
-    def test_callCaching_crc32(self):
+    def test_callCaching_crc32(self, gcloud_tool):
         """Test case of metadata from an analysis where some callCaching info is recorded with crc32 rather than md5"""
-        callCaching_crc32_mdata = self._call_for('callCaching_crc32')
+        callCaching_crc32_mdata = self._call_for('callCaching_crc32', gcloud_tool)
         callCaching_crc32_mdata_exp = workflow_utils._json_loadf(self._test_fname('metadata_orig.callCaching_crc32.exp.json'))
         assert sorted(callCaching_crc32_mdata.items()) == sorted(callCaching_crc32_mdata_exp.items())
 

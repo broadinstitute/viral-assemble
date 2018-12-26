@@ -386,10 +386,6 @@ def _standardize_dx_url(url):
 
 # ** GCS-related utils
 
-@util.misc.memoize
-def _gcloud_tool():
-    return tools.gcloud.GCloudTool()
-
 def _transfer_to_gcs(url, file_size, file_md5, bucket_name='sabeti-ilya-cromwell', project_id='viral-comp-dev'):
     """Transfer given files to GCS using Google's Data Transfer Service; return their URLs."""
 
@@ -1813,7 +1809,7 @@ def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
 # ** finalize_analysis_dirs impl
 
 # *** _gather_file_metadata_from_analysis_metadata
-def _gather_file_metadata_from_analysis_metadata(analysis_metadata, file_path_to_metadata=None):
+def _gather_file_metadata_from_analysis_metadata(analysis_metadata, file_path_to_metadata=None, gcloud_tool=None):
     """For files referenced in `analysis_metadata` (as strings denoting local or cloud paths),
     gather file metadata such as md5 hashes and sizes.
 
@@ -1825,6 +1821,8 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata, file_path_to
     """
 
     chk, make_seq, first_non_None = util.misc.from_module(util.misc, 'chk make_seq first_non_None')
+
+    gcloud_tool = first_non_None(gcloud_tool, tools.gcloud.GCloudTool())
 
     # var: file_paths_in_analysis_metadata - all file paths referenced in the analysis metadata.
     file_paths_in_analysis_metadata = set()
@@ -1908,10 +1906,10 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata, file_path_to
             ga_key_attrs = ga_tool.examinekey(ga_tool.lookupkey(file_path))
             for mdata_field in ('md5', 'size'):
                 if mdata_field in ga_key_attrs:
-                    _set_file_mdata(file_path, mdata_field, ga_key_attrs[field])
+                    _set_file_mdata(file_path, mdata_field, ga_key_attrs[mdata_field])
 
-    if not _gcloud_tool().is_anonymous_client():
-        gs_mdata = _gcloud_tool().get_metadata_for_objects(files_to_gs_stat)
+    if not gcloud_tool.is_anonymous_client():
+        gs_mdata = gcloud_tool.get_metadata_for_objects(files_to_gs_stat)
         for gs_uri in files_to_gs_stat:
             for mdata_field in ('md5', 'size'):
                 _set_file_mdata(gs_uri, mdata_field, gs_mdata[gs_uri][mdata_field])
