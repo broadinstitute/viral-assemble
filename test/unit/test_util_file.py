@@ -41,6 +41,7 @@ def testTempFiles():
                 tmp_fns.append(fn)
 
         assert os.path.isfile(my_tmp_fn)
+
         assert util.file.keep_tmp() or not os.path.exists(my_tmp_fns[0])
         assert util.file.keep_tmp() or not os.path.exists(my_tmp_fns[1])
 
