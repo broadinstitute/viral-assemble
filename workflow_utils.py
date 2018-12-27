@@ -24,7 +24,7 @@ In combination, these utilities enable much of what DNAnexus enables, but:
    - allowing easy archiving/unarchiving of data, using git-annex commands
    - using all of git's normal mechanisms, such as branches and submodules, to organize things
 
-Terms:
+Terms and abbreviations:
    workflow:
        currently this means a WDL workflow, normally from pipes/WDL/workflows in a specific
        version of vira-ngs.
@@ -39,6 +39,17 @@ Terms:
    full inputs:
        full inputs to an analysis, comprised of `specified inputs` supplemented where needed by workflow's defaults.
        corresponds to DNAnexus notion of 'originalInputs'.
+
+   lcpath:
+       local or cloud path, representing as a string
+
+   fmdata:
+       file metadata (size, md5, etc) associated with a file, represented as a dict;
+       different from analysis metadata, which is associated with an analysis
+       and includes things like analysis labels.
+
+   jpath:
+       path navigating through a parsed json structure: tuple of keys and indices to get from the root to a leaf value.
 
 TODO:
   - make things work with v7 git-annex repos
@@ -167,6 +178,16 @@ def _md5_for_file(fname):
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
     return hash_md5.hexdigest().upper()
+
+def _is_valid_md5(s):
+    return _is_str(s) and len(s) == 32 and set(s) <= set('0123456789ABCDEF')
+
+def _qry_json(json_data, jmespath_expr, dflt=None):
+    """Return the result of a jmespath query `jmespath_expr` on `json_data`,
+    or `dflt` if the query returns None."""
+    res =  jmespath.search(jmespath_expr, json_data,
+                           jmespath.Options(dict_cls=collections.OrderedDict))
+    return res if res is not None else dflt
 
 def _pretty_print_json(json_dict, sort_keys=True):
     """Return a pretty-printed version of a dict converted to json, as a string."""
@@ -1808,52 +1829,16 @@ def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
 
 # ** finalize_analysis_dirs impl
 
-# *** _gather_file_metadata_from_analysis_metadata
-def _gather_file_metadata_from_analysis_metadata(analysis_metadata, file_path_to_metadata=None, gcloud_tool=None):
-    """For files referenced in `analysis_metadata` (as strings denoting local or cloud paths),
-    gather file metadata such as md5 hashes and sizes.
-
-    We can gather them from:
-       - Cromwell's callCaching info
-       - for files on gs, gsutil stat calls
-       - for local files under git-annex control, the symlink into the annex which includes the md5 and file size
-       - the local file itself
+# *** _gather_fmdata_from_calls
+def _gather_fmdata_from_calls(analysis_metadata, lcpath2fmdata=None):
+    """For lcpaths in `analysis_metadata`, gather fmdata.
     """
 
     chk, make_seq, first_non_None = util.misc.from_module(util.misc, 'chk make_seq first_non_None')
 
-    gcloud_tool = first_non_None(gcloud_tool, tools.gcloud.GCloudTool())
-
-    # var: file_paths_in_analysis_metadata - all file paths referenced in the analysis metadata.
-    file_paths_in_analysis_metadata = set()
-
-    # var: file_path_to_metadata - maps file path string (as used in workflow metadata, either local or cloud path)
+    # var: lcpath2fmdata - maps file path string (as used in workflow metadata, either local or cloud path)
     #    to a dict mapping metadata item name (md5, size, etc) to value.
-    file_path_to_metadata = first_non_None(file_path_to_metadata, _ord_dict())
-
-    def _file_mdata_dict(file_path):
-        """Return the dictionary representing the metadata for the file denoted by `file_path`"""
-        return file_path_to_metadata.setdefault(file_path, {})
-
-    def _set_file_mdata(file_path, key, val):
-        """For the file denoted by `file_path`, set metadata field `key` to `val`.
-        If the field is already set, check that it has not changed.
-        """
-        file_md = _file_mdata_dict(file_path)
-        if key in file_md:
-            chk(file_md[key] == val)
-        else:
-            file_md[key] = val
-
-    def _qry_json(json_data, jmespath_expr, dflt=None):
-        """Return the result of a jmespath query `jmespath_expr` on `json_data`,
-        or `dflt` if the query returns None."""
-        res =  jmespath.search(jmespath_expr, json_data,
-                               jmespath.Options(dict_cls=collections.OrderedDict))
-        return res if res is not None else dflt
-
-    def _is_valid_md5(s):
-        return _is_str(s) and len(s) == 32 and set(s) <= set('0123456789ABCDEF')
+    lcpath2fmdata = first_non_None(lcpath2fmdata, collections.defaultdict(dict))
 
     # Extract md5s of files from callCaching data
     # Note: the exact API used here may not be fully official/permanent -
@@ -1885,12 +1870,37 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata, file_path_to
                         #       'inp2hashes=', inp2hashes)
                         chk(len(inp_vals) == len(inp2hashes[inp_name]))
                         for inp_one_val, inp_one_hash in zip(inp_vals, inp2hashes[inp_name]):
-                            file_paths_in_analysis_metadata.add(inp_one_val)
+                            one_val_mdata = lcpath2fmdata[inp_one_val]
                             if _is_valid_md5(inp_one_hash):
-                                _set_file_mdata(inp_one_val, 'md5', inp_one_hash)
+                                one_val_mdata['md5'] = inp_one_hash
             # for call_attempts_field, hashes_field in (('inputs', 'input'), ('outputs', 'output expression'))
         # for call_attempt in call_attempts
     # for call_name, call_attempts in analysis_metadata['calls'].items()
+    
+    return lcpath2fmdata
+# end: def _gather_fmdata_from_calls(analysis_metadata, lcpath2fmdata=None)
+
+# *** _gather_file_metadata_from_analysis_metadata
+def _gather_file_metadata_from_analysis_metadata(analysis_metadata, lcpath2fmdata=None, gcloud_tool=None):
+    """For files referenced in `analysis_metadata` (as strings denoting local or cloud paths),
+    gather file metadata such as md5 hashes and sizes.
+
+    We can gather them from:
+       - Cromwell's callCaching info
+       - for files on gs, gsutil stat calls
+       - for local files under git-annex control, the symlink into the annex which includes the md5 and file size
+       - the local file itself
+    """
+
+    chk, make_seq, first_non_None = util.misc.from_module(util.misc, 'chk make_seq first_non_None')
+
+    gcloud_tool = first_non_None(gcloud_tool, tools.gcloud.GCloudTool())
+
+    # var: lcpath2fmdata - maps file path string (as used in workflow metadata, either local or cloud path)
+    #    to a dict mapping metadata item name (md5, size, etc) to value.
+    lcpath2fmdata = first_non_None(lcpath2fmdata, collections.defaultdict(dict))
+
+    _gather_fmdata_from_calls(analysis_metadata, lcpath2fmdata)
 
     #
     # For inputs/output files for which we could not get an md5 from the callCaching metadata,
@@ -1899,27 +1909,27 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata, file_path_to
 
     files_to_gs_stat = set()
     ga_tool = tools.git_annex.GitAnnexTool()
-    for file_path in sorted(file_paths_in_analysis_metadata - set(file_path_to_metadata.keys())):
+    for file_path in sorted(lcpath2fmdata):
         if file_path.startswith('gs://'):
             files_to_gs_stat.add(file_path)
         elif ga_tool.is_link_into_annex(file_path):
             ga_key_attrs = ga_tool.examinekey(ga_tool.lookupkey(file_path))
             for mdata_field in ('md5', 'size'):
                 if mdata_field in ga_key_attrs:
-                    _set_file_mdata(file_path, mdata_field, ga_key_attrs[mdata_field])
+                    lcpath2fmdata[mdata_field] = ga_key_attrs[mdata_field]
 
     if not gcloud_tool.is_anonymous_client():
         gs_mdata = gcloud_tool.get_metadata_for_objects(files_to_gs_stat)
         for gs_uri in files_to_gs_stat:
             for mdata_field in ('md5', 'size'):
-                _set_file_mdata(gs_uri, mdata_field, gs_mdata[gs_uri][mdata_field])
+                lcpath2fmdata[mdata_field] = gs_mdata[gs_uri][mdata_field]
 
-    for file_path in sorted(file_paths_in_analysis_metadata - set(file_path_to_metadata.keys())):
-        _log.info('NO MD5: %s', file_path)
+#    for file_path in sorted(file_paths_in_analysis_metadata - set(file_path_to_metadata.keys())):
+#        _log.info('NO MD5: %s', file_path)
 
-    print('RESULT-----------')
-    print('\n'.join(map(str, file_path_to_metadata.items())))
-    return file_path_to_metadata
+#    print('RESULT-----------')
+#    print('\n'.join(map(str, file_path_to_metadata.items())))
+    return lcpath2fmdata
 
     # file_path_to_obj = _ord_dict()
     # dict_path_to_obj = _ord_dict()
