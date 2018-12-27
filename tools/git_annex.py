@@ -251,6 +251,7 @@ class GitAnnexTool(tools.Tool):
 
     @staticmethod
     def _get_file_exts_for_key(fname, max_extension_length=5):
+        """Determine the suffix of `fname` that would be included in the git-annex MD5E key, after the md5."""
         exts = ''
         while True:
             fname, ext = os.path.splitext(fname)
