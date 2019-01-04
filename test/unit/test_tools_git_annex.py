@@ -43,6 +43,7 @@ def git_annex_repo(ga_tool_module, tmpdir_module):
         mkdir_p('ga_repo')
         with pushd_popd('ga_repo'):
             ga_tool.init_repo()
+            ga_tool.initremote_external(remote_name='myldir', externaltype='ldir')
             ga_tool.execute_git(['config', 'annex.backend', 'MD5E'])
             ga_tool.execute_git(['config', '--type=int', 'annex.maxextensionlength', '5'])
             yield os.getcwd()

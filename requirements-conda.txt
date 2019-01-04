@@ -9,6 +9,7 @@ jmespath=0.9.3
 kmc=3.1.1rc1
 gatk=3.8
 git-annex=7.20181211
+git-annex-remote-ldir=0.0.1
 google-cloud-storage=1.12.0
 kraken=1.0.0_fork3_upd1
 krona=2.7

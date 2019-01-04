@@ -158,6 +158,10 @@ class GitAnnexTool(tools.Tool):
         self.execute_git(['init'])
         self.execute(['init'])
 
+    def initremote_external(self, remote_name, externaltype):
+        """Init an external special remote ldir"""
+        self.execute(['initremote', remote_name, 'type=external', 'externaltype={}'.format(externaltype), 'encryption=none'])
+
     def add(self, fname):
         """Add a file to git-annex"""
         _log.debug('CALL TO ADD %s; batch status = %s', fname, self._batching)
