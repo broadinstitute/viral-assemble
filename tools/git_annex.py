@@ -8,6 +8,7 @@ import logging
 import collections
 import os
 import os.path
+import stat
 import subprocess
 import shutil
 import random
@@ -22,6 +23,7 @@ import copy
 import tools
 import util.file
 import util.misc
+import util.version
 
 TOOL_NAME = 'git-annex'
 TOOL_VERSION = '7.20181211'
@@ -37,6 +39,7 @@ _log.setLevel(logging.DEBUG)
 #     single_method.argpacks = []
 #     def single_method_impl(self, *args):
 #         if not self._batching:
+
 #              batch_method([args])
 #         single_method.argpacks.append(args)
 
@@ -77,7 +80,10 @@ class GitAnnexTool(tools.Tool):
     def _get_run_env(self):
         if not hasattr(self, '_run_env'):
             # ensure that the git and git-annex binaries we installed are first in PATH.
-            self._run_env = dict(os.environ, PATH=':'.join((self._get_bin_dir(), os.environ['PATH'])))
+            self._run_env = dict(os.environ, PATH=':'.join((self._get_bin_dir(),
+                                                            os.path.join(util.version.get_project_path(),
+                                                                         'tools', 'git-annex-remotes'),
+                                                            os.environ['PATH'])))
         return self._run_env
 
     def _call_tool_cmd(self, tool_cmd, **kw):
@@ -85,7 +91,6 @@ class GitAnnexTool(tools.Tool):
 
     def execute(self, args, tool='git-annex', batch_args=()):    # pylint: disable=W0221
         """Run program `tool` with arguments `args`."""
-
         tool_cmd = (os.path.join(self._get_bin_dir(), tool),) + tuple(map(str, args))
 
         _log.debug(' '.join(tool_cmd))
@@ -303,5 +308,25 @@ class GitAnnexTool(tools.Tool):
                 self.execute(['drop', os.path.basename(f)])
         assert os.path.islink(f)
         assert not os.path.isfile(f)
+
+    def import_urls(self, urls):
+        """Imports `urls` into git-annex.  urls can be local or cloud paths.
+
+        Returns:
+           map from url to git-annex key for the contents of the URL.
+        """
+        
+        pass
+
+    def _gather_fmdata_from_local_files(lcpath2fmdata):
+        """Gather file metadata from local files."""
+        for file_path, fmdata in lcpath2fmdata.items():
+            if not file_path.startswith('/') or all(f in fmdata for f in ('md5', 'size')) or \
+               not os.path.isfile(file_path):
+                continue
+            fmdata['size'] = os.path.getsize(file_path)
+            fmdata['md5'] = _md5_for_file(file_path)
+
+        
 
 # end: class GitAnnexTool

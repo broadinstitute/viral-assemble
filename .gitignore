@@ -76,3 +76,5 @@ tools/conda-tools/
 .pytest_cache/
 
 tmp/**
+
+tools/tmp_envs

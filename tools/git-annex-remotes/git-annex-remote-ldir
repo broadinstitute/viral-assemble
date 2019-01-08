@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -eu -o pipefail
+
+conda-execute -q `which the-git-annex-remote-ldir` < /dev/null > /dev/null 2> /dev/null
+conda-execute -q `which the-git-annex-remote-ldir`
