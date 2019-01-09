@@ -45,6 +45,7 @@ vphaser2=2.0
 arrow=0.12.1
 bedtools=2.27.1
 biopython=1.72
+contextlib2=0.5.5
 future==0.16.0
 matplotlib=1.5.3
 pluggy=0.8.0

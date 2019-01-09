@@ -17,8 +17,9 @@ import tempfile
 import pipes
 import time
 import functools
-import contextlib
 import copy
+
+import contextlib2 as contextlib
 
 import tools
 import util.file
@@ -42,6 +43,11 @@ _log.setLevel(logging.DEBUG)
 
 #              batch_method([args])
 #         single_method.argpacks.append(args)
+class _ValHolder(object):
+    def __init__(self, val=None):
+        self.val = val
+
+_BatchedCall = collections.namedtuple('_BatchedCall', ['batch_args', 'output_holder'])
 
 # * class GitAnnexTool
 class GitAnnexTool(tools.Tool):
@@ -68,8 +74,7 @@ class GitAnnexTool(tools.Tool):
         if install_methods is None:
             install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, channel='conda-forge')]
         tools.Tool.__init__(self, install_methods=install_methods)
-        self._batching = False
-        self._batched_cmds = collections.defaultdict(list)
+        self._batched_cmds = None
 
     def version(self):
         return TOOL_VERSION
@@ -86,26 +91,18 @@ class GitAnnexTool(tools.Tool):
                                                             os.environ['PATH'])))
         return self._run_env
 
-    def _call_tool_cmd(self, tool_cmd, **kw):
-        subprocess.check_call(tool_cmd, env=self._get_run_env(), **kw)
+    def execute(self, *args, **kwargs):
+        with contextlib.ExitStack() as stack:
+            if self._batched_cmds is None:
+                self = stack.enter_context(self.batching())
+            self._add_command_to_batch(*args, **kwargs)
 
-    def execute(self, args, tool='git-annex', batch_args=()):    # pylint: disable=W0221
-        """Run program `tool` with arguments `args`."""
+    def _add_command_to_batch(self, args, tool='git-annex', batch_args=None, output_holder=None):
+        """Add command to current batch"""
         tool_cmd = (os.path.join(self._get_bin_dir(), tool),) + tuple(map(str, args))
+        self._batched_cmds[tool_cmd].append(_BatchedCall(batch_args=batch_args, output_holder=output_holder))
 
-        _log.debug(' '.join(tool_cmd))
-
-        if not batch_args:
-            _log.debug('Instant non-batched (no batch args): %s', tool_cmd)
-            self._call_tool_cmd(tool_cmd)
-            return
-
-        self._batched_cmds[tool_cmd].append(batch_args)
-        if not self._batching:
-            _log.debug('Instantly running cmd %s with batch args %s', tool_cmd, batch_args)
-            self.execute_batched_commands(instant=True)
-
-    def execute_batched_commands(self, instant=False):
+    def _execute_batched_commands(self):
         """Run any saved batched commands.
 
         Note that if one command fails, others won't be run.
@@ -113,42 +110,38 @@ class GitAnnexTool(tools.Tool):
 
         # TODO: figure out correct behavior if some cmds fail
 
-        _log.debug('RUNNING BATCH CMDS: instant=%s', instant)
+        _log.debug('RUNNING BATCH CMDS: %s', self._batched_cmds)
         while self._batched_cmds:
-            tool_cmd, batch_inputs = self._batched_cmds.popitem()
-            _log.debug('Running batch cmd %s with batched args %s', tool_cmd, batch_inputs)
-            with util.file.tempfname(prefix='git-annex-batch-inputs') as batch_inps_fname:
-                util.file.dump_file(batch_inps_fname,
-                                    '\n'.join([' '.join(map(str, inps)) for inps in batch_inputs]))
-                with open(batch_inps_fname) as batch_inps_file:
-                    _log.debug('CALLING BATCH: %s batch_inps_file=%s', tool_cmd, batch_inps_file)
-                    subprocess.check_call(tool_cmd, stdin=batch_inps_file)
+            tool_cmd, batch_calls = self._batched_cmds.popitem()
+            with contextlib.ExitStack() as stack:
+                subprocess_call_args = {}
+                if batch_calls[0].batch_args:
+                    _log.info('calling batch calls: %s %s', tool_cmd, batch_calls)
+                    batch_inps_fname = stack.enter_context(util.file.tempfname(prefix='git-annex-batch-inputs'))
+                    util.file.dump_file(batch_inps_fname,
+                                        '\n'.join([' '.join(map(str, batch_call.batch_args)) for batch_call in batch_calls]))
+                    batch_inps_file = stack.enter_context(open(batch_inps_fname))
+                    subprocess_call_args.update(stdin=batch_inps_file)
 
+                subprocess_func = getattr(subprocess, 'check_output' if batch_calls[0].output_holder else 'check_call')
+                result = subprocess_func(tool_cmd, env=self._get_run_env(), **subprocess_call_args)
+
+                if batch_calls[0].output_holder:
+                    if len(batch_calls) == 1:
+                        batch_calls[0].output_holder.val = result
+                    else:
+                        result_lines = result.strip().split()
+                        util.misc.chk(len(result_lines) == len(batch_calls))
+                        for batch_call, result_line in zip(batch_calls, result_lines):
+                            batch_call.output_holder.val = result_line
+                
     @contextlib.contextmanager
     def batching(self):
-        """Commands run within this context will, on successful context exit, be run as a batch (if not already batching) or
-        added to currently accumulating batch (if already batching).  If an exception occurs within the context,
-        commands batched within the context will not be run or saved for later.
-        """
-
-        # TODO: figure out correct behavior if exception occurs within context
-        
-        _log.debug('BATCHING enter context: self._batching was %s', self._batching)
-        save_batching = self._batching
-        save_batched_cmds = copy.deepcopy(self._batched_cmds)
-        self._batching = True
-
-        try:
-            yield
-            _log.debug('BATCHING: successfully returned from yield')
-            self._batching = save_batching
-            if not self._batching:
-                self.execute_batched_commands()
-        except Exception as e:
-            _log.debug('BATCHING: exception %s', e)
-            self._batching = save_batching
-            self._batched_cmds = save_batched_cmds
-            raise
+        """Delay commands until context exit."""
+        self = copy.copy(self)
+        self._batched_cmds = collections.defaultdict(list)
+        yield self
+        self._execute_batched_commands()
 
     def execute_git(self, args):
         """Run a git command"""
@@ -169,9 +162,9 @@ class GitAnnexTool(tools.Tool):
 
     def add(self, fname):
         """Add a file to git-annex"""
-        _log.debug('CALL TO ADD %s; batch status = %s', fname, self._batching)
+        _log.debug('CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
         self.execute(['add', '--batch'], batch_args=(fname,))
-        _log.debug('RETURNED FROM CALL TO ADD %s; batch status = %s', fname, self._batching)
+        _log.debug('RETURNED FROM CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
 
     def commit(self, msg):
         """Execute git commit"""

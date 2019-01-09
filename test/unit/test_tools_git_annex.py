@@ -163,11 +163,12 @@ def test_git_annex_init_add_get_drop(ga_tool, git_annex_repo, dir_remote, ga_fil
 # end: def test_git_annex_init_add_get_drop(tmpdir_function):
 
 def test_batch_add(ga_tool, git_annex_repo, file_A, file_B):
-    with ga_tool.batching():
-        ga_tool.add(file_A)
-        assert not ga_tool.is_link_into_annex(file_A)
-        ga_tool.add(file_B)
-        assert not ga_tool.is_link_into_annex(file_B)
+    with ga_tool.batching() as ga_tool:
+        for f in (file_A, file_B):
+            assert not ga_tool.is_link_into_annex(f)
+            ga_tool.add(f)
+            assert not ga_tool.is_link_into_annex(f)
+
     assert ga_tool.is_link_into_annex(file_A)
     assert ga_tool.is_link_into_annex(file_B)
 
@@ -178,11 +179,13 @@ def test_fromkey(ga_tool, git_annex_repo, file_A, file_B):
     ga_tool.fromkey(file_A_key, file_A_link2)
     assert os.path.samefile(file_A, file_A_link2)
 
-    with ga_tool.batching():
+    with ga_tool.batching() as ga_tool:
         file_A_link3 = file_A+'.link3.txt'
         file_A_link4 = file_A+'.link4.txt'
+        assert not lexists(file_A_link3)
         ga_tool.fromkey(file_A_key, file_A_link3)
         assert not lexists(file_A_link3)
+        assert not lexists(file_A_link4)
         ga_tool.fromkey(file_A_key, file_A_link4)
         assert not lexists(file_A_link4)
     assert ga_tool.is_file_in_annex(file_A_link3)
