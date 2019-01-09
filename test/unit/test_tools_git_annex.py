@@ -162,14 +162,17 @@ def test_empty_batching_context(ga_tool):
             pass
 
 def test_batch_add(ga_tool, git_annex_repo, file_A, file_B):
+    f2key = {}
     with ga_tool.batching() as ga_tool:
         for f in (file_A, file_B):
             assert not ga_tool.is_link_into_annex(f)
+            f2key[f] = ga_tool.calckey(f)
             ga_tool.add(f)
             assert not ga_tool.is_link_into_annex(f)
 
-    assert ga_tool.is_link_into_annex(file_A)
-    assert ga_tool.is_link_into_annex(file_B)
+    for f in (file_A, file_B):
+        assert ga_tool.is_link_into_annex(f)
+        assert ga_tool.lookupkey(f) == f2key[f]
 
 def test_fromkey(ga_tool, git_annex_repo, file_A, file_B):
     ga_tool.add(file_A)

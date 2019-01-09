@@ -33,25 +33,20 @@ TOOL_VERSION = '7.20181211'
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
 
-
-# class _Batcher(object):
-#     """Batches """
-
-# def _batcher(single_method, batch_method):
-#     single_method.argpacks = []
-#     def single_method_impl(self, *args):
-#         if not self._batching:
-
-#              batch_method([args])
-#         single_method.argpacks.append(args)
 class _ValHolder(object):
+
+    """A mutable holder for one value.  Used to provide a place to record output of commands."""
+
     def __init__(self, val=None):
         self.val = val
 
+# NamedTuple: _BatchedCall - arguments to one git-annex call in a set of batched cals, and an optional place to record call output
 _BatchedCall = collections.namedtuple('_BatchedCall', ['batch_args', 'output_holder'])
 
 # * class GitAnnexTool
 class GitAnnexTool(tools.Tool):
+
+# ** class docs
 
     '''Tool wrapper for git-annex.
 
@@ -60,16 +55,18 @@ class GitAnnexTool(tools.Tool):
     # Implementation notes
 
     # Fields:
-    #   _batching: if True, commands are batched rather then run immediately
-    #   _batched_cmds: map from git-annex command to input tuples to feed to the command in batch mode
+    #   _batched_cmds: None or map from git-annex command to list of _BatchedCall records
 
     # TODO:
+    #    - pass -J options or configure annex.jobs
     #    - support unlocked annexed files
     #    - add waiting for git index.lock to clear for some ops?  which ones?
     #    - automatically decide what to batch together?
     #    - support caching of metadata?
     #    - check that batched commands are indeed independent?  (put names of affected repo paths in shared mem?)
     #    - (option to) do opos on a separate checkout in a tmp  dir and then merge?  checkout first commit if only adding dirs
+
+# ** general infrastructure for running commands
 
     def __init__(self, install_methods=None):
         if install_methods is None:
@@ -98,24 +95,28 @@ class GitAnnexTool(tools.Tool):
                                                             os.environ['PATH'])))
         return self._run_env
 
-    def execute(self, *args, **kwargs):
+    def execute(self, args, batch_args=None, output_holder=None, now=False, tool='git-annex'):
         """Run the given git or git-annex command.  If batching is in effect (see self.batching()), the command is stored and will be
         executed when the batching context exits.
         
         Args:
             args: list of arguments too the command
-            tool: git-annex or git, defaults to git-annex
             batch_args: if given, tuple of args to a batch git-annex command
             output_holder: if given, the output of the command will be stored into this _ValHolder object.
               Note that if batching is in effect, this will only happen after the batching context closes.
+            now: execute instantly even if batching is in effect
+            tool: git-annex or git, defaults to git-annex
         """
         with contextlib.ExitStack() as stack:
-            if self._batched_cmds is None:
+            if self._batched_cmds is None or now:
                 self = stack.enter_context(self.batching())
-            self._add_command_to_batch(*args, **kwargs)
+            self._add_command_to_batch(args, batch_args, output_holder, tool)
 
-    def _add_command_to_batch(self, args, tool='git-annex', batch_args=None, output_holder=None):
-        """Add command to current batch"""
+    def _add_command_to_batch(self, args, batch_args, output_holder, tool):
+        """Add command to current batch."""
+        if batch_args:
+            util.misc.chk(tool == 'git-annex')
+            args = tuple(args) + ('--batch',)
         tool_cmd = (os.path.join(self._get_bin_dir(), tool),) + tuple(map(str, args))
         self._batched_cmds[tool_cmd].append(_BatchedCall(batch_args=batch_args, output_holder=output_holder))
 
@@ -133,6 +134,8 @@ class GitAnnexTool(tools.Tool):
             with contextlib.ExitStack() as stack:
                 subprocess_call_args = {}
                 if batch_calls[0].batch_args:
+                    # This is a git-annex command with the --batch flag: prepare an input file of the
+                    # command arguments, one line per batched call.
                     _log.info('calling batch calls: %s %s', tool_cmd, batch_calls)
                     batch_inps_fname = stack.enter_context(util.file.tempfname(prefix='git-annex-batch-inputs'))
                     util.file.dump_file(batch_inps_fname,
@@ -144,10 +147,10 @@ class GitAnnexTool(tools.Tool):
                 result = subprocess_func(tool_cmd, env=self._get_run_env(), **subprocess_call_args)
 
                 if batch_calls[0].output_holder:
-                    if len(batch_calls) == 1:
-                        batch_calls[0].output_holder.val = result
+                    if not batch_calls[0].batch_args:
+                        batch_calls[0].output_holder.val = result.rstrip('\n')
                     else:
-                        result_lines = result.strip().split()
+                        result_lines = result.rstrip('\n').split('\n')
                         util.misc.chk(len(result_lines) == len(batch_calls))
                         for batch_call, result_line in zip(batch_calls, result_lines):
                             batch_call.output_holder.val = result_line
@@ -155,7 +158,11 @@ class GitAnnexTool(tools.Tool):
     @contextlib.contextmanager
     def batching(self):
         """Create a batching context.  Commands issued within the batching context _may_ be delayed and issued in batches
-        for efficiency; we guarantee that when the batching context exits, the commands have been executed."""
+        for efficiency; we guarantee that when the batching context exits, the commands have been executed.
+
+        The value returned by this context manager is a GitAnnexTool object that batches commands issued to it,
+        and will run them by the time of the context exit.
+        """
         self = copy.copy(self)
         self._batched_cmds = collections.defaultdict(list)
         yield self
@@ -166,6 +173,8 @@ class GitAnnexTool(tools.Tool):
     def execute_git(self, args):
         """Run a git command"""
         self.execute(args, tool='git')
+
+# ** specific commands
 
     def print_version(self):
         """Print git-annex version"""
@@ -183,7 +192,7 @@ class GitAnnexTool(tools.Tool):
     def add(self, fname):
         """Add a file to git-annex"""
         _log.debug('CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
-        self.execute(['add', '--batch'], batch_args=(fname,))
+        self.execute(['add'], batch_args=(fname,))
         _log.debug('RETURNED FROM CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
 
     def commit(self, msg):
@@ -202,7 +211,7 @@ class GitAnnexTool(tools.Tool):
 
     def fromkey(self, key, fname):
         """Manually set up a symlink to a given key as a given file"""
-        self.execute(['fromkey', '--force', '--batch'], batch_args=(key, fname))
+        self.execute(['fromkey', '--force'], batch_args=(key, fname))
 
     def _get_link_into_annex(self, f):
         """If `f` points to an annexed file, possibly through a chain of symlinks, return
@@ -322,27 +331,41 @@ class GitAnnexTool(tools.Tool):
         assert os.path.islink(f)
         assert not os.path.isfile(f)
 
-    def calckey(self, path, output_holder):
+    def calckey(self, path, output_holder=None):
         """Compute the git-annex key for the given file"""
-        self.execute(['calckey', '--batch'])
-        
+        now = not output_holder
+        output_holder = output_holder or _ValHolder()
+        self.execute(['calckey'], (path,), now=now, output_holder=output_holder)
+        return output_holder.val
 
-    def import_urls(self, urls):
-        """Imports `urls` into git-annex.  urls can be local or cloud paths.
+    def import_urls(self, urls, url2filestat=None):
+        """Imports `urls` into git-annex.
+
+        Args:
+          urls: iterable of urls, which are strings denoting either local or cloud files.
+          url2filestat: map from url to filestat (filestat is a map from data attrs like size, md5, git_annex_key to values).
 
         Returns:
-           map from url to git-annex key for the contents of the URL.
+          map from url to filestat
         """
-        
-        pass
 
-    def _gather_fmdata_from_local_files(lcpath2fmdata):
+        if url2filestat is None:
+            url2filestat = collections.OrderedDict()
+
+        for url in set(urls):
+            if url not in url2filestat:
+                url2filestat[url] = collections.OrderedDict()
+
+    def _gather_stat_from_local_files(self, url2filestat):
         """Gather file metadata from local files."""
-        for file_path, fmdata in lcpath2fmdata.items():
-            if not file_path.startswith('/') or all(f in fmdata for f in ('md5', 'size')) or \
-               not os.path.isfile(file_path):
+
+        for url, filestat in url2filestat.items():
+            if 'git_annex_key' in filestat: continue
+            if 'size' in filestat and 'md5' in filestat: continue
+            if not os.path.isfile(url):
                 continue
-            fmdata['size'] = os.path.getsize(file_path)
+
+            filestat['size'] = os.path.getsize(file_path)
             fmdata['md5'] = _md5_for_file(file_path)
 
         
