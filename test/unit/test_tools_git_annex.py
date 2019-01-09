@@ -206,5 +206,10 @@ def test_get_file_exts_for_key(ga_tool):
             fpath = os.path.join(pfx, fname)
             assert ga_tool._get_file_exts_for_key(fpath) == expected, (fpath, expected)
 
+def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
+    url2filestat = ga_tool.import_urls(urls=(file_A, file_B))
+    for f in (file_A, file_B):
+        assert f in url2filestat
+        assert 'git_annex_key' in url2filestat[f]
 
 

@@ -17,6 +17,7 @@ import tempfile
 import pipes
 import time
 import functools
+import operator
 import copy
 import warnings
 
@@ -38,6 +39,9 @@ class _ValHolder(object):
     """A mutable holder for one value.  Used to provide a place to record output of commands."""
 
     def __init__(self, val=None):
+        self.val = val
+
+    def __call__(self, val):
         self.val = val
 
 # NamedTuple: _BatchedCall - arguments to one git-annex call in a set of batched cals, and an optional place to record call output
@@ -148,12 +152,12 @@ class GitAnnexTool(tools.Tool):
 
                 if batch_calls[0].output_holder:
                     if not batch_calls[0].batch_args:
-                        batch_calls[0].output_holder.val = result.rstrip('\n')
+                        batch_calls[0].output_holder(result.rstrip('\n'))
                     else:
                         result_lines = result.rstrip('\n').split('\n')
                         util.misc.chk(len(result_lines) == len(batch_calls))
                         for batch_call, result_line in zip(batch_calls, result_lines):
-                            batch_call.output_holder.val = result_line
+                            batch_call.output_holder(result_line)
                 
     @contextlib.contextmanager
     def batching(self):
@@ -293,7 +297,12 @@ class GitAnnexTool(tools.Tool):
 
     @staticmethod
     def construct_key(key_attrs, max_extension_length=5):
-        """Construct a git-annex key from its attributes.  Currently only MD5E keys are supported."""
+        """Construct a git-annex key from its attributes.  Currently only MD5E keys are supported.
+        
+        Args:
+          key_attrs: map from key attribute name to value; must include mappings for the following keys -
+             backend (currently must be MD5E), size, md5, fname.
+        """
         util.misc.chk(key_attrs['backend'] == 'MD5E')
         _log.info('constuct_key from %s', key_attrs)
         return '{backend}-s{size}--{md5}{exts}'.format(exts=GitAnnexTool._get_file_exts_for_key(key_attrs['fname'],
@@ -333,10 +342,9 @@ class GitAnnexTool(tools.Tool):
 
     def calckey(self, path, output_holder=None):
         """Compute the git-annex key for the given file"""
-        now = not output_holder
-        output_holder = output_holder or _ValHolder()
-        self.execute(['calckey'], (path,), now=now, output_holder=output_holder)
-        return output_holder.val
+        our_output_holder = _ValHolder()
+        self.execute(['calckey'], (path,), output_holder=output_holder or our_output_holder, now=not output_holder)
+        return our_output_holder.val
 
     def import_urls(self, urls, url2filestat=None):
         """Imports `urls` into git-annex.
@@ -352,22 +360,47 @@ class GitAnnexTool(tools.Tool):
         if url2filestat is None:
             url2filestat = collections.OrderedDict()
 
-        for url in set(urls):
+        urls = sorted(set(urls))
+        for url in urls:
             if url not in url2filestat:
                 url2filestat[url] = collections.OrderedDict()
 
-    def _gather_stat_from_local_files(self, url2filestat):
-        """Gather file metadata from local files."""
+        self._gather_filestats_from_local_files(url2filestat)
+        _log.info('GOT RESULTS: %s', url2filestat)
+        return url2filestat
 
-        for url, filestat in url2filestat.items():
-            if 'git_annex_key' in filestat: continue
-            if 'size' in filestat and 'md5' in filestat: continue
-            if not os.path.isfile(url):
-                continue
+    def _gather_filestats_from_local_files(self, url2filestat):
+        """Gather filestats for URLs that point to local files.
 
-            filestat['size'] = os.path.getsize(file_path)
-            fmdata['md5'] = _md5_for_file(file_path)
+        For files that are git-annex links, get the git-annex key from the link, even if the file
+        is not present in the local annex.
 
+        For files for which we already have the md5, but not the size, quickly get the size and then compute
+        the MD5E key.
+        """
         
+        with self.batching() as self:
+            for url, filestat in url2filestat.items():
+                if 'git_annex_key' in filestat: continue
+                if 'size' in filestat and 'md5' in filestat: continue
+                #if not url.startswith('/'): continue
+
+                if self.is_link_into_annex(url):
+                    filestat['git_annex_key'] = self.lookupkey(url)
+                    continue
+
+                if not os.path.isfile(url):
+                    _log.info('NOT A FILE: %s', url)
+                    continue
+
+                filestat['size'] = os.path.getsize(url)
+                if 'md5' in filestat:
+                    filestat['git_annex_key'] = self.construct_key(key_attrs=dict(backend='MD5E',
+                                                                                  fname=os.path.basename(url),
+                                                                                  **filestat))
+                    continue
+
+                _log.info('CALLING CALCKEY: %s', url)
+                self.calckey(url, output_holder=functools.partial(operator.setitem, filestat, 'git_annex_key'))
 
 # end: class GitAnnexTool
