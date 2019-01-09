@@ -75,12 +75,15 @@ class GitAnnexTool(tools.Tool):
             install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, channel='conda-forge')]
         tools.Tool.__init__(self, install_methods=install_methods)
         self._batched_cmds = None
+        _log.info('Created GitAnnexTool %s', id(self))
 
     def version(self):
         return TOOL_VERSION
 
     def _get_bin_dir(self):
-        return os.path.dirname(self.install_and_get_path())
+        bin_dir = os.path.dirname(self.install_and_get_path())
+        util.misc.chk(self.is_installed())
+        return bin_dir
 
     def _get_run_env(self):
         if not hasattr(self, '_run_env'):

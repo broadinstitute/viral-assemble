@@ -23,12 +23,8 @@ _log = logging.getLogger(__name__)  # pylint: disable=invalid-name
 mkdir_p, pushd_popd = util.misc.from_module(util.file, 'mkdir_p pushd_popd')
 join, isfile, exists, lexists, abspath, relpath = util.misc.from_module(os.path, 'join isfile exists lexists abspath relpath')
 
-@pytest.fixture
-def ga_tool():
-    return tools.git_annex.GitAnnexTool()
-
 @pytest.fixture(scope='module')
-def ga_tool_module():
+def ga_tool():
     return tools.git_annex.GitAnnexTool()
 
 def test_git_annex_basic(ga_tool):
@@ -36,9 +32,8 @@ def test_git_annex_basic(ga_tool):
     ga_tool.print_version()
 
 @pytest.fixture(scope='module')
-def git_annex_repo(ga_tool_module, tmpdir_module):
+def git_annex_repo(ga_tool, tmpdir_module):
     """Creates a git-annex repo, initializes it, makes it the current dir."""
-    ga_tool = ga_tool_module
     with pushd_popd(tmpdir_module):
         mkdir_p('ga_repo')
         with pushd_popd('ga_repo'):
@@ -49,8 +44,7 @@ def git_annex_repo(ga_tool_module, tmpdir_module):
             yield os.getcwd()
 
 @pytest.fixture(scope='module')
-def dir_remote(ga_tool_module, git_annex_repo, tmpdir_module):
-    ga_tool = ga_tool_module
+def dir_remote(ga_tool, git_annex_repo, tmpdir_module):
     dir_remote_name = 'my_dir_remote_{}'.format(uuid.uuid4())
     dir_remote = join(tmpdir_module, dir_remote_name)
     mkdir_p(dir_remote)
