@@ -52,22 +52,23 @@ def dir_remote(ga_tool, git_annex_repo, tmpdir_module):
     ga_tool.initremote(dir_remote_name, 'directory', directory=dir_remote)
     return dir_remote_name
 
-def _ga_file(ga_tool, sfx=''):
+def _a_file(sfx='', subdir=None):
     file_name = 'my_file_{}_{}.txt'.format(sfx, uuid.uuid4())
+    if subdir:
+        subdir = 'dir_{}_{}'.format(subdir, uuid.uuid4())
+        util.file.mkdir_p(subdir)
+        file_name = os.path.join(subdir, file_name)
+
     util.file.dump_file(file_name, file_name + 'some contents')
     return file_name
 
 @pytest.fixture
-def ga_file(ga_tool):
-    return _ga_file(ga_tool)
+def file_A():
+    return _a_file(sfx='A')
 
 @pytest.fixture
-def file_A(ga_tool):
-    return _ga_file(ga_tool, 'A')
-
-@pytest.fixture
-def file_B(ga_tool):
-    return _ga_file(ga_tool, 'B')
+def file_B():
+    return _a_file(sfx='B', subdir='B_dir')
 
 def _compute_md5(fname):
     data = util.file.slurp_file(fname)
@@ -75,84 +76,84 @@ def _compute_md5(fname):
         data = data.encode('utf-8')
     return hashlib.md5(data).hexdigest().lower()
 
-def test_git_annex_init_add_get_drop(ga_tool, git_annex_repo, dir_remote, ga_file):
+def test_git_annex_init_add_get_drop(ga_tool, git_annex_repo, dir_remote, file_A):
     """Test basic git-annex operations"""
 
     # TODO: add tests for when file is not in top dir of repo
     # (have fixtures for various cases)
-    ga_tool.add(ga_file)
+    ga_tool.add(file_A)
     ga_tool.commit('one file')
 
-    assert isfile(ga_file)
-    ga_file_md5 = _compute_md5(ga_file)
-    ga_file_size = os.path.getsize(ga_file)
-    ga_file_key_name = ga_file_md5+os.path.splitext(ga_file)[1]
-    ga_file_key = 'MD5E-s{}--{}'.format(ga_file_size, ga_file_key_name)
-    assert ga_tool._get_link_into_annex(ga_file)[0] == ga_file
-    assert '.git/annex/objects/' in ga_tool._get_link_into_annex(ga_file)[1]
-    assert ga_tool.lookupkey(ga_file) == ga_file_key
+    assert isfile(file_A)
+    file_A_md5 = _compute_md5(file_A)
+    file_A_size = os.path.getsize(file_A)
+    file_A_key_name = file_A_md5+os.path.splitext(file_A)[1]
+    file_A_key = 'MD5E-s{}--{}'.format(file_A_size, file_A_key_name)
+    assert ga_tool._get_link_into_annex(file_A)[0] == file_A
+    assert '.git/annex/objects/' in ga_tool._get_link_into_annex(file_A)[1]
+    assert ga_tool.lookupkey(file_A) == file_A_key
 
-    ga_tool.move(ga_file, to_remote_name=dir_remote)
-    assert not exists(ga_file)
-    assert ga_tool._get_link_into_annex(ga_file)[0] == ga_file
-    assert '.git/annex/objects/' in ga_tool._get_link_into_annex(ga_file)[1]
-    assert ga_tool.lookupkey(ga_file) == ga_file_key
+    ga_tool.move(file_A, to_remote_name=dir_remote)
+    assert not exists(file_A)
+    assert ga_tool._get_link_into_annex(file_A)[0] == file_A
+    assert '.git/annex/objects/' in ga_tool._get_link_into_annex(file_A)[1]
+    assert ga_tool.lookupkey(file_A) == file_A_key
 
-    ga_tool.get(ga_file)
-    assert isfile(ga_file)
-    assert ga_tool.is_link_into_annex(ga_file)
+    ga_tool.get(file_A)
+    assert isfile(file_A)
+    assert ga_tool.is_link_into_annex(file_A)
 
-    assert ga_tool.lookupkey(ga_file) == ga_file_key
-    key_attrs = ga_tool.examinekey(ga_file_key)
-    assert key_attrs['key_name'] == ga_file_key_name
-    assert key_attrs['md5'] == ga_file_md5
-    assert key_attrs['size'] == ga_file_size
-    assert ga_tool.construct_key(dict(key_attrs, fname=ga_file)) == ga_file_key
+    assert ga_tool.lookupkey(file_A) == file_A_key
+    key_attrs = ga_tool.examinekey(file_A_key)
+    assert key_attrs['key_name'] == file_A_key_name
+    assert key_attrs['md5'] == file_A_md5
+    assert key_attrs['size'] == file_A_size
+    assert ga_tool.construct_key(dict(key_attrs, fname=file_A)) == file_A_key
 
-    ga_tool.drop(ga_file)
-    assert not exists(ga_file)
-    assert ga_tool.is_link_into_annex(ga_file)
-    assert ga_tool.lookupkey(ga_file) == ga_file_key
+    ga_tool.drop(file_A)
+    assert not exists(file_A)
+    assert ga_tool.is_link_into_annex(file_A)
+    assert ga_tool.lookupkey(file_A) == file_A_key
 
     # test operations when the current dir is outside the repo
-    ga_file_abs = abspath(ga_file)
+    file_A_abs = abspath(file_A)
     with pushd_popd('/'):
-        ga_tool.get(ga_file_abs)
-        assert isfile(ga_file_abs)
-        ga_tool.drop(ga_file_abs)
-        assert not exists(ga_file_abs)
+        ga_tool.get(file_A_abs)
+        assert isfile(file_A_abs)
+        ga_tool.drop(file_A_abs)
+        assert not exists(file_A_abs)
 
-        ga_file_rel = relpath(ga_file_abs)
-        ga_tool.get(ga_file_rel)
-        assert isfile(ga_file_abs)
+        file_A_rel = relpath(file_A_abs)
+        ga_tool.get(file_A_rel)
+        assert isfile(file_A_abs)
 
-        ga_tool.get(ga_file_rel)
-        assert isfile(ga_file_abs)
-        ga_tool.drop(ga_file_rel)
-        assert not exists(ga_file_abs)
+        ga_tool.get(file_A_rel)
+        assert isfile(file_A_abs)
+        ga_tool.drop(file_A_rel)
+        assert not exists(file_A_abs)
 
     with pushd_popd('..'):
-        ga_file_link_abs = 'ga_file_link_abs'
-        os.symlink(ga_file_abs, ga_file_link_abs)
-        assert not exists(ga_file_abs)
-        ga_tool.get(ga_file_link_abs)
-        assert ga_tool.is_file_in_annex(ga_file_abs)
-        assert isfile(ga_file_abs)
-        assert isfile(ga_file_link_abs)
-        ga_tool.drop(ga_file_link_abs)
-        assert not exists(ga_file_abs)
-        assert not exists(ga_file_link_abs)
+        file_A_link_abs = 'file_A_link_abs'
+        os.symlink(file_A_abs, file_A_link_abs)
+        assert not exists(file_A_abs)
+        ga_tool.get(file_A_link_abs)
+        assert ga_tool.is_file_in_annex(file_A_abs)
+        assert isfile(file_A_abs)
+        assert isfile(file_A_link_abs)
+        ga_tool.drop(file_A_link_abs)
+        assert not exists(file_A_abs)
+        assert not exists(file_A_link_abs)
 
-        ga_file_rel = relpath(ga_file_abs)
-        ga_file_link_rel = 'ga_file_link_rel'
-        os.symlink(ga_file_rel, ga_file_link_rel)
-        assert not exists(ga_file_rel)
-        ga_tool.get(ga_file_link_rel)
-        assert isfile(ga_file_rel)
-        assert isfile(ga_file_link_rel)
-        ga_tool.drop(ga_file_link_rel)
-        assert not exists(ga_file_rel)
-        assert not exists(ga_file_link_rel)
+        file_A_rel = relpath(file_A_abs)
+        file_A_link_rel = 'file_A_link_rel'
+        os.symlink(file_A_rel, file_A_link_rel)
+        assert not exists(file_A_rel)
+        ga_tool.get(file_A_link_rel)
+        assert isfile(file_A_rel)
+        assert isfile(file_A_link_rel)
+        ga_tool.drop(file_A_link_rel)
+        assert not exists(file_A_rel)
+        assert not exists(file_A_link_rel)
     # end: with pushd_popd('..'):
 # end: def test_git_annex_init_add_get_drop(tmpdir_function):
 
