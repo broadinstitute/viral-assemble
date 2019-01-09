@@ -18,6 +18,7 @@ import pipes
 import time
 import functools
 import copy
+import warnings
 
 import contextlib2 as contextlib
 
@@ -81,11 +82,14 @@ class GitAnnexTool(tools.Tool):
         return TOOL_VERSION
 
     def _get_bin_dir(self):
+        """Return the directory containing the git-annex binary"""
         bin_dir = os.path.dirname(self.install_and_get_path())
         util.misc.chk(self.is_installed())
         return bin_dir
 
     def _get_run_env(self):
+        """Return the environment in which git-annex should be run.  This environment will include in its PATH
+        the binaries for git-annex external special remote implementations that we add."""
         if not hasattr(self, '_run_env'):
             # ensure that the git and git-annex binaries we installed are first in PATH.
             self._run_env = dict(os.environ, PATH=':'.join((self._get_bin_dir(),
@@ -95,6 +99,16 @@ class GitAnnexTool(tools.Tool):
         return self._run_env
 
     def execute(self, *args, **kwargs):
+        """Run the given git or git-annex command.  If batching is in effect (see self.batching()), the command is stored and will be
+        executed when the batching context exits.
+        
+        Args:
+            args: list of arguments too the command
+            tool: git-annex or git, defaults to git-annex
+            batch_args: if given, tuple of args to a batch git-annex command
+            output_holder: if given, the output of the command will be stored into this _ValHolder object.
+              Note that if batching is in effect, this will only happen after the batching context closes.
+        """
         with contextlib.ExitStack() as stack:
             if self._batched_cmds is None:
                 self = stack.enter_context(self.batching())
@@ -140,10 +154,13 @@ class GitAnnexTool(tools.Tool):
                 
     @contextlib.contextmanager
     def batching(self):
-        """Delay commands until context exit."""
+        """Create a batching context.  Commands issued within the batching context _may_ be delayed and issued in batches
+        for efficiency; we guarantee that when the batching context exits, the commands have been executed."""
         self = copy.copy(self)
         self._batched_cmds = collections.defaultdict(list)
         yield self
+        if not self._batched_cmds:
+            warnings.warn("Empty batching context -- did you forget to use the yielded GitAnnexTool()?", RuntimeWarning)
         self._execute_batched_commands()
 
     def execute_git(self, args):
@@ -304,6 +321,11 @@ class GitAnnexTool(tools.Tool):
                 self.execute(['drop', os.path.basename(f)])
         assert os.path.islink(f)
         assert not os.path.isfile(f)
+
+    def calckey(self, path, output_holder):
+        """Compute the git-annex key for the given file"""
+        self.execute(['calckey', '--batch'])
+        
 
     def import_urls(self, urls):
         """Imports `urls` into git-annex.  urls can be local or cloud paths.
