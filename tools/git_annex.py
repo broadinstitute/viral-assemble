@@ -349,6 +349,61 @@ class GitAnnexTool(tools.Tool):
         self.execute(['calckey'], (path,), output_acceptor=output_acceptor or our_output_acceptor, now=not output_acceptor)
         return our_output_acceptor.val
 
+
+    class Remote(object):
+        
+        """Represents a particular special remote"""
+
+        def __init__(self):
+            pass
+
+        def gather_filestats(self, ga_tool, url2filestat):
+            """Gather filestats for URLs"""
+            raise NotImplemented()
+
+    # end: class Remote(object)
+
+    class LocalDirRemote(Remote):
+        """Files stored in local dir"""
+
+        def gather_filestats(self, ga_tool, url2filestat):
+            """Gather filestats for URLs that point to local files.
+
+            For files that are git-annex links, get the git-annex key from the link, even if the file
+            is not present in the local annex.
+
+            For files for which we already have the md5, but not the size, quickly get the size and then compute
+            the MD5E key.
+            """
+
+            with ga_tool.batching() as ga_tool:
+                for url, filestat in url2filestat.items():
+                    if 'git_annex_key' in filestat: continue
+                    if 'size' in filestat and 'md5' in filestat: continue
+                    #if not url.startswith('/'): continue
+
+                    if ga_tool.is_link_into_annex(url):
+                        filestat['git_annex_key'] = ga_tool.lookupkey(url)
+                        continue
+
+                    if not os.path.isfile(url):
+                        _log.info('NOT A FILE: %s', url)
+                        continue
+
+                    filestat['size'] = os.path.getsize(url)
+                    if 'md5' in filestat:
+                        filestat['git_annex_key'] = ga_tool.construct_key(key_attrs=dict(backend='MD5E',
+                                                                                      fname=os.path.basename(url),
+                                                                                      **filestat))
+                        continue
+
+                    _log.info('CALLING CALCKEY: %s', url)
+                    ga_tool.calckey(url, output_acceptor=functools.partial(operator.setitem, filestat, 'git_annex_key'))
+
+            # end: with ga_tool.batching() as ga_tool
+        # end: def _gather_filestats_from_local_files(ga_tool, url2filestat):
+    # end: class LocalDirRemote(object)
+
     def import_urls(self, urls, url2filestat=None):
         """Imports `urls` into git-annex.
 
@@ -368,44 +423,15 @@ class GitAnnexTool(tools.Tool):
             if url not in url2filestat:
                 url2filestat[url] = collections.OrderedDict()
 
-        self._gather_filestats_from_local_files(url2filestat)
+        remotes = []
+        remotes.append(self.LocalDirRemote())
+
+        for remote in remotes:
+            remote.gather_filestats(ga_tool=self, url2filestat=url2filestat)
+
         _log.info('GOT RESULTS: %s', url2filestat)
         return url2filestat
-
-    def _gather_filestats_from_local_files(self, url2filestat):
-        """Gather filestats for URLs that point to local files.
-
-        For files that are git-annex links, get the git-annex key from the link, even if the file
-        is not present in the local annex.
-
-        For files for which we already have the md5, but not the size, quickly get the size and then compute
-        the MD5E key.
-        """
         
-        with self.batching() as self:
-            for url, filestat in url2filestat.items():
-                if 'git_annex_key' in filestat: continue
-                if 'size' in filestat and 'md5' in filestat: continue
-                #if not url.startswith('/'): continue
-
-                if self.is_link_into_annex(url):
-                    filestat['git_annex_key'] = self.lookupkey(url)
-                    continue
-
-                if not os.path.isfile(url):
-                    _log.info('NOT A FILE: %s', url)
-                    continue
-
-                filestat['size'] = os.path.getsize(url)
-                if 'md5' in filestat:
-                    filestat['git_annex_key'] = self.construct_key(key_attrs=dict(backend='MD5E',
-                                                                                  fname=os.path.basename(url),
-                                                                                  **filestat))
-                    continue
-
-                _log.info('CALLING CALCKEY: %s', url)
-                self.calckey(url, output_acceptor=functools.partial(operator.setitem, filestat, 'git_annex_key'))
-
-        # end: def _gather_filestats_from_local_files(self, url2filestat):
+    # end: def import_urls(self, urls, url2filestat=None)
 
 # end: class GitAnnexTool
