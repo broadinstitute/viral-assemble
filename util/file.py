@@ -22,6 +22,7 @@ import csv
 import inspect
 import tarfile
 import atexit
+import hashlib
 
 import util.cmd
 import util.misc
@@ -975,3 +976,9 @@ def repack_tarballs(out_compressed_tarball,
     if outfile is not None:
         outfile.close()
 
+def md5_for_file(fname):
+    hash_md5 = hashlib.md5()
+    with open(fname, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest().upper()

@@ -105,3 +105,16 @@ def test_string_to_file_name():
             t_path = os.path.join(tmp_d, util.file.string_to_file_name(test_fname, tmp_d))
             util.file.make_empty(t_path)
             assert os.path.isfile(t_path) and os.path.getsize(t_path) == 0
+
+@pytest.mark.parametrize('content,md5',
+                         [pytest.param('', 'D41D8CD98F00B204E9800998ECF8427E', id='empty'),
+                          pytest.param('test data', 'EB733A00C0C9D336E65691A37AB54293', id='some data')])
+def test_md5_for_file(tmpdir_function, content, md5):
+    fname = os.path.join(tmpdir_function, 'data.txt')
+    util.file.dump_file(fname=fname, value=content)
+    assert util.file.md5_for_file(fname) == md5
+
+
+                         
+    
+    
