@@ -112,9 +112,13 @@ class GitAnnexTool(tools.Tool):
             tool: git-annex or git, defaults to git-annex
         """
         with contextlib.ExitStack() as stack:
-            if self._batched_cmds is None or now:
+            if now or not batch_args or not self.is_batching():
                 self = stack.enter_context(self.batching())
             self._add_command_to_batch(args, batch_args, output_holder, tool)
+
+    def is_batching(self):
+        """Return True if batching is in effect"""
+        return self._batched_cmds is not None
 
     def _add_command_to_batch(self, args, batch_args, output_holder, tool):
         """Add command to current batch."""
@@ -122,7 +126,8 @@ class GitAnnexTool(tools.Tool):
             util.misc.chk(tool == 'git-annex')
             args = tuple(args) + ('--batch',)
         tool_cmd = (os.path.join(self._get_bin_dir(), tool),) + tuple(map(str, args))
-        self._batched_cmds[tool_cmd].append(_BatchedCall(batch_args=batch_args, output_holder=output_holder))
+        batched_call = _BatchedCall(batch_args=batch_args, output_holder=output_holder)
+        self._batched_cmds.setdefault(tool_cmd, []).append(batched_call)
 
     def _execute_batched_commands(self):
         """Run any saved batched commands.
@@ -168,7 +173,7 @@ class GitAnnexTool(tools.Tool):
         and will run them by the time of the context exit.
         """
         self = copy.copy(self)
-        self._batched_cmds = collections.defaultdict(list)
+        self._batched_cmds = collections.OrderedDict()
         yield self
         if not self._batched_cmds:
             warnings.warn("Empty batching context -- did you forget to use the yielded GitAnnexTool()?", RuntimeWarning)
