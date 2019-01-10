@@ -45,7 +45,7 @@ class _ValHolder(object):
         self.val = val
 
 # NamedTuple: _BatchedCall - arguments to one git-annex call in a set of batched cals, and an optional place to record call output
-_BatchedCall = collections.namedtuple('_BatchedCall', ['batch_args', 'output_holder'])
+_BatchedCall = collections.namedtuple('_BatchedCall', ['batch_args', 'output_acceptor'])
 
 # * class GitAnnexTool
 class GitAnnexTool(tools.Tool):
@@ -99,34 +99,34 @@ class GitAnnexTool(tools.Tool):
                                                             os.environ['PATH'])))
         return self._run_env
 
-    def execute(self, args, batch_args=None, output_holder=None, now=False, tool='git-annex'):
+    def execute(self, args, batch_args=None, output_acceptor=None, now=False, tool='git-annex'):
         """Run the given git or git-annex command.  If batching is in effect (see self.batching()), the command is stored and will be
         executed when the batching context exits.
         
         Args:
             args: list of arguments too the command
             batch_args: if given, tuple of args to a batch git-annex command
-            output_holder: if given, the output of the command will be stored into this _ValHolder object.
-              Note that if batching is in effect, this will only happen after the batching context closes.
+            output_acceptor: if given, the output of the command will be passed to this callable.
+              Note that if batching is in effect, this will only happen when the batching context closes.
             now: execute instantly even if batching is in effect
             tool: git-annex or git, defaults to git-annex
         """
         with contextlib.ExitStack() as stack:
             if now or not batch_args or not self.is_batching():
                 self = stack.enter_context(self.batching())
-            self._add_command_to_batch(args, batch_args, output_holder, tool)
+            self._add_command_to_batch(args, batch_args, output_acceptor, tool)
 
     def is_batching(self):
         """Return True if batching is in effect"""
         return self._batched_cmds is not None
 
-    def _add_command_to_batch(self, args, batch_args, output_holder, tool):
+    def _add_command_to_batch(self, args, batch_args, output_acceptor, tool):
         """Add command to current batch."""
         if batch_args:
             util.misc.chk(tool == 'git-annex')
             args = tuple(args) + ('--batch',)
         tool_cmd = (os.path.join(self._get_bin_dir(), tool),) + tuple(map(str, args))
-        batched_call = _BatchedCall(batch_args=batch_args, output_holder=output_holder)
+        batched_call = _BatchedCall(batch_args=batch_args, output_acceptor=output_acceptor)
         self._batched_cmds.setdefault(tool_cmd, []).append(batched_call)
 
     def _execute_batched_commands(self):
@@ -152,17 +152,17 @@ class GitAnnexTool(tools.Tool):
                     batch_inps_file = stack.enter_context(open(batch_inps_fname))
                     subprocess_call_args.update(stdin=batch_inps_file)
 
-                subprocess_func = getattr(subprocess, 'check_output' if batch_calls[0].output_holder else 'check_call')
+                subprocess_func = getattr(subprocess, 'check_output' if batch_calls[0].output_acceptor else 'check_call')
                 result = subprocess_func(tool_cmd, env=self._get_run_env(), **subprocess_call_args)
 
-                if batch_calls[0].output_holder:
+                if batch_calls[0].output_acceptor:
                     if not batch_calls[0].batch_args:
-                        batch_calls[0].output_holder(result.rstrip('\n'))
+                        batch_calls[0].output_acceptor(result.rstrip('\n'))
                     else:
                         result_lines = result.rstrip('\n').split('\n')
                         util.misc.chk(len(result_lines) == len(batch_calls))
                         for batch_call, result_line in zip(batch_calls, result_lines):
-                            batch_call.output_holder(result_line)
+                            batch_call.output_acceptor(result_line)
                 
     @contextlib.contextmanager
     def batching(self):
@@ -345,11 +345,11 @@ class GitAnnexTool(tools.Tool):
         assert os.path.islink(f)
         assert not os.path.isfile(f)
 
-    def calckey(self, path, output_holder=None):
+    def calckey(self, path, output_acceptor=None):
         """Compute the git-annex key for the given file"""
-        our_output_holder = _ValHolder()
-        self.execute(['calckey'], (path,), output_holder=output_holder or our_output_holder, now=not output_holder)
-        return our_output_holder.val
+        our_output_acceptor = _ValHolder()
+        self.execute(['calckey'], (path,), output_acceptor=output_acceptor or our_output_acceptor, now=not output_acceptor)
+        return our_output_acceptor.val
 
     def import_urls(self, urls, url2filestat=None):
         """Imports `urls` into git-annex.
@@ -406,6 +406,6 @@ class GitAnnexTool(tools.Tool):
                     continue
 
                 _log.info('CALLING CALCKEY: %s', url)
-                self.calckey(url, output_holder=functools.partial(operator.setitem, filestat, 'git_annex_key'))
+                self.calckey(url, output_acceptor=functools.partial(operator.setitem, filestat, 'git_annex_key'))
 
 # end: class GitAnnexTool
