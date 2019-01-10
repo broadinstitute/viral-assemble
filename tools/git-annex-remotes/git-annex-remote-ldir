@@ -2,5 +2,13 @@
 
 set -eu -o pipefail
 
-conda-execute -q `which the-git-annex-remote-ldir` < /dev/null > /dev/null 2> /dev/null
-conda-execute -q `which the-git-annex-remote-ldir`
+IMPL=$(which the-git-annex-remote-ldir)
+
+PY_VER=$(python -c 'import sys; print(sys.version_info.major)')
+if [ "$PY_VER" -eq "2" ]
+then
+    conda-execute -q $IMPL < /dev/null > /dev/null 2> /dev/null
+    conda-execute -q $IMPL
+else
+    $IMPL
+fi

@@ -156,13 +156,11 @@ class GitAnnexTool(tools.Tool):
                 result = subprocess_func(tool_cmd, env=self._get_run_env(), **subprocess_call_args)
 
                 if batch_calls[0].output_acceptor:
-                    if not batch_calls[0].batch_args:
-                        batch_calls[0].output_acceptor(result.rstrip('\n'))
-                    else:
-                        result_lines = result.rstrip('\n').split('\n')
-                        util.misc.chk(len(result_lines) == len(batch_calls))
-                        for batch_call, result_line in zip(batch_calls, result_lines):
-                            batch_call.output_acceptor(result_line)
+                    output = result.decode().rstrip('\n')
+                    call_outputs = output.split('\n') if batch_calls[0].batch_args else [output]
+                    util.misc.chk(len(call_outputs) == len(batch_calls))
+                    for batch_call, call_output in zip(batch_calls, call_outputs):
+                        batch_call.output_acceptor(call_output)
                 
     @contextlib.contextmanager
     def batching(self):
