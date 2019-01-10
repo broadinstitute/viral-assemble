@@ -172,12 +172,6 @@ def _is_under_dir(path, base_dir):
 def _md5_base64(s):
     return hashlib.md5(s).digest().encode('base64').strip()
 
-def _md5_for_file(fname):
-    hash_md5 = hashlib.md5()
-    with open(fname, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest().upper()
 
 def _is_valid_md5(s):
     return _is_str(s) and len(s) == 32 and set(s) <= set('0123456789ABCDEF')
