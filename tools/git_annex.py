@@ -408,4 +408,6 @@ class GitAnnexTool(tools.Tool):
                 _log.info('CALLING CALCKEY: %s', url)
                 self.calckey(url, output_acceptor=functools.partial(operator.setitem, filestat, 'git_annex_key'))
 
+        # end: def _gather_filestats_from_local_files(self, url2filestat):
+
 # end: class GitAnnexTool
