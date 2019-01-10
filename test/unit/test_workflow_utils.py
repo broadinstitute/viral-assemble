@@ -52,7 +52,7 @@ class TestGatherFileMetadataFromAnalysisMetadata():
     def test_succ(self, gcloud_tool):
         """Test case of metadata from an analysis that succeeded"""
         succ_mdata = self._call_for('succ', gcloud_tool)
-        workflow_utils._write_json('/tmp/cmp.json', **succ_mdata)
+        #workflow_utils._write_json('/tmp/cmp.json', **succ_mdata)
         succ_exp = workflow_utils._json_loadf(self._test_fname('metadata_orig.succ.exp.json'))
         for file_name, file_mdata in succ_exp.items():
             assert set(file_mdata.items()) <= set(succ_mdata[file_name].items())
