@@ -168,6 +168,7 @@ def test_batch_add(ga_tool, git_annex_repo, file_A, file_B):
         for f in (file_A, file_B):
             assert not ga_tool.is_link_into_annex(f)
             f2key[f] = ga_tool.calckey(f)
+            assert util.file.md5_for_file(f).lower() in f2key[f]
             ga_tool.add(f)
             assert not ga_tool.is_link_into_annex(f)
 
@@ -211,5 +212,7 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
     for f in (file_A, file_B):
         assert f in url2filestat
         assert 'git_annex_key' in url2filestat[f]
+        assert util.file.md5_for_file(f).lower() in url2filestat[f]['git_annex_key']
+
 
 
