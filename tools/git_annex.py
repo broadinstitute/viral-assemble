@@ -371,12 +371,13 @@ class GitAnnexTool(tools.Tool):
         """Represents a particular git-annex special remote.
         """
 
-        def __init__(self):
-            pass
+        def __init__(self, remote_name, remote_uuid):
+            self.remote_name = remote_name
+            self.remote_uuid = remote_uuid
 
         def get_remote_uuid():
             """Return the git-annex uuid for this remote"""
-            raise NotImplemented()
+            return self.remote_uuid
 
         def gather_filestats(self, ga_tool, url2filestat):
             """Gather filestats for URLs"""
@@ -388,6 +389,20 @@ class GitAnnexTool(tools.Tool):
         """Files stored in local dir"""
 
         EXTERNALTYPE = 'ldir'
+
+        def __init__(self, remote_name, remote_uuid):
+            super(GitAnnexTool.LocalDirRemote, self).__init__(remote_name, remote_uuid)
+
+        @classmethod
+        def load_remotes(cls, ga_tool, git_config):
+            """Load external remotes"""
+            result = []
+            for git_cfg_key, git_cfg_val in git_config.items():
+                if git_cfg_key.startswith('remote.') and git_cfg_key.endswith('.annex-externaltype') and git_cfg_val=='ldir':
+                    remote_name = git_cfg_key.split('.')[1]
+                    remote_uuid = git_config['remote.' + remote_name + '.annex-uuid']
+                    result.append(cls(remote_name=remote_name, remote_uuid=remote_uuid))
+            return result
 
         def gather_filestats(self, ga_tool, url2filestat):
             """Gather filestats for URLs that point to local files.
@@ -431,6 +446,12 @@ class GitAnnexTool(tools.Tool):
 
     REMOTE_TYPES = [LocalDirRemote]
 
+    def get_remotes(self):
+        """Load remotes from the git configuration"""
+        git_config = self.get_git_config()
+        return functools.reduce(operator.concat, [list(remote_type.load_remotes(self, git_config))
+                                                  for remote_type in self.REMOTE_TYPES], [])
+
     def import_urls(self, urls, url2filestat=None):
         """Imports `urls` into git-annex.
 
@@ -450,8 +471,7 @@ class GitAnnexTool(tools.Tool):
             if url not in url2filestat:
                 url2filestat[url] = collections.OrderedDict()
 
-        remotes = []
-        remotes.append(self.LocalDirRemote())
+        remotes = self.get_remotes()
 
         for remote in remotes:
             remote.gather_filestats(ga_tool=self, url2filestat=url2filestat)
