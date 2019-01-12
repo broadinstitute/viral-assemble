@@ -40,6 +40,8 @@ def pytest_configure(config):
     reporter = FixtureReporter(config)
     config.pluginmanager.register(reporter, 'fixturereporter')
 
+    pytest.runslow = config.getoption("--runslow", default=False)
+
 #
 # Fixtures for creating a temp dir at session/module/class/function scope.
 # Unlike pytest's tmpdir fixture, they use tempfile.mkdtemp to create a 
