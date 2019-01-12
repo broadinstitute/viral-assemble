@@ -20,6 +20,7 @@ import functools
 import operator
 import copy
 import warnings
+import traceback
 
 import contextlib2 as contextlib
 
@@ -99,7 +100,7 @@ class GitAnnexTool(tools.Tool):
                                                             os.environ['PATH'])))
         return self._run_env
 
-    def execute(self, args, batch_args=None, output_acceptor=None, now=False, tool='git-annex'):
+    def execute(self, args, batch_args=None, output_acceptor=None, now=True, tool='git-annex'):
         """Run the given git or git-annex command.  If batching is in effect (see self.batching()), the command is stored and will be
         executed when the batching context exits.
         
@@ -174,12 +175,20 @@ class GitAnnexTool(tools.Tool):
         self._batched_cmds = collections.OrderedDict()
         yield self
         if not self._batched_cmds:
-            warnings.warn("Empty batching context -- did you forget to use the yielded GitAnnexTool()?", RuntimeWarning)
+            warnings.warn("Empty batching context -- did you forget to use the yielded GitAnnexTool()? {}".format(traceback.format_stack()), RuntimeWarning)
         self._execute_batched_commands()
 
-    def execute_git(self, args):
+    def execute_git(self, args, **kw):
         """Run a git command"""
-        self.execute(args, tool='git')
+        self.execute(args, tool='git', **kw)
+
+    def get_git_config(self):
+        """Return git configuration, as a dict from config param to value.  Note that value is always a string."""
+        output_acceptor = _ValHolder()
+        self.execute_git(['config', '-l'], output_acceptor=output_acceptor)
+        output = output_acceptor.val.decode().rstrip('\n')
+        output_lines = output.split('\n')
+        return collections.OrderedDict(line.rsplit('=', 1) for line in output_lines)
 
 # ** specific commands
 
@@ -196,10 +205,10 @@ class GitAnnexTool(tools.Tool):
         """Init an external special remote ldir"""
         self.execute(['initremote', remote_name, 'type=external', 'externaltype={}'.format(externaltype), 'encryption=none'])
 
-    def add(self, fname):
+    def add(self, fname, now=True):
         """Add a file to git-annex"""
         _log.debug('CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
-        self.execute(['add'], batch_args=(fname,))
+        self.execute(['add'], batch_args=(fname,), now=now)
         _log.debug('RETURNED FROM CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
 
     def commit(self, msg):
@@ -216,9 +225,9 @@ class GitAnnexTool(tools.Tool):
         """Move a file from local repo to a remote"""
         self.execute(['move', fname, '--to', to_remote_name])
 
-    def fromkey(self, key, fname):
+    def fromkey(self, key, fname, now=True):
         """Manually set up a symlink to a given key as a given file"""
-        self.execute(['fromkey', '--force'], batch_args=(key, fname))
+        self.execute(['fromkey', '--force'], batch_args=(key, fname), now=now)
 
     def _get_link_into_annex(self, f):
         """If `f` points to an annexed file, possibly through a chain of symlinks, return
@@ -343,19 +352,31 @@ class GitAnnexTool(tools.Tool):
         assert os.path.islink(f)
         assert not os.path.isfile(f)
 
-    def calckey(self, path, output_acceptor=None):
+    def calckey(self, path, output_acceptor=None, now=True):
         """Compute the git-annex key for the given file"""
         our_output_acceptor = _ValHolder()
-        self.execute(['calckey'], (path,), output_acceptor=output_acceptor or our_output_acceptor, now=not output_acceptor)
+        self.execute(['calckey'], (path,), output_acceptor=output_acceptor or our_output_acceptor, now=now or not output_acceptor)
         return our_output_acceptor.val
 
+    def registerurl(self, key, url, now=True):
+        """Tell git-annex that `key` can be fetched from `url`"""
+        self.execute(['registerurl'], (key, url), now=now)
+
+    def setpresentkey(self, key, remote_uuid, present, now=True):
+        """Tell git-annex that `key` can be fetched from `url`"""
+        self.execute(['setpresentkey'], (key, url, '1' if present else '0'), now=now)
 
     class Remote(object):
         
-        """Represents a particular special remote"""
+        """Represents a particular git-annex special remote.
+        """
 
         def __init__(self):
             pass
+
+        def get_remote_uuid():
+            """Return the git-annex uuid for this remote"""
+            raise NotImplemented()
 
         def gather_filestats(self, ga_tool, url2filestat):
             """Gather filestats for URLs"""
@@ -365,6 +386,8 @@ class GitAnnexTool(tools.Tool):
 
     class LocalDirRemote(Remote):
         """Files stored in local dir"""
+
+        EXTERNALTYPE = 'ldir'
 
         def gather_filestats(self, ga_tool, url2filestat):
             """Gather filestats for URLs that point to local files.
@@ -376,7 +399,7 @@ class GitAnnexTool(tools.Tool):
             the MD5E key.
             """
 
-            with ga_tool.batching() as ga_tool:
+            with ga_tool.batching() as ga_tool_calckey:
                 for url, filestat in url2filestat.items():
                     if 'git_annex_key' in filestat: continue
                     if 'size' in filestat and 'md5' in filestat: continue
@@ -393,16 +416,20 @@ class GitAnnexTool(tools.Tool):
                     filestat['size'] = os.path.getsize(url)
                     if 'md5' in filestat:
                         filestat['git_annex_key'] = ga_tool.construct_key(key_attrs=dict(backend='MD5E',
-                                                                                      fname=os.path.basename(url),
-                                                                                      **filestat))
+                                                                                         fname=os.path.basename(url),
+                                                                                         **filestat))
                         continue
 
                     _log.info('CALLING CALCKEY: %s', url)
-                    ga_tool.calckey(url, output_acceptor=functools.partial(operator.setitem, filestat, 'git_annex_key'))
+                    ga_tool_calckey.calckey(url, output_acceptor=functools.partial(operator.setitem, filestat, 'git_annex_key'),
+                                            now=False)
+                    #ga_tool.registerurl(url, )
 
-            # end: with ga_tool.batching() as ga_tool
-        # end: def _gather_filestats_from_local_files(ga_tool, url2filestat):
+            # end: with ga_tool.batching() as ga_tool_now
+        # end: def gather_filestats(ga_tool, url2filestat):
     # end: class LocalDirRemote(object)
+
+    REMOTE_TYPES = [LocalDirRemote]
 
     def import_urls(self, urls, url2filestat=None):
         """Imports `urls` into git-annex.

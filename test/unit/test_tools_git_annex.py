@@ -169,7 +169,7 @@ def test_batch_add(ga_tool, git_annex_repo, file_A, file_B):
             assert not ga_tool.is_link_into_annex(f)
             f2key[f] = ga_tool.calckey(f)
             assert util.file.md5_for_file(f).lower() in f2key[f]
-            ga_tool.add(f)
+            ga_tool.add(f, now=False)
             assert not ga_tool.is_link_into_annex(f)
 
     for f in (file_A, file_B):
@@ -187,10 +187,10 @@ def test_fromkey(ga_tool, git_annex_repo, file_A, file_B):
         file_A_link3 = file_A+'.link3.txt'
         file_A_link4 = file_A+'.link4.txt'
         assert not lexists(file_A_link3)
-        ga_tool.fromkey(file_A_key, file_A_link3)
+        ga_tool.fromkey(file_A_key, file_A_link3, now=False)
         assert not lexists(file_A_link3)
         assert not lexists(file_A_link4)
-        ga_tool.fromkey(file_A_key, file_A_link4)
+        ga_tool.fromkey(file_A_key, file_A_link4, now=False)
         assert not lexists(file_A_link4)
     assert ga_tool.is_file_in_annex(file_A_link3)
     assert ga_tool.is_file_in_annex(file_A_link4)
