@@ -741,3 +741,6 @@ def first_non_None(*args):
         if arg is not None:
             return arg
     raise ValueError('No non-None args')
+
+def maybe_decode(s):
+    return s.decode() if hasattr(s, 'decode') else s

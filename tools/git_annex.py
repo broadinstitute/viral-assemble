@@ -157,7 +157,7 @@ class GitAnnexTool(tools.Tool):
                 result = subprocess_func(tool_cmd, env=self._get_run_env(), **subprocess_call_args)
 
                 if batch_calls[0].output_acceptor:
-                    output = result.decode().rstrip('\n')
+                    output = util.misc.maybe_decode(result).rstrip('\n')
                     call_outputs = output.split('\n') if batch_calls[0].batch_args else [output]
                     util.misc.chk(len(call_outputs) == len(batch_calls))
                     for batch_call, call_output in zip(batch_calls, call_outputs):
@@ -186,7 +186,7 @@ class GitAnnexTool(tools.Tool):
         """Return git configuration, as a dict from config param to value.  Note that value is always a string."""
         output_acceptor = _ValHolder()
         self.execute_git(['config', '-l'], output_acceptor=output_acceptor)
-        output = output_acceptor.val.decode().rstrip('\n')
+        output = util.misc.maybe_decode(output_acceptor.val).rstrip('\n')
         output_lines = output.split('\n')
         return collections.OrderedDict(line.rsplit('=', 1) for line in output_lines)
 
