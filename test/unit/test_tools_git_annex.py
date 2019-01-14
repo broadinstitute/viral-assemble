@@ -38,7 +38,8 @@ def git_annex_repo(ga_tool, tmpdir_module):
         mkdir_p('ga_repo')
         with pushd_popd('ga_repo'):
             ga_tool.init_repo()
-            ga_tool.initremote_external(remote_name='myldir', externaltype='ldir')
+            ga_tool.initremote_external(remote_name='ldir_remote', externaltype='ldir')
+            ga_tool.initremote_external(remote_name='gs_uri_remote', externaltype='gs_uri')
             ga_tool.execute_git(['config', 'annex.backend', 'MD5E'])
             ga_tool.execute_git(['config', '--type=int', 'annex.maxextensionlength', '5'])
             yield os.getcwd()
@@ -208,8 +209,19 @@ def test_get_file_exts_for_key(ga_tool):
             assert ga_tool._get_file_exts_for_key(fpath) == expected, (fpath, expected)
 
 def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
-    url2filestat = ga_tool.import_urls(urls=(file_A, file_B))
-    for f in (file_A, file_B):
+
+    gs_uris = ('gs://gcp-public-data-landsat/LC08/PRE/044/034/LC80440342016259LGN00/LC80440342016259LGN00_B1.TIF',)
+
+    ldir_uris = (file_A, file_B)
+    uris_to_import = gs_uris + ldir_uris
+
+    url2filestat = ga_tool.import_urls(urls=uris_to_import)
+    for f in uris_to_import:
         assert f in url2filestat
         assert 'git_annex_key' in url2filestat[f]
+
+    for f in ldir_uris:
         assert util.file.md5_for_file(f).lower() in url2filestat[f]['git_annex_key']
+
+
+    

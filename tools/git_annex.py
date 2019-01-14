@@ -25,6 +25,7 @@ import traceback
 import contextlib2 as contextlib
 
 import tools
+import tools.gcloud
 import util.file
 import util.misc
 import util.version
@@ -383,6 +384,18 @@ class GitAnnexTool(tools.Tool):
             """Gather filestats for URLs"""
             raise NotImplemented()
 
+        @classmethod
+        def load_external_special_remotes(cls, ga_tool, git_config):
+            """Load external special remotes"""
+            result = []
+            for git_cfg_key, git_cfg_val in git_config.items():
+                if git_cfg_key.startswith('remote.') and git_cfg_key.endswith('.annex-externaltype') \
+                   and git_cfg_val==cls.EXTERNALTYPE:
+                    remote_name = git_cfg_key.split('.')[1]
+                    remote_uuid = git_config['remote.' + remote_name + '.annex-uuid']
+                    result.append(cls(remote_name=remote_name, remote_uuid=remote_uuid))
+            return result
+
     # end: class Remote(object)
 
     class LocalDirRemote(Remote):
@@ -392,17 +405,6 @@ class GitAnnexTool(tools.Tool):
 
         def __init__(self, remote_name, remote_uuid):
             super(GitAnnexTool.LocalDirRemote, self).__init__(remote_name, remote_uuid)
-
-        @classmethod
-        def load_remotes(cls, ga_tool, git_config):
-            """Load external remotes"""
-            result = []
-            for git_cfg_key, git_cfg_val in git_config.items():
-                if git_cfg_key.startswith('remote.') and git_cfg_key.endswith('.annex-externaltype') and git_cfg_val=='ldir':
-                    remote_name = git_cfg_key.split('.')[1]
-                    remote_uuid = git_config['remote.' + remote_name + '.annex-uuid']
-                    result.append(cls(remote_name=remote_name, remote_uuid=remote_uuid))
-            return result
 
         def gather_filestats(self, ga_tool, url2filestat):
             """Gather filestats for URLs that point to local files.
@@ -444,12 +446,51 @@ class GitAnnexTool(tools.Tool):
         # end: def gather_filestats(ga_tool, url2filestat):
     # end: class LocalDirRemote(object)
 
-    REMOTE_TYPES = [LocalDirRemote]
+    class GsUriRemote(Remote):
+        """Files stored in the google cloud"""
+
+        EXTERNALTYPE = 'gs_uri'
+
+        def __init__(self, remote_name, remote_uuid):
+            super(GitAnnexTool.GsUriRemote, self).__init__(remote_name, remote_uuid)
+            self.gcloud_tool = tools.gcloud.GCloudTool()
+
+        def gather_filestats(self, ga_tool, url2filestat):
+            """Gather filestats for gs:// URLs.
+
+            For files for which we already have the md5, but not the size, quickly get the size using gsutil ls.
+            """
+            
+            gs_uris_needing_stat = set()
+            for url, filestat in url2filestat.items():
+                if 'git_annex_key' in filestat: continue
+                if 'size' in filestat and 'md5' in filestat: continue
+                if not url.startswith('gs://'): continue
+                gs_uris_needing_stat.add(url)
+
+            uri2attrs = self.gcloud_tool.get_metadata_for_objects(gs_uris_needing_stat)
+                
+            for url, filestat in url2filestat.items():
+                if 'git_annex_key' in filestat: continue
+                if 'size' in filestat and 'md5' in filestat: continue
+                if not url.startswith('gs://'): continue
+
+                filestat.update(**uri2attrs[url])
+                filestat['git_annex_key'] = ga_tool.construct_key(key_attrs=dict(backend='MD5E',
+                                                                                 size=filestat['size'],
+                                                                                 md5=filestat['md5'],
+                                                                                 fname=url))
+                #ga_tool.registerurl(url, )
+
+        # end: def gather_filestats(ga_tool, url2filestat):
+    # end: class GsUriRemote(object)
+
+    REMOTE_TYPES = [LocalDirRemote, GsUriRemote]
 
     def get_remotes(self):
         """Load remotes from the git configuration"""
         git_config = self.get_git_config()
-        return functools.reduce(operator.concat, [list(remote_type.load_remotes(self, git_config))
+        return functools.reduce(operator.concat, [list(remote_type.load_external_special_remotes(self, git_config))
                                                   for remote_type in self.REMOTE_TYPES], [])
 
     def import_urls(self, urls, url2filestat=None):
