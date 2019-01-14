@@ -1,14 +1,127 @@
-#!/bin/bash
+#!/usr/bin/env python
 
-set -eu -o pipefail
+# conda execute
+# env:
+#  - annexremote
+# channels:
+#  - conda-forge
+#  - nodefaults
+# run_with: python
 
-IMPL=$(which the-git-annex-remote-ldir)
+import subprocess
+import time
+import json
+import sys
+import os
+import os.path
 
-PY_VER=$(python -c 'import sys; print(sys.version_info.major)')
-if [ "$PY_VER" -eq "2" ]
-then
-    conda-execute -q $IMPL < /dev/null > /dev/null 2> /dev/null
-    conda-execute -q $IMPL
-else
-    $IMPL
-fi
+from annexremote import Master
+from annexremote import SpecialRemote
+from annexremote import RemoteError
+from annexremote import UnsupportedRequest
+
+#Now create your special remote class. It must subtype ``SpecialRemote`` and implement at least the 6 basic methods:
+
+LDIR_URI_PFX='file://'
+
+def _msg(*args):
+    print(*args, file=sys.stderr)
+
+def _run(cmd):
+    _msg('running command: ', cmd, 'cwd=', os.getcwd())
+    beg_time = time.time()
+    subprocess.check_call(cmd, shell=True)
+    _msg('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
+
+def _run_get_output(cmd):
+    _msg('running command: ', cmd)
+    beg_time = time.time()
+    output = subprocess.check_output(cmd, shell=True).decode('utf-8')
+    _msg('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
+    return output
+
+def _run_get_json(cmd):
+    return json.loads(_run_get_output(cmd).strip())
+
+
+class LocalDirRemote(SpecialRemote):
+    def initremote(self):
+        # initialize the remote, eg. create the folders
+        # raise RemoteError if the remote couldn't be initialized
+        pass
+
+    def prepare(self):
+        # prepare to be used, eg. open TCP connection, authenticate with the server etc.
+        # raise RemoteError if not ready to use
+        pass
+
+    def transfer_store(self, key, filename):
+        # store the file in `filename` to a unique location derived from `key`
+        # raise RemoteError if the file couldn't be stored
+        raise RemoteError('Cannot yet store files')
+
+    def _dbg(self, *args):
+        self.annex.debug(' '.join(map(str, args)))
+
+    def _url2path(self, url):
+        return url[len(LDIR_URI_PFX):]
+
+    def transfer_retrieve(self, key, filename):
+        # get the file identified by `key` and store it to `filename`
+        # raise RemoteError if the file couldn't be retrieved
+        urls = self.annex.geturls(key=key, prefix=LDIR_URI_PFX)
+        url = [url for url in urls if self.claimurl(url)][0]
+        self._dbg('transfer-retrieve: key=', key, 'filename=', filename, 'urls=', urls, 'url=', url)
+        try:
+            #cmd = 'dx download --no-progress ' + self._url_to_dxid(url) + " -f -o '" + filename + "'"
+            cmd = 'cp ' + self._url2path(url) + " '" + filename + "'"
+            self._dbg('cmd=', cmd)
+            _run(cmd)
+        except subprocess.CalledProcessError:
+            raise RemoteError('transfer_retrieve: Error running ldir download cmd {}'.format(cmd))
+
+    def checkpresent(self, key):
+        # return True if the key is present in the remote
+        # return False if the key is not present
+        # raise RemoteError if the presence of the key couldn't be determined, eg. in case of connection error
+        _msg('CHECKPRESENT: %s'.format(key))
+        self._dbg('CHECKING PRESENCE OF KEY ', key)
+        urls = self.annex.geturls(key=key, prefix=LDIR_URI_PFX)
+        url = [url for url in urls if self.claimurl(url)][0]
+        self._dbg('checkpresent: key=', key, 'urls=', urls, 'url=', url)
+        return bool(self.checkurl(url))
+        #urls = self.annex.geturls(key=key, prefix='')
+        #self._dbg('URLS=', urls)
+        #return any([self.checkurl(url) for url in self.annex.geturls(key=key, prefix=LDIR_URI_PFX)])
+        #raise RemoteError('Cannot yet check by key')
+
+    def whereis(self, key):
+        self._dbg('WHEREIS: key=', key, 'urls=', self.annex.geturls(key=key,prefix=LDIR_URI_PFX))
+        raise UnsupportedRequest('Not supporting whereis yet')
+        
+    def remove(self, key):
+        # remove the key from the remote
+        # raise RemoteError if it couldn't be removed
+        # note that removing a not existing key isn't considered an error
+        raise RemoteError('Cannot yet remove keys')
+
+    def claimurl(self, url):
+        return url.startswith(LDIR_URI_PFX)
+
+    def checkurl(self, url):
+        if not self.claimurl(url): raise RemoteError('Cannot check non-gs URL {}'.format(url))
+        path = self._url2path(url)
+        if not os.path.isfile(path): return None
+        return [dict(size=os.path.getsize(path), filename=os.path.basename(path))]
+
+# In your ``main`` function, link your remote to the master class and initialize the protocol:
+
+def main():
+    master = Master()
+    remote = LocalDirRemote(master)
+    master.LinkRemote(remote)
+    master.Listen()
+
+if __name__ == "__main__":
+    main()
+
