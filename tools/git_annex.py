@@ -23,6 +23,7 @@ import warnings
 import traceback
 
 import contextlib2 as contextlib
+import uritools
 
 import tools
 import tools.gcloud
@@ -101,6 +102,14 @@ class GitAnnexTool(tools.Tool):
                                                             os.environ['PATH'])))
         return self._run_env
 
+    @contextlib.contextmanager
+    def maybe_now(self, now=True):
+        with contextlib.ExitStack() as stack:
+            if now :
+                self = stack.enter_context(self.batching())
+            yield self
+        
+
     def execute(self, args, batch_args=None, output_acceptor=None, now=True, tool='git-annex'):
         """Run the given git or git-annex command.  If batching is in effect (see self.batching()), the command is stored and will be
         executed when the batching context exits.
@@ -113,9 +122,7 @@ class GitAnnexTool(tools.Tool):
             now: execute instantly even if batching is in effect
             tool: git-annex or git, defaults to git-annex
         """
-        with contextlib.ExitStack() as stack:
-            if now or not batch_args or not self.is_batching():
-                self = stack.enter_context(self.batching())
+        with self.maybe_now(now=now or not batch_args or not self.is_batching()) as self:
             self._add_command_to_batch(args, batch_args, output_acceptor, tool)
 
     def is_batching(self):
@@ -141,7 +148,7 @@ class GitAnnexTool(tools.Tool):
 
         _log.debug('RUNNING BATCH CMDS: %s', self._batched_cmds)
         while self._batched_cmds:
-            tool_cmd, batch_calls = self._batched_cmds.popitem()
+            tool_cmd, batch_calls = self._batched_cmds.popitem(last=False)
             with contextlib.ExitStack() as stack:
                 subprocess_call_args = {}
                 if batch_calls[0].batch_args:
@@ -365,7 +372,7 @@ class GitAnnexTool(tools.Tool):
 
     def setpresentkey(self, key, remote_uuid, present, now=True):
         """Tell git-annex that `key` can be fetched from `url`"""
-        self.execute(['setpresentkey'], (key, url, '1' if present else '0'), now=now)
+        self.execute(['setpresentkey'], (key, remote_uuid, '1' if present else '0'), now=now)
 
     class Remote(object):
         
@@ -379,6 +386,10 @@ class GitAnnexTool(tools.Tool):
         def get_remote_uuid():
             """Return the git-annex uuid for this remote"""
             return self.remote_uuid
+
+        def handles_url(self, url):
+            """Return True if this remote handles this URL"""
+            raise NotImplemented()
 
         def gather_filestats(self, ga_tool, url2filestat):
             """Gather filestats for URLs"""
@@ -406,6 +417,10 @@ class GitAnnexTool(tools.Tool):
         def __init__(self, remote_name, remote_uuid):
             super(GitAnnexTool.LocalDirRemote, self).__init__(remote_name, remote_uuid)
 
+        def handles_url(self, url):
+            """Return True if this remote handles this URL"""
+            return uritools.urisplit(url).scheme in ('file', None)
+
         def gather_filestats(self, ga_tool, url2filestat):
             """Gather filestats for URLs that point to local files.
 
@@ -418,17 +433,12 @@ class GitAnnexTool(tools.Tool):
 
             with ga_tool.batching() as ga_tool_calckey:
                 for url, filestat in url2filestat.items():
-                    if 'git_annex_key' in filestat: continue
-                    if 'size' in filestat and 'md5' in filestat: continue
-                    #if not url.startswith('/'): continue
 
                     if ga_tool.is_link_into_annex(url):
                         filestat['git_annex_key'] = ga_tool.lookupkey(url)
                         continue
 
-                    if not os.path.isfile(url):
-                        _log.info('NOT A FILE: %s', url)
-                        continue
+                    util.misc.chk(os.path.isfile(url))
 
                     filestat['size'] = os.path.getsize(url)
                     if 'md5' in filestat:
@@ -440,7 +450,6 @@ class GitAnnexTool(tools.Tool):
                     _log.info('CALLING CALCKEY: %s', url)
                     ga_tool_calckey.calckey(url, output_acceptor=functools.partial(operator.setitem, filestat, 'git_annex_key'),
                                             now=False)
-                    #ga_tool.registerurl(url, )
 
             # end: with ga_tool.batching() as ga_tool_now
         # end: def gather_filestats(ga_tool, url2filestat):
@@ -455,32 +464,21 @@ class GitAnnexTool(tools.Tool):
             super(GitAnnexTool.GsUriRemote, self).__init__(remote_name, remote_uuid)
             self.gcloud_tool = tools.gcloud.GCloudTool()
 
+        def handles_url(self, url):
+            """Return True if this remote handles this URL"""
+            return uritools.urisplit(url).scheme == 'gs'
+
         def gather_filestats(self, ga_tool, url2filestat):
             """Gather filestats for gs:// URLs.
 
             For files for which we already have the md5, but not the size, quickly get the size using gsutil ls.
             """
             
-            gs_uris_needing_stat = set()
-            for url, filestat in url2filestat.items():
-                if 'git_annex_key' in filestat: continue
-                if 'size' in filestat and 'md5' in filestat: continue
-                if not url.startswith('gs://'): continue
-                gs_uris_needing_stat.add(url)
-
-            uri2attrs = self.gcloud_tool.get_metadata_for_objects(gs_uris_needing_stat)
+            uri2attrs = self.gcloud_tool.get_metadata_for_objects(url2filestat)
+            _log.info('URI2ATTRS=%s %s', uri2attrs, url2filestat)
                 
             for url, filestat in url2filestat.items():
-                if 'git_annex_key' in filestat: continue
-                if 'size' in filestat and 'md5' in filestat: continue
-                if not url.startswith('gs://'): continue
-
                 filestat.update(**uri2attrs[url])
-                filestat['git_annex_key'] = ga_tool.construct_key(key_attrs=dict(backend='MD5E',
-                                                                                 size=filestat['size'],
-                                                                                 md5=filestat['md5'],
-                                                                                 fname=url))
-                #ga_tool.registerurl(url, )
 
         # end: def gather_filestats(ga_tool, url2filestat):
     # end: class GsUriRemote(object)
@@ -493,33 +491,64 @@ class GitAnnexTool(tools.Tool):
         return functools.reduce(operator.concat, [list(remote_type.load_external_special_remotes(self, git_config))
                                                   for remote_type in self.REMOTE_TYPES], [])
 
-    def import_urls(self, urls, url2filestat=None):
+    def import_urls(self, urls, url2filestat=None, now=True):
         """Imports `urls` into git-annex.
 
         Args:
           urls: iterable of urls, which are strings denoting either local or cloud files.
           url2filestat: map from url to filestat (filestat is a map from data attrs like size, md5, git_annex_key to values).
+          now: if False, results may be delayed until batching context ends
 
         Returns:
           map from url to filestat
         """
 
-        if url2filestat is None:
-            url2filestat = collections.OrderedDict()
+        with self.maybe_now(now) as self:
+            if url2filestat is None:
+                url2filestat = collections.OrderedDict()
 
-        urls = sorted(set(urls))
-        for url in urls:
-            if url not in url2filestat:
-                url2filestat[url] = collections.OrderedDict()
+            urls = sorted(set(urls))
+            for url in urls:
+                if url not in url2filestat:
+                    url2filestat[url] = collections.OrderedDict()
 
-        remotes = self.get_remotes()
+            remotes = self.get_remotes()
 
-        for remote in remotes:
-            remote.gather_filestats(ga_tool=self, url2filestat=url2filestat)
+            def _construct_keys(url2filestat):
+                """For URLs for which we don't have a git-annex key but have its components, construct the key."""
+                for url, filestat in url2filestat.items():
+                    if 'git_annex_key' not in filestat and 'size' in filestat and 'md5' in filestat:
+                        filestat['git_annex_key'] = self.construct_key(key_attrs=dict(backend='MD5E',
+                                                                                      size=filestat['size'],
+                                                                                      md5=filestat['md5'],
+                                                                                      fname=url))
 
-        _log.info('GOT RESULTS: %s', url2filestat)
-        return url2filestat
-        
-    # end: def import_urls(self, urls, url2filestat=None)
+            _construct_keys(url2filestat)
+
+            for remote in remotes:
+
+                url2filestat_remote = collections.OrderedDict()            
+                for url, filestat in url2filestat.items():
+                    if 'git_annex_key' in filestat:
+                        continue
+                    if not remote.handles_url(url):
+                        continue
+                    url2filestat_remote[url] = filestat
+
+                remote.gather_filestats(ga_tool=self, url2filestat=url2filestat_remote)
+                _construct_keys(url2filestat_remote)
+
+                for url, filestat in url2filestat_remote.items():
+                    util.misc.chk('git_annex_key' in filestat)
+                    self.registerurl(key=filestat['git_annex_key'], url=url, now=False)
+                    self.setpresentkey(key=filestat['git_annex_key'], remote_uuid=remote.remote_uuid, present=True, now=False)
+
+            # end: for remote in remotes
+
+            _log.info('GOT RESULTS: %s', url2filestat)
+            return url2filestat
+        # with self.maybe_now(now) as self:
+
+    # end: def import_urls(self, urls, url2filestat=None, now=True)
 
 # end: class GitAnnexTool
