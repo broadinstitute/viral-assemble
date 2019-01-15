@@ -12,7 +12,6 @@ kmc=3.1.1rc1
 gatk=3.8
 git-annex=7.20181211
 google-cloud-storage=1.13.0
-google-cloud-sdk=228.0.0
 kraken=1.0.0_fork3_upd1
 krona=2.7
 last=876
