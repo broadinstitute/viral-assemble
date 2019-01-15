@@ -218,5 +218,4 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
     for f in ldir_uris:
         assert util.file.md5_for_file(f).lower() in url2filestat[f]['git_annex_key']
 
-
     

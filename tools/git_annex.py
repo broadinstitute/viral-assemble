@@ -48,7 +48,7 @@ class _ValHolder(object):
         self.val = val
 
 # NamedTuple: _BatchedCall - arguments to one git-annex call in a set of batched cals, and an optional place to record call output
-_BatchedCall = collections.namedtuple('_BatchedCall', ['batch_args', 'output_acceptor'])
+_BatchedCall = collections.namedtuple('_BatchedCall', ['batch_args', 'cwd', 'output_acceptor'])
 
 
 # * class GitAnnexTool
@@ -133,6 +133,9 @@ class GitAnnexTool(tools.Tool):
         with self.maybe_now(now=now or not batch_args or not self.is_batching()) as self:
             self._add_command_to_batch(args, batch_args, output_acceptor, tool)
 
+    def execute_batch(self, args, batch_args, output_acceptor=None):
+        return self.execute(args=args, batch_args=batch_args, output_acceptor=output_acceptor, now=False)
+
     def is_batching(self):
         """Return True if batching is in effect"""
         return self._batched_cmds is not None
@@ -143,8 +146,8 @@ class GitAnnexTool(tools.Tool):
             util.misc.chk(tool == 'git-annex')
             args = tuple(args) + ('--batch',)
         tool_cmd = (os.path.join(self._get_bin_dir(), tool),) + tuple(map(str, args))
-        batched_call = _BatchedCall(batch_args=batch_args, output_acceptor=output_acceptor)
-        self._batched_cmds.setdefault(tool_cmd, []).append(batched_call)
+        batched_call = _BatchedCall(batch_args=batch_args, cwd=os.getcwd(), output_acceptor=output_acceptor)
+        self._batched_cmds.setdefault((tool_cmd, os.getcwd()), []).append(batched_call)
 
     def _execute_batched_commands(self):
         """Run any saved batched commands.
@@ -156,8 +159,9 @@ class GitAnnexTool(tools.Tool):
 
         _log.debug('RUNNING BATCH CMDS: %s', self._batched_cmds)
         while self._batched_cmds:
-            tool_cmd, batch_calls = self._batched_cmds.popitem(last=False)
+            (tool_cmd, cmd_cwd), batch_calls = self._batched_cmds.popitem(last=False)
             with contextlib.ExitStack() as stack:
+                stack.enter_context(util.file.pushd_popd(cmd_cwd))
                 subprocess_call_args = {}
                 if batch_calls[0].batch_args:
                     # This is a git-annex command with the --batch flag: prepare an input file of the
@@ -223,7 +227,7 @@ class GitAnnexTool(tools.Tool):
     def add(self, fname):
         """Add a file to git-annex"""
         _log.debug('CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
-        self.execute(['add'], batch_args=(fname,), now=False)
+        self.execute_batch(['add'], batch_args=(fname,))
         _log.debug('RETURNED FROM CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
 
     def commit(self, msg):
@@ -243,7 +247,7 @@ class GitAnnexTool(tools.Tool):
     @add_now_arg
     def fromkey(self, key, fname):
         """Manually set up a symlink to a given key as a given file"""
-        self.execute(['fromkey', '--force'], batch_args=(key, fname), now=False)
+        self.execute_batch(['fromkey', '--force'], batch_args=(key, fname))
 
     def _get_link_into_annex(self, f):
         """If `f` points to an annexed file, possibly through a chain of symlinks, return
@@ -342,6 +346,7 @@ class GitAnnexTool(tools.Tool):
         raise NotImplemented()
 
 
+    @add_now_arg
     def get(self, f):
         """Ensure the file exists in the local annex, fetching it from a remote if necessary.
         Unlike git-annex-get, follows symlinks and  will get the file regardless of what the current dir is."""
@@ -354,8 +359,7 @@ class GitAnnexTool(tools.Tool):
         f, link_target = self._get_link_into_annex(f)
         if not os.path.isfile(f):
             with util.file.pushd_popd(os.path.dirname(os.path.abspath(f))):
-                self.execute(['get', os.path.basename(f)])
-        assert os.path.isfile(f)
+                self.execute_batch(['get'], (os.path.basename(f),))
 
     def drop(self, f):
         """Drop the file from its local repo."""
@@ -378,12 +382,12 @@ class GitAnnexTool(tools.Tool):
     @add_now_arg
     def registerurl(self, key, url):
         """Tell git-annex that `key` can be fetched from `url`"""
-        self.execute(['registerurl'], (key, url), now=False)
+        self.execute_batch(['registerurl'], (key, url))
 
     @add_now_arg
     def setpresentkey(self, key, remote_uuid, present):
         """Tell git-annex that `key` can be fetched from `url`"""
-        self.execute(['setpresentkey'], (key, remote_uuid, '1' if present else '0'), now=False)
+        self.execute_batch(['setpresentkey'], (key, remote_uuid, '1' if present else '0'))
 
     class Remote(object):
         
