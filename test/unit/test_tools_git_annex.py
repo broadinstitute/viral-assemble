@@ -158,11 +158,6 @@ def test_git_annex_init_add_get_drop(ga_tool, git_annex_repo, dir_remote, file_A
     # end: with pushd_popd('..'):
 # end: def test_git_annex_init_add_get_drop(tmpdir_function):
 
-def test_empty_batching_context(ga_tool):
-    with pytest.warns(RuntimeWarning, match='Empty batching context'):
-        with ga_tool.batching():
-            pass
-
 def test_batch_add(ga_tool, git_annex_repo, file_A, file_B):
     f2key = {}
     with ga_tool.batching() as ga_tool:
