@@ -185,11 +185,14 @@ def tmp_dir(*args, **kwargs):
 def pushd_popd(target_dir):
     '''Temporary change to the specified directory, restoring current directory on context exit.'''
     save_cwd = os.getcwd()
+    save_env_pwd = os.environ['PWD']
     try:
         os.chdir(target_dir)
+        os.environ['PWD'] = target_dir
         yield target_dir
     finally:
         os.chdir(save_cwd)
+        os.environ['PWD'] = save_env_pwd
 
 def keep_tmp():
     """Whether to preserve temporary directories and files (useful during debugging).
