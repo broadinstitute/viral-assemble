@@ -8,8 +8,14 @@ import logging
 import collections
 import os
 import os.path
+import sys
 import stat
-import subprocess
+
+if os.name == 'posix' and sys.version_info[0] < 3:
+    import subprocess32 as subprocess
+else:
+    import subprocess
+
 import shutil
 import random
 import shlex
@@ -161,23 +167,24 @@ class GitAnnexTool(tools.Tool):
         while self._batched_cmds:
             (tool_cmd, cmd_cwd), batch_calls = self._batched_cmds.popitem(last=False)
             with contextlib.ExitStack() as stack:
-                stack.enter_context(util.file.pushd_popd(cmd_cwd))
                 subprocess_call_args = {}
                 if batch_calls[0].batch_args:
                     # This is a git-annex command with the --batch flag: prepare an input file of the
                     # command arguments, one line per batched call.
                     _log.info('calling batch calls: %s %s', tool_cmd, batch_calls)
-                    batch_inps_fname = stack.enter_context(util.file.tempfname(prefix='git-annex-batch-inputs'))
-                    util.file.dump_file(batch_inps_fname,
-                                        '\n'.join([' '.join(map(str, batch_call.batch_args)) for batch_call in batch_calls]))
-                    batch_inps_file = stack.enter_context(open(batch_inps_fname))
-                    subprocess_call_args.update(stdin=batch_inps_file)
 
-                subprocess_func = getattr(subprocess, 'check_output' if batch_calls[0].output_acceptor else 'check_call')
-                result = subprocess_func(tool_cmd, env=self._get_run_env(), **subprocess_call_args)
+                    batch_inp_str = '\n'.join([' '.join(map(str, batch_call.batch_args)) for batch_call in batch_calls]) + '\n'
+                    subprocess_call_args.update(input=batch_inp_str)
 
                 if batch_calls[0].output_acceptor:
-                    output = util.misc.maybe_decode(result).rstrip('\n')
+                    subprocess_call_args.update(stdout=subprocess.PIPE)
+
+                _log.info('CALLING SUBPROCESS RUN: %s %s', tool_cmd, subprocess_call_args)
+                result = subprocess.run(tool_cmd, check=True, cwd=cmd_cwd, universal_newlines=True,
+                                        env=self._get_run_env(), **subprocess_call_args)
+
+                if batch_calls[0].output_acceptor:
+                    output = util.misc.maybe_decode(result.stdout).rstrip('\n')
                     call_outputs = output.split('\n') if batch_calls[0].batch_args else [output]
                     util.misc.chk(len(call_outputs) == len(batch_calls))
                     for batch_call, call_output in zip(batch_calls, call_outputs):
