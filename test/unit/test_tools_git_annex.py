@@ -208,7 +208,8 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
     gs_uris = ('gs://gcp-public-data-landsat/LC08/PRE/044/034/LC80440342016259LGN00/LC80440342016259LGN00_B1.TIF',)
 
     ldir_uris = (file_A, file_B)
-    uris_to_import = gs_uris + ldir_uris
+    #uris_to_import = gs_uris + ldir_uris
+    uris_to_import = ldir_uris
 
     url2filestat = ga_tool.import_urls(urls=uris_to_import)
     for f in uris_to_import:
@@ -217,8 +218,7 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
         fn = os.path.join(str(uuid.uuid4()), os.path.basename(f))
         ga_tool.fromkey(url2filestat[f]['git_annex_key'], fn)
         ga_tool.get(fn)
+        assert os.path.isfile(fn)
 
     for f in ldir_uris:
         assert util.file.md5_for_file(f).lower() in url2filestat[f]['git_annex_key']
-
-

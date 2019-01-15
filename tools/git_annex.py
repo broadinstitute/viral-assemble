@@ -342,6 +342,8 @@ class GitAnnexTool(tools.Tool):
           key_attrs: map from key attribute name to value; must include mappings for the following keys -
              backend (currently must be MD5E), size, md5, fname.
         """
+        key_attrs = copy.copy(key_attrs)
+        key_attrs['md5'] = key_attrs['md5'].lower()
         util.misc.chk(key_attrs['backend'] == 'MD5E')
         _log.info('constuct_key from %s', key_attrs)
         return '{backend}-s{size}--{md5}{exts}'.format(exts=GitAnnexTool._get_file_exts_for_key(key_attrs['fname'],
@@ -456,21 +458,27 @@ class GitAnnexTool(tools.Tool):
             with ga_tool.batching() as ga_tool_calckey:
                 for url, filestat in url2filestat.items():
 
-                    if ga_tool.is_link_into_annex(url):
-                        filestat['git_annex_key'] = ga_tool.lookupkey(url)
+                    if url.startswith('file://'):
+                        file_path = url[len('file://'):]
+
+                    util.misc.chk(os.path.islink(file_path) or os.path.isfile(file_path),
+                                  'neither link nor file: %s'.format(file_path))
+
+                    if ga_tool.is_link_into_annex(file_path):
+                        filestat['git_annex_key'] = ga_tool.lookupkey(file_path)
                         continue
 
-                    util.misc.chk(os.path.isfile(url))
+                    util.misc.chk(os.path.isfile(file_path))
 
-                    filestat['size'] = os.path.getsize(url)
+                    filestat['size'] = os.path.getsize(file_path)
                     if 'md5' in filestat:
                         filestat['git_annex_key'] = ga_tool.construct_key(key_attrs=dict(backend='MD5E',
-                                                                                         fname=os.path.basename(url),
+                                                                                         fname=os.path.basename(file_path),
                                                                                          **filestat))
                         continue
 
-                    _log.info('CALLING CALCKEY: %s', url)
-                    ga_tool_calckey.calckey(url, output_acceptor=functools.partial(operator.setitem, filestat, 'git_annex_key'),
+                    _log.info('CALLING CALCKEY: %s', file_path)
+                    ga_tool_calckey.calckey(file_path, output_acceptor=functools.partial(operator.setitem, filestat, 'git_annex_key'),
                                             now=False)
 
             # end: with ga_tool.batching() as ga_tool_now
@@ -500,7 +508,7 @@ class GitAnnexTool(tools.Tool):
             _log.info('URI2ATTRS=%s %s', uri2attrs, url2filestat)
                 
             for url, filestat in url2filestat.items():
-                filestat.update(**uri2attrs[url])
+                filestat.update(size=uri2attrs[url]['size'], md5=uri2attrs[url]['md5'].lower())
 
         # end: def gather_filestats(ga_tool, url2filestat):
     # end: class GsUriRemote(object)
@@ -529,7 +537,20 @@ class GitAnnexTool(tools.Tool):
         if url2filestat is None:
             url2filestat = collections.OrderedDict()
 
+        remapped_urls = {}
+
+        def local_file_path_to_url(url):
+            if uritools.urisplit(url).scheme is not None:
+                return url
+            util.misc.chk(os.path.isfile(url), 'IMPORT FAIL: missing file %s'.format(url))
+            new_url = 'file://' + os.path.abspath(url)
+            remapped_urls[url] = new_url
+            return new_url
+
+        urls = map(local_file_path_to_url, urls)
+
         urls = sorted(set(urls))
+
         for url in urls:
             if url not in url2filestat:
                 url2filestat[url] = collections.OrderedDict()
@@ -566,6 +587,9 @@ class GitAnnexTool(tools.Tool):
                 self.setpresentkey(key=filestat['git_annex_key'], remote_uuid=remote.remote_uuid, present=True, now=False)
 
         # end: for remote in remotes
+
+        for k, v in remapped_urls.items():
+            url2filestat[k] = url2filestat[v]
 
         _log.info('GOT RESULTS: %s', url2filestat)
         return url2filestat

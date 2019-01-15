@@ -71,7 +71,11 @@ class LocalDirRemote(SpecialRemote):
         # get the file identified by `key` and store it to `filename`
         # raise RemoteError if the file couldn't be retrieved
         urls = self.annex.geturls(key=key, prefix=LDIR_URI_PFX)
-        url = [url for url in urls if self.claimurl(url)][0]
+        self._dbg('NNNNN: key={} filename={} urls={}'.format(key, filename, urls))
+        url_list = [url for url in urls if self.claimurl(url)]
+        if not url_list:
+            raise RemoteError('transfer_retrieve: no urls for key {} filename {}'.format(key, filename))
+        url = url_list[0]
         self._dbg('transfer-retrieve: key=', key, 'filename=', filename, 'urls=', urls, 'url=', url)
         try:
             #cmd = 'dx download --no-progress ' + self._url_to_dxid(url) + " -f -o '" + filename + "'"
