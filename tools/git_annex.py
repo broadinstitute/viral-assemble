@@ -103,10 +103,12 @@ class GitAnnexTool(tools.Tool):
         the binaries for git-annex external special remote implementations that we add."""
         if not hasattr(self, '_run_env'):
             # ensure that the git and git-annex binaries we installed are first in PATH.
-            self._run_env = dict(os.environ, PATH=':'.join((self._get_bin_dir(),
-                                                            os.path.join(util.version.get_project_path(),
-                                                                         'tools', 'git-annex-remotes'),
-                                                            os.environ['PATH'])))
+            self._run_env = dict(os.environ,
+                                 PATH=':'.join((self._get_bin_dir(),
+                                                os.path.join(util.version.get_project_path(),
+                                                             'tools', 'git-annex-remotes'),
+                                                os.environ['PATH'])),
+                                 PYTHONPATH=':'.join((util.version.get_project_path(), os.environ.get('PYTHONPATH', ''))))
         return self._run_env
 
     @contextlib.contextmanager

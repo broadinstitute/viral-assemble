@@ -219,4 +219,4 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
         ga_tool.fromkey(url2filestat[f]['git_annex_key'], fn)
         ga_tool.get(fn)
         assert os.path.isfile(fn)
-        assert util.file.md5_for_file(f).lower() in url2filestat[f]['git_annex_key']
+        assert util.file.md5_for_file(fn).lower() in url2filestat[f]['git_annex_key']

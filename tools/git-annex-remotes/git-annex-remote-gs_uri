@@ -13,6 +13,8 @@ from annexremote import SpecialRemote
 from annexremote import RemoteError
 from annexremote import UnsupportedRequest
 
+import tools.gcloud
+
 #Now create your special remote class. It must subtype ``SpecialRemote`` and implement at least the 6 basic methods:
 
 GS_URI_PFX='gs://'
@@ -60,13 +62,18 @@ class GSURIRemote(SpecialRemote):
         # get the file identified by `key` and store it to `filename`
         # raise RemoteError if the file couldn't be retrieved
         urls = self.annex.geturls(key=key, prefix=GS_URI_PFX)
-        url = [url for url in urls if self.claimurl(url)][0]
+        url_list = [url for url in urls if self.claimurl(url)]
+        if not url_list:
+            raise RemoteError('No urls for key {} filename {}'.format(key, filename))
+        url = url_list[0]
         self._dbg('transfer-retrieve: key=', key, 'filename=', filename, 'urls=', urls, 'url=', url)
         try:
             #cmd = 'dx download --no-progress ' + self._url_to_dxid(url) + " -f -o '" + filename + "'"
-            cmd = 'gsutil cp ' + url + " '" + filename + "'"
-            self._dbg('cmd=', cmd)
-            _run(cmd)
+            gcloud_tool = tools.gcloud.GCloudTool()
+            gcloud_tool.download_object(gs_uri=url, destination_file_name=filename)
+            #cmd = 'gsutil cp ' + url + " '" + filename + "'"
+            #self._dbg('cmd=', cmd)
+            #_run(cmd)
         except subprocess.CalledProcessError:
             raise RemoteError('transfer_retrieve: Error running gs download cmd {}'.format(cmd))
 
@@ -102,20 +109,23 @@ class GSURIRemote(SpecialRemote):
     def checkurl(self, url):
         if not self.claimurl(url): raise RemoteError('Cannot check non-gs URL {}'.format(url))
         try:
-            stat_output = _run_get_output('gsutil stat ' + url)
-            self._dbg('TYPE ORIG IS ', type(stat_output))
-            stat_output = str(stat_output)
-            self._dbg('TYPE at 1 IS ', type(stat_output))
-            stat_output = stat_output.strip()
-            self._dbg('TYPE at 2 IS ', type(stat_output))
-            stat_output = stat_output.split('\n')
-            self._dbg('LINES', len(stat_output))
-            for line in stat_output:
-                line = str(line)
-                self._dbg('LINE', line)
-                fields = line.strip().split()
-                if len(fields) == 2 and fields[0] == 'Content-Length:':
-                    return [dict(size=int(fields[1]), filename=os.path.basename(url))]
+            gcloud_tool = tools.gcloud.GCloudTool()
+            mdata = gcloud_tool.get_metadata_for_objects([url])
+            return [dict(size=int(mdata['size']), filename=os.path.basename(url))]
+            # stat_output = _run_get_output('gsutil stat ' + url)
+            # self._dbg('TYPE ORIG IS ', type(stat_output))
+            # stat_output = str(stat_output)
+            # self._dbg('TYPE at 1 IS ', type(stat_output))
+            # stat_output = stat_output.strip()
+            # self._dbg('TYPE at 2 IS ', type(stat_output))
+            # stat_output = stat_output.split('\n')
+            # self._dbg('LINES', len(stat_output))
+            # for line in stat_output:
+            #     line = str(line)
+            #     self._dbg('LINE', line)
+            #     fields = line.strip().split()
+            #     if len(fields) == 2 and fields[0] == 'Content-Length:':
+                    
         except subprocess.CalledProcessError:
             raise RemoteError('Could not stat url')
 
