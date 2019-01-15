@@ -74,9 +74,10 @@ class GSURIRemote(SpecialRemote):
         # return True if the key is present in the remote
         # return False if the key is not present
         # raise RemoteError if the presence of the key couldn't be determined, eg. in case of connection error
-        _msg('CHECKPRESENT: %s'.format(key))
+        _msg('CHECKPRESENT: {}'.format(key))
         self._dbg('CHECKING PRESENCE OF KEY ', key)
         urls = self.annex.geturls(key=key, prefix=GS_URI_PFX)
+        self._dbg('got urls {}'.format(urls))
         url = [url for url in urls if self.claimurl(url)][0]
         self._dbg('checkpresent: key=', key, 'urls=', urls, 'url=', url)
         return bool(self.checkurl(url))
