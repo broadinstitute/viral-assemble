@@ -26,7 +26,7 @@ import util.file
 import util.misc
 
 TOOL_NAME = 'google-cloud-storage'
-TOOL_VERSION = '1.12.0'
+TOOL_VERSION = '1.13.0'
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
@@ -92,6 +92,11 @@ class GCloudTool(tools.Tool):
         bucket = self.get_bucket(gs_uri_parts.authority)
         blob = bucket.get_blob(gs_uri_parts.path[1:])
         return util.misc.chk(blob)
+
+    def download_object(self, gs_uri, destination_file_name):
+        """Downloads a blob from the bucket."""
+        blob = self.get_blob(gs_uri)
+        blob.download_to_filename(destination_file_name)
 
     def get_metadata_for_objects(self, gs_uris):
         """Get metadata for objects stored in Google Cloud Storage.
