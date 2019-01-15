@@ -111,7 +111,7 @@ class GSURIRemote(SpecialRemote):
         try:
             gcloud_tool = tools.gcloud.GCloudTool()
             mdata = gcloud_tool.get_metadata_for_objects([url])
-            return [dict(size=int(mdata['size']), filename=os.path.basename(url))]
+            return [dict(size=int(mdata[url]['size']), filename=os.path.basename(url))]
             # stat_output = _run_get_output('gsutil stat ' + url)
             # self._dbg('TYPE ORIG IS ', type(stat_output))
             # stat_output = str(stat_output)

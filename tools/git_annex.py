@@ -400,6 +400,13 @@ class GitAnnexTool(tools.Tool):
         """Tell git-annex that `key` can be fetched from `url`"""
         self.execute_batch(['setpresentkey'], (key, remote_uuid, '1' if present else '0'))
 
+    @add_now_arg
+    def checkpresentkey(self, key, output_acceptor=None):
+        """Check if key is present in some remote"""
+        our_output_acceptor = _ValHolder()
+        self.execute(['checkpresentkey'], (key,), output_acceptor=output_acceptor or our_output_acceptor, now=not output_acceptor)
+        return our_output_acceptor.val
+
     class Remote(object):
         
         """Represents a particular git-annex special remote.
