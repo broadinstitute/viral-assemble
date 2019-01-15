@@ -11,6 +11,8 @@ import itertools
 import uuid
 import hashlib
 import platform
+import functools
+import operator
 
 import pytest
 
@@ -212,6 +214,22 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
     #uris_to_import = ldir_uris
 
     url2filestat = ga_tool.import_urls(urls=uris_to_import)
+
+    url_presence = {}
+    with ga_tool.batching() as ga_tool:
+        for f in uris_to_import:
+            assert f in url2filestat
+            assert 'git_annex_key' in url2filestat[f], 'no git_annex_key for {}: {}'.format(f, url2filestat[f])
+            ga_tool.checkpresentkey(url2filestat[f]['git_annex_key'],
+                                    output_acceptor=functools.partial(operator.setitem, url_presence,
+                                                                      url2filestat[f]['git_annex_key']),
+                                    now=False)
+            assert not url_presence
+    
+    for f in uris_to_import:
+        assert url2filestat[f]['git_annex_key'] in url_presence
+        assert url_presence[url2filestat[f]['git_annex_key']] == '1'
+
     for f in uris_to_import:
         assert f in url2filestat
         assert 'git_annex_key' in url2filestat[f], 'no git_annex_key for {}: {}'.format(f, url2filestat[f])

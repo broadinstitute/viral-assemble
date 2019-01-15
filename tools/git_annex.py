@@ -138,6 +138,7 @@ class GitAnnexTool(tools.Tool):
             now: execute instantly even if batching is in effect
             tool: git-annex or git, defaults to git-annex
         """
+        _log.info('EXECUTE: now={} batch_args={} self.is_batching={}'.format(now, batch_args, self.is_batching()))
         with self.maybe_now(now=now or not batch_args or not self.is_batching()) as self:
             self._add_command_to_batch(args, batch_args, output_acceptor, tool)
 
@@ -200,9 +201,11 @@ class GitAnnexTool(tools.Tool):
         The value returned by this context manager is a GitAnnexTool object that batches commands issued to it,
         and will run them by the time of the context exit.
         """
+        _log.info('ENTERING BATCHING CONTEXT; was batching? {}'.format(self.is_batching()))
         self = copy.copy(self)
         self._batched_cmds = collections.OrderedDict()
         yield self
+        _log.info('ENTERING BATCHING CONTEXT; was batching? {}'.format(self.is_batching()))
         self._execute_batched_commands()
 
     def execute_git(self, args, **kw):
