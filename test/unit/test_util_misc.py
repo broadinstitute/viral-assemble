@@ -314,6 +314,9 @@ def test_transform_json_data():
 def test_json_gather_leaf_jpaths():
     test_data = (
         (1, {(): 1}),
+        ([1, 2], {(0,): 1, (1,): 2}),
+        ({'1': 2}, {('1',): 2}),
+        ({'1': 2, '3': [4, '5']}, {('1',): 2, ('3', 0): 4, ('3', 1): '5'}),
     )
     for inp, expected_out in test_data:
         assert(util.misc.json_gather_leaf_jpaths(inp) == expected_out)
@@ -323,5 +326,3 @@ def test_map_vals():
     assert tuple(map_vals({})) == ()
     assert tuple(map_vals({1:2})) == (2,)
     assert tuple(map_vals({1:2,3:4})) == (2,4)
-
-    
