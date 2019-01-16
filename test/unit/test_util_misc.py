@@ -4,6 +4,7 @@ __author__ = "dpark@broadinstitute.org"
 
 import os, random, collections
 import unittest
+import logging
 import subprocess
 import util.misc
 import util.file
@@ -303,4 +304,24 @@ def test_first_non_None(*args):
     with pytest.raises(ValueError):
         first_non_None(None, None)
 
+def test_transform_json_data():
+    transform_json_data = util.misc.transform_json_data
+    def handle_node(val, path):
+        logging.info('HANDLE_NODE: val={} path={}'.format(val, path))
+        return val
+    transform_json_data(1, handle_node)
 
+def test_json_gather_leaf_jpaths():
+    test_data = (
+        (1, {(): 1}),
+    )
+    for inp, expected_out in test_data:
+        assert(util.misc.json_gather_leaf_jpaths(inp) == expected_out)
+
+def test_map_vals():
+    map_vals = util.misc.map_vals
+    assert tuple(map_vals({})) == ()
+    assert tuple(map_vals({1:2})) == (2,)
+    assert tuple(map_vals({1:2,3:4})) == (2,4)
+
+    

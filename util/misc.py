@@ -743,4 +743,50 @@ def first_non_None(*args):
     raise ValueError('No non-None args')
 
 def maybe_decode(s):
+    """Return a unicode version of `s`, decoding if needed.  For Python 2/3 compatibility."""
     return s.decode() if hasattr(s, 'decode') else s
+
+def transform_json_data(val, node_handler, path=()):
+    """Transform a parsed json structure, by replacing nodes for which `node_handler` returns
+    an object different from `val`, with that object.  If `node_handler` has a named arg `path`,
+    the path from the root will be passed via that arg (as a tuple).  If `node_handler` has a named
+    arg `is_leaf`, it will set to True when node_handler is called for a leaf, to False otherwise.
+    """
+    recurse = functools.partial(transform_json_data, node_handler=node_handler)
+    node_handler_named_args = getnamedargs(node_handler)
+    node_handler_args = {}
+    if 'path' in node_handler_named_args:
+        node_handler_args['path'] = path
+    is_leaf = not isinstance(val, (list, collections.Mapping))
+    if 'is_leaf' in node_handler_named_args:
+        node_handler_args['is_leaf'] = is_leaf
+    handled_val = node_handler(val, **node_handler_args)
+    if handled_val is not val:
+        #_log.debug('resolved %s to %s', val, handled_val)
+        return handled_val
+    elif isinstance(val, list):
+        return [recurse(val=v, path=path+(i,)) for i, v in enumerate(val)]
+    elif isinstance(val, collections.Mapping):
+        return collections.OrderedDict([(k, recurse(val=v, path=path+(k,)))
+                                        for k, v in val.items()])
+    else:
+        return val
+# end: def transform_json_data(val, node_handler, path=())
+
+def json_gather_leaf_jpaths(json_data):
+    """Construct a map which for each leaf maps its jpath to the leaf value"""
+    jpath2leaf = collections.OrderedDict()
+    def save_leaf_path(val, path, is_leaf):
+        if not is_leaf: 
+            return val
+        assert path not in jpath2leaf
+        jpath2leaf[path] = val
+        log.info('GATHER: {} {}'.format(val, path))
+        return val
+    transform_json_data(json_data, save_leaf_path)
+    log.info('RETURNING %s', jpath2leaf)
+    return jpath2leaf
+
+def map_vals(d):
+    """Return an iterator over map values"""
+    return map(operator.itemgetter(1), d.items())
