@@ -260,6 +260,8 @@ def _json_to_org(val, org_file, depth=1, heading='root'):
             elif _maps(val, '$git_link'):
                 rel_path = val['$git_link']
                 out.write(' - [[file:{}][{}]]\n'.format(rel_path, os.path.basename(rel_path)))
+            elif _is_str(val) and os.path.isabs(val) and os.path.isdir(val):
+                out.write(' - [[file+emacs:{}][{}]]\n'.format(val, os.path.basename(val)))
             elif isinstance(val, collections.Mapping):
                 out.write(' - map of ' + str(len(val)) + '\n')
                 if len(val):
