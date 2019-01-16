@@ -96,7 +96,7 @@ class GCloudTool(tools.Tool):
         return blob
 
     def get_blob(self, gs_uri):
-        return util.misc.chk(self.maybe_get_blob(gs_uri), 'could not get blob from {} {}'.format(gs_uri, gs_uri_parts.path[1:]))
+        return util.misc.chk(self.maybe_get_blob(gs_uri), 'could not get blob from {}'.format(gs_uri))
 
     def download_object(self, gs_uri, destination_file_name):
         """Downloads a blob from the bucket."""
