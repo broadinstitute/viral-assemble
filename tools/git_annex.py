@@ -136,9 +136,10 @@ class GitAnnexTool(tools.Tool):
 
     @contextlib.contextmanager
     def maybe_now(self, now=True):
-        with contextlib.ExitStack() as stack:
-            if now :
-                self = stack.enter_context(self.batching())
+        if now:
+            with self.batching() as self:
+                yield self
+        else:
             yield self
 
     def add_now_arg(method):
@@ -532,6 +533,8 @@ class GitAnnexTool(tools.Tool):
                         continue
 
                     filestat['size'] = os.path.getsize(file_path)
+                    if 'md5' not in filestat:
+                        filestat['md5'] = util.file.md5_for_file(file_path)
                     if 'md5' in filestat:
                         filestat['git_annex_key'] = ga_tool.construct_key(key_attrs=dict(backend='MD5E',
                                                                                          fname=os.path.basename(file_path),
