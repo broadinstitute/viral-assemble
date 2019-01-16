@@ -571,7 +571,7 @@ class GitAnnexTool(tools.Tool):
 
         def handles_url(self, url):
             """Return True if this remote handles this URL"""
-            return uritools.urisplit(url).scheme == 'gs'
+            return uritools.isuri(url) and uritools.urisplit(url).scheme == 'gs'
 
         def gather_filestats(self, ga_tool, url2filestat):
             """Gather filestats for gs:// URLs.
@@ -584,7 +584,8 @@ class GitAnnexTool(tools.Tool):
                 if 'git_annex_key' in filestat: continue
                 if not self.handles_url(url): continue
                 gs_urls_needing_metadata.add(url)
-            
+
+            _log.info('GS URLS NEEDING METADATA: %s', '\n'.join(map(str, gs_urls_needing_metadata)))
             url2attrs = self.gcloud_tool.get_metadata_for_objects(gs_urls_needing_metadata, ignore_errors=True)
             _log.info('url2ATTRS=%s %s', url2attrs, url2filestat)
 
@@ -639,7 +640,7 @@ class GitAnnexTool(tools.Tool):
             remote.gather_filestats(ga_tool=self, url2filestat=url2filestat)
         # end: for remote in remotes
 
-        _log.info('GOT RESULTS: %s', url2filestat)
+        _log.info('GOT RESULTS: %s', {k: v for k, v in url2filestat.items() if v})
 
         if not ignore_non_urls:
             for url in urls:
