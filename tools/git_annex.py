@@ -4,6 +4,7 @@
 
 # * imports
 
+from __future__ import print_function
 import logging
 import collections
 import os
@@ -27,9 +28,11 @@ import operator
 import copy
 import warnings
 import traceback
+import atexit
 
 import contextlib2 as contextlib
 import uritools
+import threading
 
 import tools
 import tools.gcloud
@@ -42,6 +45,24 @@ TOOL_VERSION = '7.20181211'
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
+
+_tot_exec_time = 0
+_tot_exec_time_lock = threading.Lock()
+
+def print_exec_time():
+    print('TOTAL EXEC TIME: {}'.format(_tot_exec_time), file=sys.stderr)
+
+atexit.register(print_exec_time)
+
+@contextlib.contextmanager
+def exec_timer():
+    beg = time.time()
+    yield
+    duration = time.time() - beg
+    global _tot_exec_time
+    global _tot_exec_time_lock
+    with _tot_exec_time_lock:
+        _tot_exec_time += duration
 
 class _ValHolder(object):
 
@@ -94,9 +115,11 @@ class GitAnnexTool(tools.Tool):
 
     def _get_bin_dir(self):
         """Return the directory containing the git-annex binary"""
-        bin_dir = os.path.dirname(self.install_and_get_path())
-        util.misc.chk(self.is_installed())
-        return bin_dir
+        if not hasattr(self, 'save_bin_dir'):
+            bin_dir = os.path.dirname(self.install_and_get_path())
+            util.misc.chk(self.is_installed())
+            self.save_bin_dir = bin_dir
+        return self.save_bin_dir
 
     def _get_run_env(self):
         """Return the environment in which git-annex should be run.  This environment will include in its PATH
@@ -183,8 +206,9 @@ class GitAnnexTool(tools.Tool):
                     subprocess_call_args.update(stdout=subprocess.PIPE)
 
                 _log.info('CALLING SUBPROCESS RUN: %s %s', tool_cmd, subprocess_call_args)
-                result = subprocess.run(tool_cmd, check=True, cwd=cmd_cwd, universal_newlines=True,
-                                        env=self._get_run_env(), **subprocess_call_args)
+                with exec_timer():
+                    result = subprocess.run(tool_cmd, check=True, cwd=cmd_cwd, universal_newlines=True,
+                                            env=self._get_run_env(), **subprocess_call_args)
 
                 if batch_calls[0].output_acceptor:
                     output = util.misc.maybe_decode(result.stdout).rstrip('\n')
@@ -404,6 +428,12 @@ class GitAnnexTool(tools.Tool):
         self.execute_batch(['setpresentkey'], (key, remote_uuid, '1' if present else '0'))
 
     @add_now_arg
+    def register_key_in_remote_at_url(self, key, url, remote_uuid):
+        """Record that `key` is present in remote `remote_uuid` at `url`"""
+        self.registerurl(key, url, now=False)
+        self.setpresentkey(key, remote_uuid, True, now=False)
+
+    @add_now_arg
     def checkpresentkey(self, key, output_acceptor=None):
         """Check if key is present in some remote"""
         our_output_acceptor = _ValHolder()
@@ -448,6 +478,7 @@ class GitAnnexTool(tools.Tool):
                     remote_uuid = git_config['remote.' + remote_name + '.annex-uuid']
                     result.append(cls(remote_name=remote_name, remote_uuid=remote_uuid))
             return result
+        # end: def load_external_special_remotes(cls, ga_tool, git_config)
 
     # end: class Remote(object)
 
@@ -459,12 +490,17 @@ class GitAnnexTool(tools.Tool):
         def __init__(self, remote_name, remote_uuid):
             super(GitAnnexTool.LocalDirRemote, self).__init__(remote_name, remote_uuid)
 
-        def canonicalize_url(self, url, **kw):
-            pass
-
         def handles_url(self, url):
             """Return True if this remote handles this URL"""
-            return uritools.urisplit(url).scheme in ('file', None)
+            return (uritools.isuri(url) and uritools.urisplit(url).scheme == 'file' and uritools.urisplit(url).authority == '') \
+                or uritools.isabspath(url)
+
+        def canonicalize_url(self, url, **kw):
+            """Return a canonical form of a URL that this remote handles"""
+            util.misc.chk(self.handles_url(url))
+            if uritools.isuri(url):
+                return url
+            return uritools.uricompose(scheme='file', authority='', path=url)
 
         def gather_filestats(self, ga_tool, url2filestat):
             """Gather filestats for URLs that point to local files.
@@ -476,20 +512,24 @@ class GitAnnexTool(tools.Tool):
             the MD5E key.
             """
 
+            urls_with_new_keys = set()
             with ga_tool.batching() as ga_tool_calckey:
                 for url, filestat in url2filestat.items():
+                    if 'git_annex_key' in filestat: continue
+                    if not self.handles_url(url): continue
+                    canon_url = self.canonicalize_url(url)
+                    
+                    file_path = uritools.urisplit(canon_url).path
+                    util.misc.chk(os.path.isabs(file_path))
+                    
+                    is_link_into_annex = ga_tool.is_link_into_annex(file_path)
+                    if not (is_link_into_annex or os.path.isfile(file_path)): continue
 
-                    if url.startswith('file://'):
-                        file_path = url[len('file://'):]
-
-                    util.misc.chk(os.path.islink(file_path) or os.path.isfile(file_path),
-                                  'neither link nor file: %s'.format(file_path))
-
-                    if ga_tool.is_link_into_annex(file_path):
+                    urls_with_new_keys.add((url, canon_url))
+                    
+                    if is_link_into_annex:
                         filestat['git_annex_key'] = ga_tool.lookupkey(file_path)
                         continue
-
-                    util.misc.chk(os.path.isfile(file_path))
 
                     filestat['size'] = os.path.getsize(file_path)
                     if 'md5' in filestat:
@@ -501,8 +541,12 @@ class GitAnnexTool(tools.Tool):
                     _log.info('CALLING CALCKEY: %s', file_path)
                     ga_tool_calckey.calckey(file_path, output_acceptor=functools.partial(operator.setitem, filestat, 'git_annex_key'),
                                             now=False)
-
-            # end: with ga_tool.batching() as ga_tool_now
+                # end: for url, filestat in url2filestat.items()
+            # end: with ga_tool.batching() as ga_tool_calckey
+            for url, canon_url in urls_with_new_keys:
+                ga_tool.register_key_in_remote_at_url(key=url2filestat[url]['git_annex_key'],
+                                                      url=canon_url, remote_uuid=self.remote_uuid, now=False)
+            
         # end: def gather_filestats(ga_tool, url2filestat):
     # end: class LocalDirRemote(object)
 
@@ -524,12 +568,25 @@ class GitAnnexTool(tools.Tool):
 
             For files for which we already have the md5, but not the size, quickly get the size using gsutil ls.
             """
-            
-            uri2attrs = self.gcloud_tool.get_metadata_for_objects(url2filestat)
-            _log.info('URI2ATTRS=%s %s', uri2attrs, url2filestat)
-                
+
+            gs_urls_needing_metadata = set()
             for url, filestat in url2filestat.items():
-                filestat.update(size=uri2attrs[url]['size'], md5=uri2attrs[url]['md5'].lower())
+                if 'git_annex_key' in filestat: continue
+                if not self.handles_url(url): continue
+                gs_urls_needing_metadata.add(url)
+            
+            url2attrs = self.gcloud_tool.get_metadata_for_objects(gs_urls_needing_metadata)
+            _log.info('url2ATTRS=%s %s', url2attrs, url2filestat)
+
+            for url in gs_urls_needing_metadata:
+                filestat = url2filestat[url]
+                filestat.update(size=url2attrs[url]['size'], md5=url2attrs[url]['md5'].lower())
+                filestat['git_annex_key'] = ga_tool.construct_key(key_attrs=dict(backend='MD5E',
+                                                                                 size=filestat['size'],
+                                                                                 md5=filestat['md5'],
+                                                                                 fname=url))
+                ga_tool.register_key_in_remote_at_url(key=filestat['git_annex_key'],
+                                                      url=url, remote_uuid=self.remote_uuid, now=False)
 
         # end: def gather_filestats(ga_tool, url2filestat):
     # end: class GsUriRemote(object)
@@ -559,18 +616,6 @@ class GitAnnexTool(tools.Tool):
         if url2filestat is None:
             url2filestat = collections.OrderedDict()
 
-        remapped_urls = {}
-
-        def local_file_path_to_url(url):
-            if uritools.urisplit(url).scheme is not None:
-                return url
-            util.misc.chk(os.path.isfile(url), 'IMPORT FAIL: missing file %s'.format(url))
-            new_url = 'file://' + os.path.abspath(url)
-            remapped_urls[url] = new_url
-            return new_url
-
-        urls = map(local_file_path_to_url, urls)
-
         urls = sorted(set(urls))
 
         for url in urls:
@@ -579,41 +624,16 @@ class GitAnnexTool(tools.Tool):
 
         remotes = self.get_remotes()
 
-        def _construct_keys(url2filestat):
-            """For URLs for which we don't have a git-annex key but have its components, construct the key."""
-            for url, filestat in url2filestat.items():
-                if 'git_annex_key' not in filestat and 'size' in filestat and 'md5' in filestat:
-                    filestat['git_annex_key'] = self.construct_key(key_attrs=dict(backend='MD5E',
-                                                                                  size=filestat['size'],
-                                                                                  md5=filestat['md5'],
-                                                                                  fname=url))
-
-        _construct_keys(url2filestat)
-
         for remote in remotes:
-
-            url2filestat_remote = collections.OrderedDict()            
-            for url, filestat in url2filestat.items():
-                if 'git_annex_key' in filestat:
-                    continue
-                if not remote.handles_url(url):
-                    continue
-                url2filestat_remote[url] = filestat
-
-            remote.gather_filestats(ga_tool=self, url2filestat=url2filestat_remote)
-            _construct_keys(url2filestat_remote)
-
-            for url, filestat in url2filestat_remote.items():
-                util.misc.chk('git_annex_key' in filestat)
-                self.registerurl(key=filestat['git_annex_key'], url=url, now=False)
-                self.setpresentkey(key=filestat['git_annex_key'], remote_uuid=remote.remote_uuid, present=True, now=False)
-
+            remote.gather_filestats(ga_tool=self, url2filestat=url2filestat)
         # end: for remote in remotes
 
-        for k, v in remapped_urls.items():
-            url2filestat[k] = url2filestat[v]
-
         _log.info('GOT RESULTS: %s', url2filestat)
+
+        if not ignore_non_urls:
+            for url in urls:
+                util.misc.chk('git_annex_key' in url2filestat[url], 'no key for {}: {}'.format(url, url2filestat))
+            
         return url2filestat
     # end: def import_urls(self, urls, url2filestat=None)
 

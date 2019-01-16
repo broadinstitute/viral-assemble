@@ -209,7 +209,7 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
 
     gs_uris = ('gs://gcp-public-data-landsat/LC08/PRE/044/034/LC80440342016259LGN00/LC80440342016259LGN00_B1.TIF',)
 
-    ldir_uris = (file_A, file_B)
+    ldir_uris = tuple(map(os.path.abspath, (file_A, file_B)))
     uris_to_import = gs_uris + ldir_uris
     #uris_to_import = ldir_uris
 
