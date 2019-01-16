@@ -781,10 +781,8 @@ def json_gather_leaf_jpaths(json_data):
             return val
         assert path not in jpath2leaf
         jpath2leaf[path] = val
-        log.info('GATHER: {} {}'.format(val, path))
         return val
     transform_json_data(json_data, save_leaf_path)
-    log.info('RETURNING %s', jpath2leaf)
     return jpath2leaf
 
 def map_vals(d):
