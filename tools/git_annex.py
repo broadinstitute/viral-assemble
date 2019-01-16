@@ -412,7 +412,7 @@ class GitAnnexTool(tools.Tool):
 
     class Remote(object):
         
-        """Represents a particular git-annex special remote.
+        """Abstract base cass for one instance of a particular git-annex special remote.
         """
 
         def __init__(self, remote_name, remote_uuid):
@@ -426,6 +426,12 @@ class GitAnnexTool(tools.Tool):
         def handles_url(self, url):
             """Return True if this remote handles this URL"""
             raise NotImplemented()
+
+        def canonicalize_url(self, url, **kw):
+            """Return a standard/canonical form of a given url.  For example, might convert a local
+            pathname to file:///absolute/path.  The default implementation just returns the `url`.
+            """
+            return url
 
         def gather_filestats(self, ga_tool, url2filestat):
             """Gather filestats for URLs"""
@@ -452,6 +458,9 @@ class GitAnnexTool(tools.Tool):
 
         def __init__(self, remote_name, remote_uuid):
             super(GitAnnexTool.LocalDirRemote, self).__init__(remote_name, remote_uuid)
+
+        def canonicalize_url(self, url, **kw):
+            pass
 
         def handles_url(self, url):
             """Return True if this remote handles this URL"""
@@ -534,12 +543,13 @@ class GitAnnexTool(tools.Tool):
                                                   for remote_type in self.REMOTE_TYPES], [])
 
     @add_now_arg
-    def import_urls(self, urls, url2filestat=None):
+    def import_urls(self, urls, url2filestat=None, ignore_non_urls=False):
         """Imports `urls` into git-annex.
 
         Args:
           urls: iterable of urls, which are strings denoting either local or cloud files.
           url2filestat: map from url to filestat (filestat is a map from data attrs like size, md5, git_annex_key to values).
+          ignore_non_urls: if True, urls we don't recognize as urls will be silently ignored; if False, they'll trigger an error.
           now: if False, results may be delayed until batching context ends
 
         Returns:

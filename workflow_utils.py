@@ -243,27 +243,6 @@ def _json_loadf(fname):
 def _run_get_json(cmd, *args):
     return _json_loads(_run_get_output(cmd, *args))
 
-def _transform_json_data(val, node_handler, path=()):
-    """Transform a parsed json structure, by replacing nodes for which `node_handler` returns
-    an object different from `val`, with that object.  If `node_handler` has a named arg `path`,
-    the path from the root will be passed via that arg (as a tuple).
-    """
-    recurse = functools.partial(_transform_json_data, node_handler=node_handler)
-    node_handler_named_args = util.misc.getnamedargs(node_handler)
-    node_handler_args = {}
-    if 'path' in node_handler_named_args:
-        node_handler_args['path'] = path
-    handled_val = node_handler(val, **node_handler_args)
-    if handled_val is not val:
-        #_log.debug('resolved %s to %s', val, handled_val)
-        return handled_val
-    if isinstance(val, list):
-        return [recurse(val=v, path=path+(i,)) for i, v in enumerate(val)]
-    if isinstance(val, collections.Mapping):
-        return _ord_dict(*[(k, recurse(val=v, path=path+(k,)))
-                           for k, v in val.items()])
-    return val
-# end: def _transform_json_data(val, node_handler, path=())
 
 def _json_to_org(val, org_file, depth=1, heading='root'):
     """Transform a parsed json structure to org.
@@ -691,7 +670,7 @@ def _resolve_links_in_json_data(val, rel_to_dir, methods, relpath='files'):
             maybe_resolve_link = {'$git_link': os.path.relpath(maybe_resolve_link['$git_link'], rel_to_dir)}
         return maybe_resolve_link
         
-    return _transform_json_data(val, node_handler=handle_node)
+    return util.misc.transform_json_data(val, node_handler=handle_node)
 
 # ** deleted code
 
@@ -948,7 +927,7 @@ def _make_git_links_absolute(d, base_dir):
             return val
         assert not os.path.isabs(val['$git_link'])
         return {'$git_link': os.path.join(base_dir, val['$git_link'])}
-    return _transform_json_data(d, _make_git_link_absolute)
+    return util.misc.transform_json_data(d, _make_git_link_absolute)
 
 def _make_git_links_relative(d, base_dir):
     def _make_git_link_relative(val):
@@ -956,7 +935,7 @@ def _make_git_links_relative(d, base_dir):
             return val
         assert os.path.isabs(val['$git_link'])
         return {'$git_link': os.path.relpath(val['$git_link'], base_dir)}
-    return _transform_json_data(d, _make_git_link_relative)
+    return util.misc.transform_json_data(d, _make_git_link_relative)
 
 def _apply_input_renamings(inps, input_name_subst, orig_workflow_name):
     for orig, repl in (input_name_subst or ()):
@@ -1123,7 +1102,7 @@ def _stage_inputs_for_backend(inputs, backend):
         if not _maps(inp, '$git_link'):
             return inp
         return _stage_file_for_backend(git_file_path=inp['$git_link'], backend=backend)
-    return _transform_json_data(inputs, _stage_git_link)
+    return util.misc.transform_json_data(inputs, _stage_git_link)
 
 # ** _get_dx_val
 def _get_dx_val(val, dx_files_dir):
@@ -1950,8 +1929,12 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
     cromwell_server = CromwellServer(host=cromwell_host)
     processing_stats = collections.Counter()
 
-    for wf in cromwell_server.get_workflows(query=[('submission', _isoformat_ago(hours=hours_ago))]+ \
-                                            ([] if status_only else [('status', 'Succeeded'), ('status', 'Failed')])):
+    query = []
+    if hours_ago:
+        query.append(('submission', _isoformat_ago(hours=hours_ago)))
+    if not status_only:
+        query.extend([('status', 'Succeeded'), ('status', 'Failed')])
+    for wf in cromwell_server.get_workflows(query=query):
         processing_stats['workflowsFromCromwell'] += 1
         mdata = cromwell_server.get_metadata(wf['id'])
         assert mdata['id'] == wf['id']
