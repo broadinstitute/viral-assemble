@@ -2417,6 +2417,25 @@ def analyze_workflows_orig():
 
 #########################################################################################################################
 
+def try_workflow(metadatajson):
+    z = _json_loadf(metadatajson)
+    leaf_jpaths = util.misc.json_gather_leaf_jpaths(z)
+    str_leaves = list(filter(_is_str, util.misc.map_vals(leaf_jpaths)))
+    for L in str_leaves:
+        print('LEAF:', L)
+
+    git_annex_tool = tools.git_annex.GitAnnexTool()
+    imported = git_annex_tool.import_urls(str_leaves, ignore_non_urls=True)
+    for url, filestat in imported.items():
+        if filestat:
+            print(url, str(filestat))
+
+def parser_try_workflow(parser=argparse.ArgumentParser()):
+    parser.add_argument('metadatajson', help='workflow metadata')
+    util.cmd.attach_main(parser, try_workflow, split_args=True)
+    return parser
+
+__commands__.append(('try_workflow', parser_try_workflow))
 
 #########################################################################################################################
 
@@ -2425,6 +2444,7 @@ def analyze_workflows_orig():
 
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
+
 
 
 if __name__ == '__main__':

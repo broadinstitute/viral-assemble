@@ -52,7 +52,7 @@ _tot_exec_time_lock = threading.Lock()
 def print_exec_time():
     print('TOTAL EXEC TIME: {}'.format(_tot_exec_time), file=sys.stderr)
 
-atexit.register(print_exec_time)
+#atexit.register(print_exec_time)
 
 @contextlib.contextmanager
 def exec_timer():
@@ -207,9 +207,13 @@ class GitAnnexTool(tools.Tool):
                     subprocess_call_args.update(stdout=subprocess.PIPE)
 
                 _log.info('CALLING SUBPROCESS RUN: %s %s', tool_cmd, subprocess_call_args)
-                with exec_timer():
+                try:
                     result = subprocess.run(tool_cmd, check=True, cwd=cmd_cwd, universal_newlines=True,
                                             env=self._get_run_env(), **subprocess_call_args)
+                    _log.info('RETURNED FROM SUBPROCESS RUN: %s %s %s', tool_cmd, subprocess_call_args, result)
+                except Exception as e:
+                    _log.info('FAILED SUBPROCESS RUN: %s %s %s', e, tool_cmd, subprocess_call_args)
+                    raise
 
                 if batch_calls[0].output_acceptor:
                     output = util.misc.maybe_decode(result.stdout).rstrip('\n')
@@ -513,9 +517,12 @@ class GitAnnexTool(tools.Tool):
             the MD5E key.
             """
 
+            _log.info('LOCALDIRRMOTE gather')
+
             urls_with_new_keys = set()
             with ga_tool.batching() as ga_tool_calckey:
                 for url, filestat in url2filestat.items():
+                    _log.info('LOOKING AT URL {} {}'.format(url, filestat))
                     if 'git_annex_key' in filestat: continue
                     if not self.handles_url(url): continue
                     canon_url = self.canonicalize_url(url)
@@ -578,18 +585,19 @@ class GitAnnexTool(tools.Tool):
                 if not self.handles_url(url): continue
                 gs_urls_needing_metadata.add(url)
             
-            url2attrs = self.gcloud_tool.get_metadata_for_objects(gs_urls_needing_metadata)
+            url2attrs = self.gcloud_tool.get_metadata_for_objects(gs_urls_needing_metadata, ignore_errors=True)
             _log.info('url2ATTRS=%s %s', url2attrs, url2filestat)
 
             for url in gs_urls_needing_metadata:
                 filestat = url2filestat[url]
-                filestat.update(size=url2attrs[url]['size'], md5=url2attrs[url]['md5'].lower())
-                filestat['git_annex_key'] = ga_tool.construct_key(key_attrs=dict(backend='MD5E',
-                                                                                 size=filestat['size'],
-                                                                                 md5=filestat['md5'],
-                                                                                 fname=url))
-                ga_tool.register_key_in_remote_at_url(key=filestat['git_annex_key'],
-                                                      url=url, remote_uuid=self.remote_uuid, now=False)
+                if url in url2attrs:
+                    filestat.update(size=url2attrs[url]['size'], md5=url2attrs[url]['md5'].lower())
+                    filestat['git_annex_key'] = ga_tool.construct_key(key_attrs=dict(backend='MD5E',
+                                                                                     size=filestat['size'],
+                                                                                     md5=filestat['md5'],
+                                                                                     fname=url))
+                    ga_tool.register_key_in_remote_at_url(key=filestat['git_annex_key'],
+                                                          url=url, remote_uuid=self.remote_uuid, now=False)
 
         # end: def gather_filestats(ga_tool, url2filestat):
     # end: class GsUriRemote(object)

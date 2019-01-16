@@ -75,15 +75,17 @@ class GCloudTool(tools.Tool):
                         self._is_anonymous = True
                     else:
                         raise
+            util.misc.chk(self._storage_client, 'failed to initialize storage client')
+            _log.info('Initialized storage client, anonymous=%s', self._is_anonymous)
+
         util.misc.chk(self._storage_client)
-        _log.info('Initialized storage client, anonymous=%s', self._is_anonymous)
         return self._storage_client
 
     def get_bucket(self, bucket_name):
         """Return the bucket object for given bucket name"""
         return self.get_storage_client().bucket(bucket_name)
 
-    def get_blob(self, gs_uri):
+    def maybe_get_blob(self, gs_uri):
         """Return the blob object for given gs:// uri"""
         _log.info('getting blob from %s', gs_uri)
         gs_uri_parts = uritools.urisplit(gs_uri)
@@ -91,14 +93,17 @@ class GCloudTool(tools.Tool):
                       gs_uri_parts.query is None and gs_uri_parts.fragment is None)
         bucket = self.get_bucket(gs_uri_parts.authority)
         blob = bucket.get_blob(gs_uri_parts.path[1:])
-        return util.misc.chk(blob)
+        return blob
+
+    def get_blob(self, gs_uri):
+        return util.misc.chk(self.maybe_get_blob(gs_uri), 'could not get blob from {} {}'.format(gs_uri, gs_uri_parts.path[1:]))
 
     def download_object(self, gs_uri, destination_file_name):
         """Downloads a blob from the bucket."""
         blob = self.get_blob(gs_uri)
         blob.download_to_filename(destination_file_name)
 
-    def get_metadata_for_objects(self, gs_uris):
+    def get_metadata_for_objects(self, gs_uris, ignore_errors=False):
         """Get metadata for objects stored in Google Cloud Storage.
 
         TODO:
@@ -114,10 +119,12 @@ class GCloudTool(tools.Tool):
         
         uri2attrs = {}
         for gs_uri in gs_uris:
-            blob = self.get_blob(gs_uri)
-            md5_hex = binascii.hexlify(base64.b64decode(blob.md5_hash))
-            uri2attrs[gs_uri] = collections.OrderedDict([('md5', _maybe_decode(md5_hex).upper()),
-                                                         ('size', blob.size)])
+            blob = self.maybe_get_blob(gs_uri)
+            util.misc.chk(ignore_errors or blob, 'could not get blob for {}'.format(gs_uri))
+            if blob:
+                md5_hex = binascii.hexlify(base64.b64decode(blob.md5_hash))
+                uri2attrs[gs_uri] = collections.OrderedDict([('md5', _maybe_decode(md5_hex).upper()),
+                                                             ('size', blob.size)])
         return uri2attrs
 
 # end: class GCloudTool
