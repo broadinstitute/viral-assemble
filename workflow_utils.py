@@ -2466,7 +2466,7 @@ def parser_try_workflow(parser=argparse.ArgumentParser()):
     util.cmd.attach_main(parser, try_workflow, split_args=True)
     return parser
 
-__commands__.append(('try_workflow', parser_try_workflow))
+#__commands__.append(('try_workflow', parser_try_workflow))
 
 #########################################################################################################################
 
