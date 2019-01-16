@@ -74,8 +74,8 @@ jobs:
         - travis/version-wdl-runtimes.sh
         - travis/validate-wdl.sh
         # build DNAnexus pipelines and launch a few test executions
-        - travis/build-dx.sh
-        - travis/tests-dx.sh
+        #- travis/build-dx.sh
+        #- travis/tests-dx.sh
         #- if [ "$TRAVIS_BRANCH" = "master" ]; then travis/tests-dx.sh; fi
         # test Cromwell local execution engine
         - travis/tests-cromwell.sh
@@ -165,7 +165,7 @@ jobs:
         - travis/install-tools.sh
         - source travis/activate-conda.sh
       script:
-        - travis/tests-unit.sh
+#        - travis/tests-unit.sh
         - travis/tests-long.sh
       before_cache:
         - conda clean --all --yes
@@ -184,7 +184,7 @@ jobs:
         - source travis/activate-conda.sh
       script:
         - travis/tests-long.sh
-        - travis/tests-unit.sh
+#        - travis/tests-unit.sh
       after_success:
         - coveralls
       before_cache:
