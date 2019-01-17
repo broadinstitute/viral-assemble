@@ -14,12 +14,13 @@ import shlex
 import tempfile
 import pipes
 import time
+import platform
 
 import tools
 import util.file
 import util.misc
 
-TOOL_NAME = 'dxpy-executables'
+TOOL_NAME = 'dxpy' + ('' if platform.python_version().startswith('2.7') else '-executables')
 TOOL_VERSION = '0.271.0'
 
 _log = logging.getLogger(__name__)

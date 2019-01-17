@@ -166,7 +166,7 @@ jobs:
         - source travis/activate-conda.sh
       script:
         - travis/tests-unit.sh
-        - travis/tests-long.sh
+        #- travis/tests-long.sh
       before_cache:
         - conda clean --all --yes
 
@@ -183,7 +183,7 @@ jobs:
         - travis/install-tools.sh
         - source travis/activate-conda.sh
       script:
-        - travis/tests-long.sh
+        #- travis/tests-long.sh
         - travis/tests-unit.sh
       after_success:
         - coveralls
