@@ -923,7 +923,7 @@ def _get_workflow_inputs_spec(workflow_name, docker_img):
     return _ord_dict(*[(input_name, _parse_input_spec(input_spec_str))
                        for input_name, input_spec_str in input_spec_parsed.items()])
 
-# ** _construct_analysis_inputs
+# ** _construct_analysis_inputs_parser
 
 # *** parsing of analysis inputs specified in different ways
 
@@ -1007,7 +1007,9 @@ def _get_analysis_dirs_under(analysis_dirs_roots, recurse=True):
 
 def _analysis_inputs_from_analysis_dirs_roots(args, **kw):
     analysis_dirs_inputs = []
-    for analysis_dir in list(_get_analysis_dirs_under(args.analysis_dirs_roots, recurse=args.recurse)):
+    analysis_dirs = list(_get_analysis_dirs_under(args.analysis_dirs_roots, recurse=args.recurse))
+    _log.info('BBBBBBBBBBBB analysis_dirs({})={}'.format(len(analysis_dirs), analysis_dirs))
+    for analysis_dir in analysis_dirs:
         if args.failed_only:
             mdata_fname = os.path.join(analysis_dir, 'metadata.json')
             mdata = _json_loadf(mdata_fname)
@@ -1017,6 +1019,7 @@ def _analysis_inputs_from_analysis_dirs_roots(args, **kw):
         args.analysis_dir = analysis_dir
 
         analysis_dirs_inputs.append(_analysis_inputs_from_analysis_dir_do(args, **kw))
+    _log.info('AAAAAAAA analysis_dirs_inputs: {} {} {}'.format(args, kw, analysis_dirs_inputs))
     return analysis_dirs_inputs
 
 def _construct_analysis_inputs_parser():
@@ -1397,6 +1400,7 @@ def _submit_analysis_wdl_do(workflow_name, inputs,
 
         _extract_wdl_from_docker_img(docker_img)
         workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
+        _write_json('inputs-orig.json', **inputs)
         run_inputs = _make_git_links_relative(inputs, analysis_dir)
         run_inputs = _dict_subset(run_inputs, workflow_inputs_spec.keys())
         _write_json('inputs-git-links.json', **run_inputs)
@@ -1548,6 +1552,7 @@ def submit_analysis_wdl(workflow_name, inputs,
                                 analysis_labels, cromwell_server_url,
                                 backend)
         n_submitted += 1
+    _log.info('{} analyses submitted.'.format(n_submitted))
     if n_submitted == 0:
         raise RuntimeError('No analyses submitted')
 
@@ -1942,6 +1947,8 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
     cromwell_server = CromwellServer(host=cromwell_host)
     processing_stats = collections.Counter()
 
+    url2filestat = _ord_dict()
+
     git_annex_tool = tools.git_annex.GitAnnexTool()
     with git_annex_tool.batching() as git_annex_tool:
 
@@ -1983,13 +1990,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
 
                 leaf_jpaths = util.misc.json_gather_leaf_jpaths(mdata)
                 str_leaves = list(filter(_is_str, util.misc.map_vals(leaf_jpaths)))
-                url2filestat = git_annex_tool.import_urls(str_leaves, ignore_non_urls=True)
-
-                url2filestat = {k:v for k, v in url2filestat.items() if v}
-                print('RESULT HAS {} items'.format(len(url2filestat)))
-                for url, filestat in url2filestat.items():
-                    print(url, filestat)
-
+                git_annex_tool.import_urls(str_leaves, ignore_non_urls=True, url2filestat=url2filestat)
                 mdata_rel = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir,
                                                         methods=[functools.partial(_resolve_link_using_gathered_filestat,
                                                                                    url2filestat=url2filestat,
@@ -2467,6 +2468,20 @@ def parser_try_workflow(parser=argparse.ArgumentParser()):
     return parser
 
 #__commands__.append(('try_workflow', parser_try_workflow))
+
+#########################################################################################################################
+
+def git_annex_get(fname):
+    """Ensure given file is present in local annex"""
+    tools.git_annex.GitAnnexTool().get(fname)
+    util.misc.chk(os.path.isfile(fname))
+
+def parser_git_annex_get(parser=argparse.ArgumentParser()):
+    parser.add_argument('fname', help='file to get')
+    util.cmd.attach_main(parser, git_annex_get, split_args=True)
+    return parser
+
+__commands__.append(('git_annex_get', parser_git_annex_get))
 
 #########################################################################################################################
 
