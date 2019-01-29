@@ -275,6 +275,8 @@ def test_subdict(iter_d, iter_subset):
 
 def test_chk():
     chk = util.misc.chk
+    chk_eq = util.misc.chk_eq
+
     chk(True, 'no error')
     assert chk(1) == 1
     assert chk('1', 'nonempty string') == '1'
@@ -286,6 +288,12 @@ def test_chk():
         chk(2 == 3, 'Something wrong')
     with pytest.raises(TypeError):
         chk(isinstance(None, int), 'Expected an int', TypeError)
+
+    assert chk_eq(1, 1)
+    with pytest.raises(RuntimeError):
+        chk_eq(1, 2)
+    with pytest.raises(ValueError, match='not equal: 1 2'):
+        chk_eq(1, 2, 'not equal: {} {}', ValueError)
 
 def test_first_non_None(*args):
     first_non_None = util.misc.first_non_None

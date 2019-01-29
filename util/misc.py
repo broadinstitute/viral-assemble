@@ -730,6 +730,10 @@ def chk(condition, message='Check failed', exc=RuntimeError):
         raise exc(message)
     return condition
 
+def chk_eq(a, b, message='Check failed: {} != {}', exc=RuntimeError):
+    """Check that a == b, raise an exception if not, else return True."""
+    return chk(a == b, message.format(a, b), exc=exc)
+
 def from_module(module, names):
     """Shorthand for assigning several functions from a module to local vars,
     to avoid code littered with full module paths."""
