@@ -1,5 +1,5 @@
 '''
-    Tool wrapper for git-annex
+    Tool wrapper for git-annex (and git)
 '''
 
 # * imports
@@ -46,24 +46,6 @@ TOOL_VERSION = '7.20181211'
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
 
-_tot_exec_time = 0
-_tot_exec_time_lock = threading.Lock()
-
-def print_exec_time():
-    print('TOTAL EXEC TIME: {}'.format(_tot_exec_time), file=sys.stderr)
-
-#atexit.register(print_exec_time)
-
-@contextlib.contextmanager
-def exec_timer():
-    beg = time.time()
-    yield
-    duration = time.time() - beg
-    global _tot_exec_time
-    global _tot_exec_time_lock
-    with _tot_exec_time_lock:
-        _tot_exec_time += duration
-
 class _ValHolder(object):
 
     """A mutable holder for one value.  Used to provide a place to record output of commands."""
@@ -75,8 +57,7 @@ class _ValHolder(object):
         self.val = val
 
 # NamedTuple: _BatchedCall - arguments to one git-annex call in a set of batched cals, and an optional place to record call output
-_BatchedCall = collections.namedtuple('_BatchedCall', ['batch_args', 'cwd', 'output_acceptor'])
-
+_BatchedCall = collections.namedtuple('_BatchedCall', ['batch_args', 'output_acceptor'])
 
 # * class GitAnnexTool
 class GitAnnexTool(tools.Tool):
@@ -108,7 +89,7 @@ class GitAnnexTool(tools.Tool):
             install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, channel='conda-forge')]
         tools.Tool.__init__(self, install_methods=install_methods)
         self._batched_cmds = None
-        _log.info('Created GitAnnexTool %s', id(self))
+        _log.debug('Created GitAnnexTool %s', id(self))
 
     def version(self):
         return TOOL_VERSION
@@ -166,7 +147,7 @@ class GitAnnexTool(tools.Tool):
             tool: git-annex or git, defaults to git-annex
             priority: when executing batched commands, commands with higher priority will be executed earlier
         """
-        _log.info('EXECUTE: args={} now={} batch_args={} self.is_batching={}'.format(args, now, batch_args, self.is_batching()))
+        _log.debug('EXECUTE: args={} now={} batch_args={} self.is_batching={}'.format(args, now, batch_args, self.is_batching()))
         with self.maybe_now(now=now or not batch_args or not self.is_batching()) as self:
             self._add_command_to_batch(args, batch_args, output_acceptor, tool, priority)
 
@@ -184,7 +165,7 @@ class GitAnnexTool(tools.Tool):
             util.misc.chk(tool == 'git-annex')
             args = tuple(args) + ('--batch',)
         tool_cmd = (os.path.join(self._get_bin_dir(), tool),) + tuple(map(str, args))
-        batched_call = _BatchedCall(batch_args=batch_args, cwd=os.getcwd(), output_acceptor=output_acceptor)
+        batched_call = _BatchedCall(batch_args=batch_args, output_acceptor=output_acceptor)
         self._batched_cmds.setdefault((priority, tool_cmd, os.getcwd()), []).append(batched_call)
 
     def _execute_batched_commands(self):
@@ -203,7 +184,7 @@ class GitAnnexTool(tools.Tool):
                 if batch_calls[0].batch_args:
                     # This is a git-annex command with the --batch flag: prepare an input file of the
                     # command arguments, one line per batched call.
-                    _log.info('calling batch calls: %s %s', tool_cmd, batch_calls)
+                    _log.debug('calling batch calls: %s %s', tool_cmd, batch_calls)
 
                     batch_inp_str = '\n'.join([' '.join(map(str, batch_call.batch_args)) for batch_call in batch_calls]) + '\n'
                     subprocess_call_args.update(input=batch_inp_str)
@@ -211,13 +192,13 @@ class GitAnnexTool(tools.Tool):
                 if batch_calls[0].output_acceptor:
                     subprocess_call_args.update(stdout=subprocess.PIPE)
 
-                _log.info('CALLING SUBPROCESS RUN: %s %s', tool_cmd, subprocess_call_args)
+                _log.debug('CALLING SUBPROCESS RUN: %s %s', tool_cmd, subprocess_call_args)
                 try:
                     result = subprocess.run(tool_cmd, check=True, cwd=cmd_cwd, universal_newlines=True,
                                             env=self._get_run_env(), **subprocess_call_args)
-                    _log.info('RETURNED FROM SUBPROCESS RUN: %s %s %s', tool_cmd, subprocess_call_args, result)
+                    _log.debug('RETURNED FROM SUBPROCESS RUN: %s %s %s', tool_cmd, subprocess_call_args, result)
                 except Exception as e:
-                    _log.info('FAILED SUBPROCESS RUN: %s %s %s', e, tool_cmd, subprocess_call_args)
+                    _log.debug('FAILED SUBPROCESS RUN: %s %s %s', e, tool_cmd, subprocess_call_args)
                     raise
 
                 if batch_calls[0].output_acceptor:
@@ -240,11 +221,11 @@ class GitAnnexTool(tools.Tool):
         The value returned by this context manager is a GitAnnexTool object that batches commands issued to it,
         and will run them by the time of the context exit.
         """
-        _log.info('ENTERING BATCHING CONTEXT; was batching? {}'.format(self.is_batching()))
+        _log.debug('ENTERING BATCHING CONTEXT; was batching? {}'.format(self.is_batching()))
         self = copy.copy(self)
         self._batched_cmds = collections.OrderedDict()
         yield self
-        _log.info('EXITING BATCHING CONTEXT; cmds are: {}'.format(self._batched_cmds))
+        _log.debug('EXITING BATCHING CONTEXT; cmds are: {}'.format(self._batched_cmds))
         self._execute_batched_commands()
 
     def execute_git(self, args, **kw):
@@ -400,7 +381,7 @@ class GitAnnexTool(tools.Tool):
         key_attrs = copy.copy(key_attrs)
         key_attrs['md5'] = key_attrs['md5'].lower()
         util.misc.chk(key_attrs['backend'] == 'MD5E')
-        _log.info('constuct_key from %s', key_attrs)
+        _log.debug('constuct_key from %s', key_attrs)
         return '{backend}-s{size}--{md5}{exts}'.format(exts=GitAnnexTool._get_file_exts_for_key(key_attrs['fname'],
                                                                                                 max_extension_length),
                                                        **key_attrs)
@@ -538,7 +519,7 @@ class GitAnnexTool(tools.Tool):
             the MD5E key.
             """
 
-            _log.info('LOCALDIRRMOTE gather')
+            _log.debug('LOCALDIRRMOTE gather')
 
             repo_root = ga_tool.get_repo_root()
             urls_in_this_repo = set()
@@ -546,7 +527,7 @@ class GitAnnexTool(tools.Tool):
             urls_with_new_keys = set()
             with ga_tool.batching() as ga_tool_calckey:
                 for url, filestat in url2filestat.items():
-                    _log.info('LOOKING AT URL {} {}'.format(url, filestat))
+                    _log.debug('LOOKING AT URL {} {}'.format(url, filestat))
                     if 'git_annex_key' in filestat: continue
                     if not self.handles_url(url): continue
                     canon_url = self.canonicalize_url(url)
@@ -574,7 +555,7 @@ class GitAnnexTool(tools.Tool):
                                                                                          **filestat))
                         continue
 
-                    _log.info('CALLING CALCKEY: %s', file_path)
+                    _log.debug('CALLING CALCKEY: %s', file_path)
                     ga_tool_calckey.calckey(file_path, output_acceptor=functools.partial(operator.setitem, filestat, 'git_annex_key'),
                                             now=False)
                 # end: for url, filestat in url2filestat.items()
@@ -611,9 +592,9 @@ class GitAnnexTool(tools.Tool):
                 if not self.handles_url(url): continue
                 gs_urls_needing_metadata.add(url)
 
-            _log.info('GS URLS NEEDING METADATA: %s', '\n'.join(map(str, gs_urls_needing_metadata)))
+            _log.debug('GS URLS NEEDING METADATA: %s', '\n'.join(map(str, gs_urls_needing_metadata)))
             url2attrs = self.gcloud_tool.get_metadata_for_objects(gs_urls_needing_metadata, ignore_errors=True)
-            _log.info('url2ATTRS=%s %s', url2attrs, url2filestat)
+            _log.debug('url2ATTRS=%s %s', url2attrs, url2filestat)
 
             for url in gs_urls_needing_metadata:
                 filestat = url2filestat[url]
@@ -675,7 +656,7 @@ class GitAnnexTool(tools.Tool):
             remote.gather_filestats(ga_tool=self, url2filestat=url2filestat)
         # end: for remote in remotes
 
-        _log.info('GOT RESULTS: %s', {k: v for k, v in url2filestat.items() if v})
+        _log.debug('GOT RESULTS: %s', {k: v for k, v in url2filestat.items() if v})
 
         for url in urls:
             util.misc.chk(ignore_non_urls  or  ('git_annex_key' in url2filestat[url]), 'no key for {}: {}'.format(url, url2filestat))
