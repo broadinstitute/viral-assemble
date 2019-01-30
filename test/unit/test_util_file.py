@@ -41,9 +41,7 @@ def testTempFiles():
                 tmp_fns.append(fn)
 
         assert os.path.isfile(my_tmp_fn)
-
-        assert util.file.keep_tmp() or not os.path.exists(my_tmp_fns[0])
-        assert util.file.keep_tmp() or not os.path.exists(my_tmp_fns[1])
+        assert util.file.keep_tmp() or (not os.path.exists(my_tmp_fns[0]) and not os.path.exists(my_tmp_fns[1]))
 
         largeString = 'A' * (2*1024*1024)
         util.file.dump_file(fname=my_tmp_fn, value=largeString)
