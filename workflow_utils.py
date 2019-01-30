@@ -87,6 +87,10 @@ import shlex
 import sys
 import urllib
 try:
+    from urllib import urlencode
+except ImportError:
+    from urllib.parse import urlencode
+try:
     import SimpleHTTPServer
     import SocketServer
 except ImportError:
@@ -1753,7 +1757,7 @@ class CromwellServer(object):
         self.host = host
 
     def _api(self, endpoint, query=()):
-        query_str = ('?' + urllib.urlencode(query)) if query else ''
+        query_str = ('?' + urlencode(query)) if query else ''
         return _run_get_json('curl', '-s', '-X', 'GET', 'http://{}/api/workflows/v1/{}{}'.format(self.host, endpoint, query_str),
                              '-H', 'accept: application/json')
 
