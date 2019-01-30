@@ -1,3 +1,2 @@
 futures==3.2.0
-dxpy=0.261.1
 subprocess32=3.5.3

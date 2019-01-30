@@ -82,6 +82,11 @@ def _compute_md5(fname):
 def test_git_annex_init_add_get_drop(ga_tool, git_annex_repo, dir_remote, file_A):
     """Test basic git-annex operations"""
 
+    assert ga_tool.get_repo_root() == git_annex_repo
+    mkdir_p('a_subdir')
+    with pushd_popd('a_subdir'):
+        assert ga_tool.get_repo_root() == git_annex_repo
+
     # TODO: add tests for when file is not in top dir of repo
     # (have fixtures for various cases)
     ga_tool.add(file_A)
@@ -237,5 +242,5 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
         fn = os.path.join(str(uuid.uuid4()), os.path.basename(f))
         ga_tool.fromkey(url2filestat[f]['git_annex_key'], fn)
         ga_tool.get(fn)
-        assert os.path.isfile(fn)
+        assert os.path.isfile(fn), 'git-annex get failed for {}'.format(fn)
         assert util.file.md5_for_file(fn).lower() in url2filestat[f]['git_annex_key']

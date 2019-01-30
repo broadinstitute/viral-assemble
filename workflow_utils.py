@@ -662,7 +662,7 @@ def _resolve_link_using_gathered_filestat(val, git_file_dir, url2filestat, git_a
     if os.path.lexists(fname):
         os.unlink(fname)
     git_annex_tool.fromkey(git_annex_key, fname, now=False)
-    return {'$git_link': fname, 'git_annex_key': git_annex_key}
+    return {'$git_link': fname, 'git_annex_key': git_annex_key, 'orig_path': val}
 
 def _resolve_link(val, git_file_dir, methods):
     for method in methods:
@@ -992,13 +992,12 @@ def _yield_analysis_dirs_under(analysis_dirs_roots, recurse=True):
             dirpath = os.path.realpath(dirpath)
             if dirpath in dirs_seen:
                 subdirs[:] = []
-            elif os.path.isfile(os.path.join(dirpath, 'metadata.json')):
+            elif is_analysis_dir(dirpath):
                 yield dirpath
                 subdirs[:] = []
             elif not recurse:
                 break
             dirs_seen.add(dirpath)
-
 
 def _get_analysis_dirs_under(analysis_dirs_roots, recurse=True):
     """Returns a tuple of the analysis dirs under `analysis_dirs_roots`, as they exist at the time of the call.
@@ -1977,15 +1976,14 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
 
             util.file.mkdir_p(analysis_dir)
             mdata_fname = os.path.join(analysis_dir, 'metadata_orig.json') # mdata['workflowLog'][:-4]+'.metadata.json'
-            mdata_rel_fname = os.path.join(analysis_dir, 'metadata.json') # mdata['workflowLog'][:-4]+'.metadata.json'
+            mdata_rel_fname = os.path.join(analysis_dir, 'metadata_with_gitlinks.json') # mdata['workflowLog'][:-4]+'.metadata.json'
             if os.path.lexists(mdata_rel_fname):
                 processing_stats['metadata_already_saved'] += 1
             elif 'workflowRoot' not in mdata:
                 processing_stats['workflow_root_not_in_mdata'] += 1
             else:
-                if os.path.lexists(mdata_fname):
-                    os.unlink(mdata_fname)
-                _write_json(mdata_fname, **mdata)
+                if not os.path.lexists(mdata_fname):
+                    _write_json(mdata_fname, **mdata)
                 #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
 
                 leaf_jpaths = util.misc.json_gather_leaf_jpaths(mdata)

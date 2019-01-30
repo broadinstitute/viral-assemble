@@ -20,8 +20,8 @@ import tools
 import util.file
 import util.misc
 
-TOOL_NAME = 'dxpy' + ('' if platform.python_version().startswith('2.7') else '-executables')
-TOOL_VERSION = '0.271.0'
+TOOL_NAME = 'dxpy'
+TOOL_VERSION = '0.273.0'
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)

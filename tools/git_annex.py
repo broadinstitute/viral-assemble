@@ -136,13 +136,16 @@ class GitAnnexTool(tools.Tool):
 
     @contextlib.contextmanager
     def maybe_now(self, now=True):
+        """Start a new batching context if `now` is False, else do nothing."""
         if now:
             with self.batching() as self:
                 yield self
         else:
             yield self
 
-    def add_now_arg(method):
+    def _add_now_arg(method):
+        """To `method`, add a keyword-only argument `now`, such that when it is True (defaut), the method runs immediately,
+        while if it is False, the method runs when the current batching context ends."""
         @util.misc.wraps(method)
         def impl(self, *args, **kw):
             with self.maybe_now(kw.get('now', True)) as self:
@@ -150,7 +153,7 @@ class GitAnnexTool(tools.Tool):
                 return method(self, *args, **kw)
         return impl
 
-    def execute(self, args, batch_args=None, output_acceptor=None, now=True, tool='git-annex'):
+    def execute(self, args, batch_args=None, output_acceptor=None, now=True, tool='git-annex', priority=0):
         """Run the given git or git-annex command.  If batching is in effect (see self.batching()), the command is stored and will be
         executed when the batching context exits.
         
@@ -161,26 +164,28 @@ class GitAnnexTool(tools.Tool):
               Note that if batching is in effect, this will only happen when the batching context closes.
             now: execute instantly even if batching is in effect
             tool: git-annex or git, defaults to git-annex
+            priority: when executing batched commands, commands with higher priority will be executed earlier
         """
         _log.info('EXECUTE: args={} now={} batch_args={} self.is_batching={}'.format(args, now, batch_args, self.is_batching()))
         with self.maybe_now(now=now or not batch_args or not self.is_batching()) as self:
-            self._add_command_to_batch(args, batch_args, output_acceptor, tool)
+            self._add_command_to_batch(args, batch_args, output_acceptor, tool, priority)
 
-    def execute_batch(self, args, batch_args, output_acceptor=None):
-        return self.execute(args=args, batch_args=batch_args, output_acceptor=output_acceptor, now=False)
+    def execute_batch(self, args, batch_args, output_acceptor=None, priority=0):
+        """Record a git-annex command to be run at the end of the current batching context."""
+        return self.execute(args=args, batch_args=batch_args, output_acceptor=output_acceptor, now=False, priority=priority)
 
     def is_batching(self):
         """Return True if batching is in effect"""
         return self._batched_cmds is not None
 
-    def _add_command_to_batch(self, args, batch_args, output_acceptor, tool):
+    def _add_command_to_batch(self, args, batch_args, output_acceptor, tool, priority):
         """Add command to current batch."""
         if batch_args:
             util.misc.chk(tool == 'git-annex')
             args = tuple(args) + ('--batch',)
         tool_cmd = (os.path.join(self._get_bin_dir(), tool),) + tuple(map(str, args))
         batched_call = _BatchedCall(batch_args=batch_args, cwd=os.getcwd(), output_acceptor=output_acceptor)
-        self._batched_cmds.setdefault((tool_cmd, os.getcwd()), []).append(batched_call)
+        self._batched_cmds.setdefault((priority, tool_cmd, os.getcwd()), []).append(batched_call)
 
     def _execute_batched_commands(self):
         """Run any saved batched commands.
@@ -191,8 +196,8 @@ class GitAnnexTool(tools.Tool):
         # TODO: figure out correct behavior if some cmds fail
 
         _log.debug('RUNNING BATCH CMDS: %s', self._batched_cmds)
-        while self._batched_cmds:
-            (tool_cmd, cmd_cwd), batch_calls = self._batched_cmds.popitem(last=False)
+        for item in sorted(self._batched_cmds, key=operator.itemgetter(0), reverse=True):
+            (priority, tool_cmd, cmd_cwd), batch_calls = item, self._batched_cmds.pop(item)
             with contextlib.ExitStack() as stack:
                 subprocess_call_args = {}
                 if batch_calls[0].batch_args:
@@ -222,6 +227,11 @@ class GitAnnexTool(tools.Tool):
                     for batch_call, call_output in zip(batch_calls, call_outputs):
                         batch_call.output_acceptor(call_output)
                 
+            # end: with contextlib.ExitStack() as stack:
+        # end: for item in sorted(self._batched_cmds, key=operator.itemgetter(0), reverse=True):
+        util.misc.chk(not self._batched_cmds)
+    # end: def _execute_batched_commands(self):
+
     @contextlib.contextmanager
     def batching(self):
         """Create a batching context.  Commands issued within the batching context _may_ be delayed and issued in batches
@@ -241,13 +251,24 @@ class GitAnnexTool(tools.Tool):
         """Run a git command"""
         self.execute(args, tool='git', **kw)
 
+    def execute_and_get_output(self, args, **kw):
+        """Run a git or git-annex command and return its output"""
+        output_acceptor = _ValHolder()
+        self.execute(args, output_acceptor=output_acceptor, **kw)
+        return util.misc.maybe_decode(output_acceptor.val).rstrip('\n')
+
+    def execute_git_and_get_output(self, args, **kw):
+        """Run a git or git-annex command and return its output"""
+        return self.execute_and_get_output(args, tool='git', **kw)
+
     def get_git_config(self):
         """Return git configuration, as a dict from config param to value.  Note that value is always a string."""
-        output_acceptor = _ValHolder()
-        self.execute_git(['config', '-l'], output_acceptor=output_acceptor)
-        output = util.misc.maybe_decode(output_acceptor.val).rstrip('\n')
-        output_lines = output.split('\n')
+        output_lines = self.execute_git_and_get_output(['config', '-l']).split('\n')
         return collections.OrderedDict(line.rsplit('=', 1) for line in output_lines)
+
+    def get_repo_root(self):
+        """Get the root of the repository corresponding to the current dir"""
+        return self.execute_git_and_get_output(['rev-parse', '--show-toplevel'])
 
 # ** specific commands
 
@@ -264,7 +285,7 @@ class GitAnnexTool(tools.Tool):
         """Init an external special remote ldir"""
         self.execute(['initremote', remote_name, 'type=external', 'externaltype={}'.format(externaltype), 'encryption=none'])
 
-    @add_now_arg
+    @_add_now_arg
     def add(self, fname):
         """Add a file to git-annex"""
         _log.debug('CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
@@ -285,7 +306,7 @@ class GitAnnexTool(tools.Tool):
         """Move a file from local repo to a remote"""
         self.execute(['move', fname, '--to', to_remote_name])
 
-    @add_now_arg
+    @_add_now_arg
     def fromkey(self, key, fname):
         """Manually set up a symlink to a given key as a given file"""
         self.execute_batch(['fromkey', '--force'], batch_args=(key, fname))
@@ -389,7 +410,7 @@ class GitAnnexTool(tools.Tool):
         raise NotImplemented()
 
 
-    @add_now_arg
+    @_add_now_arg
     def get(self, f):
         """Ensure the file exists in the local annex, fetching it from a remote if necessary.
         Unlike git-annex-get, follows symlinks and  will get the file regardless of what the current dir is."""
@@ -415,31 +436,31 @@ class GitAnnexTool(tools.Tool):
         assert os.path.islink(f)
         assert not os.path.isfile(f)
 
-    @add_now_arg
+    @_add_now_arg
     def calckey(self, path, output_acceptor=None):
         """Compute the git-annex key for the given file"""
         our_output_acceptor = _ValHolder()
         self.execute(['calckey'], (path,), output_acceptor=output_acceptor or our_output_acceptor, now=not output_acceptor)
         return our_output_acceptor.val
 
-    @add_now_arg
+    @_add_now_arg
     def registerurl(self, key, url):
         """Tell git-annex that `key` can be fetched from `url`"""
         self.execute_batch(['registerurl'], (key, url))
 
-    @add_now_arg
+    @_add_now_arg
     def setpresentkey(self, key, remote_uuid, present):
         """Tell git-annex that `key` can be fetched from `url`"""
         self.execute_batch(['setpresentkey'], (key, remote_uuid, '1' if present else '0'))
 
-    @add_now_arg
+    @_add_now_arg
     def register_key_in_remote_at_url(self, key, url, remote_uuid):
         """Record that `key` is present in remote `remote_uuid` at `url`"""
         self.registerurl(key, url, now=False)
         self.setpresentkey(key, remote_uuid, True, now=False)
 
-    @add_now_arg
-    def checkpresentkey(self, key, output_acceptor=None):
+    @_add_now_arg
+    def checkpresentkey(self, key, output_acceptor=None, priority=-100):
         """Check if key is present in some remote"""
         our_output_acceptor = _ValHolder()
         self.execute(['checkpresentkey'], (key,), output_acceptor=output_acceptor or our_output_acceptor, now=not output_acceptor)
@@ -519,6 +540,9 @@ class GitAnnexTool(tools.Tool):
 
             _log.info('LOCALDIRRMOTE gather')
 
+            repo_root = ga_tool.get_repo_root()
+            urls_in_this_repo = set()
+
             urls_with_new_keys = set()
             with ga_tool.batching() as ga_tool_calckey:
                 for url, filestat in url2filestat.items():
@@ -537,6 +561,8 @@ class GitAnnexTool(tools.Tool):
                     
                     if is_link_into_annex:
                         filestat['git_annex_key'] = ga_tool.lookupkey(file_path)
+                        if file_path.startswith(repo_root):
+                            urls_in_this_repo.add(url)
                         continue
 
                     filestat['size'] = os.path.getsize(file_path)
@@ -553,7 +579,7 @@ class GitAnnexTool(tools.Tool):
                                             now=False)
                 # end: for url, filestat in url2filestat.items()
             # end: with ga_tool.batching() as ga_tool_calckey
-            for url, canon_url in urls_with_new_keys:
+            for url, canon_url in (urls_with_new_keys - urls_in_this_repo):
                 ga_tool.register_key_in_remote_at_url(key=url2filestat[url]['git_annex_key'],
                                                       url=canon_url, remote_uuid=self.remote_uuid, now=False)
             
@@ -611,18 +637,27 @@ class GitAnnexTool(tools.Tool):
         return functools.reduce(operator.concat, [list(remote_type.load_external_special_remotes(self, git_config))
                                                   for remote_type in self.REMOTE_TYPES], [])
 
-    @add_now_arg
-    def import_urls(self, urls, url2filestat=None, ignore_non_urls=False):
+    @_add_now_arg
+    def import_urls(self, urls, url2filestat=None, ignore_non_urls=False, check_imported=True):
         """Imports `urls` into git-annex.
 
         Args:
           urls: iterable of urls, which are strings denoting either local or cloud files.
           url2filestat: map from url to filestat (filestat is a map from data attrs like size, md5, git_annex_key to values).
+             If not given, a new map is created.  Passing an existing map lets you accumulate url2filestat info across
+             different calls to import_urls(), and/or avoid recomputing inside import_urls() info that you may already have,
+             such as md5s of some of the urls.
           ignore_non_urls: if True, urls we don't recognize as urls will be silently ignored; if False, they'll trigger an error.
-          now: if False, results may be delayed until batching context ends
+          check_imported: double-check that the key has been successfully imported
+          now: if False, effects may be delayed until batching context ends
+
+        Effects:
+          each valid url in `urls` becomes known to git-annex, i.e. the presence of its key in the repository designated by
+          the url is recorded in the git-annex branch.
 
         Returns:
-          map from url to filestat
+          map from url to filestat.  For each valid url in `urls`, the resulting filestat will contain at least the following
+          keys: 'git_annex_key' .
         """
 
         if url2filestat is None:
@@ -642,9 +677,14 @@ class GitAnnexTool(tools.Tool):
 
         _log.info('GOT RESULTS: %s', {k: v for k, v in url2filestat.items() if v})
 
-        if not ignore_non_urls:
-            for url in urls:
-                util.misc.chk('git_annex_key' in url2filestat[url], 'no key for {}: {}'.format(url, url2filestat))
+        for url in urls:
+            util.misc.chk(ignore_non_urls  or  ('git_annex_key' in url2filestat[url]), 'no key for {}: {}'.format(url, url2filestat))
+            if check_imported and 'git_annex_key' in url2filestat[url]:
+                key = url2filestat[url]['git_annex_key']
+                self.checkpresentkey(key=key,
+                                     output_acceptor=functools.partial(util.misc.chk_eq, '1',
+                                                                       message='failed to import key {}'.format(key)),
+                                     now=False)
             
         return url2filestat
     # end: def import_urls(self, urls, url2filestat=None)

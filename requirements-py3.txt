@@ -3,4 +3,3 @@ snakemake>=5.2.0
 google-cloud-storage
 pysftp>=0.2.8
 boto3
-dxpy-executables
