@@ -13,9 +13,6 @@ import unittest
 
 import pytest
 
-if not platform.python_version().startswith('2.7'):
-    pytest.skip("skipping py27-only tests for workflow_utils", allow_module_level=True)
-
 import util.cmd
 import util.file
 import util.misc

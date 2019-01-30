@@ -63,7 +63,6 @@ __commands__ = []
 # *** built-ins
 
 import platform
-assert platform.python_version().startswith('2.7')  # dxpy requirement; should drop and use command-line
 
 import argparse
 import logging
@@ -87,8 +86,13 @@ import pipes
 import shlex
 import sys
 import urllib
-import SimpleHTTPServer
-import SocketServer
+try:
+    import SimpleHTTPServer
+    import SocketServer
+except ImportError:
+    import http.server as SimpleHTTPServer
+    SocketServer = SimpleHTTPServer.socketserver
+
 import traceback
 import copy
 from pprint import pformat
@@ -122,8 +126,8 @@ _log.setLevel(logging.DEBUG)
 # * Utils
 # ** Generic utils
 
-_str_type = getattr(builtins, 'basestring', 'str')
-_long_type = getattr(builtins, 'long', 'int')
+_str_type = basestring if hasattr(builtins, 'basestring') else str
+_long_type = long if hasattr(builtins, 'long') else int
 _scalar_types = (type(None), _str_type, _long_type, int, bool, float)
 if hasattr(builtins, 'unicode'):
     _scalar_types += (unicode,)
