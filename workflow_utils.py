@@ -124,7 +124,7 @@ import tools.gcloud
 _log = logging.getLogger(__name__)
 
 #logging.basicConfig(format="%(asctime)s - %(module)s:%(lineno)d:%(funcName)s - %(levelname)s - %(message)s")
-_log.setLevel(logging.DEBUG)
+_log.setLevel(logging.INFO)
 
 
 # * Utils
@@ -175,7 +175,9 @@ def _dict_rename_key(d, old_key, new_key):
 
 def _is_under_dir(path, base_dir):
     """Tests whether `path` is somewhere in the dir tree under `base_dir`"""
-    return os.path.realpath(path).startswith(os.path.realpath(base_dir))
+    path_parts = os.path.realpath(path).split(os.path.sep)
+    base_parts = os.path.realpath(base_dir).split(os.path.sep)
+    return path_parts[:len(base_parts)] == base_parts
 
 def _md5_base64(s):
     return hashlib.md5(s).digest().encode('base64').strip()
@@ -667,8 +669,6 @@ def _resolve_link_using_gathered_filestat(val, git_file_dir, url2filestat, git_a
     if not git_annex_key: return val
     util.file.mkdir_p(git_file_dir)
     fname = os.path.join(git_file_dir, os.path.basename(val))
-    if os.path.lexists(fname):
-        os.unlink(fname)
     git_annex_tool.fromkey(git_annex_key, fname, now=False)
     return {'$git_link': fname, 'git_annex_key': git_annex_key, 'orig_path': val}
 
@@ -1996,14 +1996,14 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
 
                 leaf_jpaths = util.misc.json_gather_leaf_jpaths(mdata)
                 str_leaves = list(filter(_is_str, util.misc.map_vals(leaf_jpaths)))
-                git_annex_tool.import_urls(str_leaves, ignore_non_urls=True, url2filestat=url2filestat)
+                git_annex_tool.import_urls(str_leaves, ignore_non_urls=True, url2filestat=url2filestat, now=False)
                 mdata_rel = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir,
                                                         methods=[functools.partial(_resolve_link_using_gathered_filestat,
                                                                                    url2filestat=url2filestat,
                                                                                    git_annex_tool=git_annex_tool),
 #                                                                 _resolve_link_local_path,
 #                                                                 _resolve_link_gs,
-                                                        ])
+                                                        ], relpath='files')
                 _write_json(mdata_rel_fname, **mdata_rel)
                 _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
                 processing_stats['saved_metata'] += 1
@@ -2022,6 +2022,41 @@ def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
 __commands__.append(('finalize_analysis_dirs', parser_finalize_analysis_dirs))
 
 ########################################################################################################################
+
+def unfold_git_links(json_fnames):
+    """Given a json file with git_links, ensure that all of them point to a file."""
+    git_annex_tool = tools.git_annex.GitAnnexTool()
+    with git_annex_tool.batching() as git_annex_tool:
+        fname2key = {}
+
+        def unfold_one_link(val, path, json_dir):
+            if not (_maps(val, '$git_link') and _maps(val, 'git_annex_key')):
+                return val
+            util.misc.chk(not os.path.isabs(val['$git_link']))
+            fname = os.path.join(json_dir, val['$git_link'])
+            key = val['git_annex_key']
+
+            if fname in fname2key:
+                util.misc.chk(fname2key[fname] == key)
+            else:
+                git_annex_tool.fromkey(key=key,
+                                       fname=fname, now=False)
+
+        for json_fname in json_fnames:
+ 
+            json_data = _json_loadf(json_fname)
+            json_dir = os.path.dirname(os.path.abspath(json_fname))
+            util.misc.transform_json_data(json_data, node_handler=functools.partial(unfold_one_link, json_dir=json_dir))
+
+def parser_unfold_git_links(parser=argparse.ArgumentParser()):
+    parser.add_argument('json_fnames', nargs='+', metavar='JSON_FNAME', help='names of files to unfold')
+    util.cmd.attach_main(parser, unfold_git_links, split_args=True)
+    return parser
+
+__commands__.append(('unfold_git_links', parser_unfold_git_links))
+
+########################################################################################################################
+
 
 # * import_from_url
 

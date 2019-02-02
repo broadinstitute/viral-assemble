@@ -56,7 +56,7 @@ class _ValHolder(object):
     def __call__(self, val):
         self.val = val
 
-# NamedTuple: _BatchedCall - arguments to one git-annex call in a set of batched cals, and an optional place to record call output
+# NamedTuple: _BatchedCall - arguments to one git-annex call in a set of batched cals, and an optional place to record call output.
 _BatchedCall = collections.namedtuple('_BatchedCall', ['batch_args', 'output_acceptor'])
 
 # * class GitAnnexTool
@@ -289,7 +289,13 @@ class GitAnnexTool(tools.Tool):
 
     @_add_now_arg
     def fromkey(self, key, fname):
-        """Manually set up a symlink to a given key as a given file"""
+        """Manually set up a symlink to a given key as a given file.  If the target filename exists, and is anything
+        other than an existing link to `key`, raise an error.
+        """
+        if os.path.exists(fname):
+            util.misc.chk(self.is_link_into_annex(fname))  # TODO: check that it's into the same repo we have?
+            util.misc.chk(self.lookupkey(fname) == key)
+            return
         self.execute_batch(['fromkey', '--force'], batch_args=(key, fname))
 
     def _get_link_into_annex(self, f):
@@ -336,10 +342,10 @@ class GitAnnexTool(tools.Tool):
 
     def lookupkey(self, f):
         """Get the git-annex key of an annexed file.  Note that, unlike git-annex-lookupkey, this looks at the file in the
-        working copy, not in the index."""
+        working copy, not in the index; and does not deal with unlocked files."""
         
         link_into_annex, target_of_link_into_annex = self._get_link_into_annex(f)
-        util.misc.chk(target_of_link_into_annex)
+        util.misc.chk(target_of_link_into_annex, '{} is not a link into annex'.format(os.path.abspath(f)))
         return os.path.basename(target_of_link_into_annex)
 
     def examinekey(self, key):
