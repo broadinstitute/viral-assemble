@@ -182,6 +182,8 @@ def test_batch_add(ga_tool, git_annex_repo, file_A, file_B):
 def test_fromkey(ga_tool, git_annex_repo, file_A, file_B):
     ga_tool.add(file_A)
     file_A_key = ga_tool.lookupkey(file_A)
+    ga_tool.add(file_B)
+    file_B_key = ga_tool.lookupkey(file_B)
     file_A_link2 = file_A+'.link2.txt'
     ga_tool.fromkey(file_A_key, file_A_link2)
     assert os.path.samefile(file_A, file_A_link2)
@@ -195,8 +197,21 @@ def test_fromkey(ga_tool, git_annex_repo, file_A, file_B):
         assert not lexists(file_A_link4)
         ga_tool.fromkey(file_A_key, file_A_link4, now=False)
         assert not lexists(file_A_link4)
+        ga_tool.fromkey(file_A_key, file_A_link3, now=False)
+        ga_tool.fromkey(file_A_key, file_A_link4, now=False)
+        assert not lexists(file_A_link4)
+
     assert ga_tool.is_file_in_annex(file_A_link3)
     assert ga_tool.is_file_in_annex(file_A_link4)
+    ga_tool.fromkey(file_A_key, file_A_link3)
+    assert ga_tool.is_file_in_annex(file_A_link3)
+    with ga_tool.batching() as ga_tool:
+        ga_tool.fromkey(file_A_key, file_A_link4, now=False)
+    assert ga_tool.is_file_in_annex(file_A_link4)
+    assert ga_tool.lookupkey(file_A_link4) == file_A_key
+    with pytest.raises(RuntimeError):
+        ga_tool.fromkey(file_B_key, file_A_link3)
+    ga_tool.fromkey(file_A_key, file_A_link3)
 
 def test_get_file_exts_for_key(ga_tool):
     test_data = {'myfile.fasta': '.fasta',

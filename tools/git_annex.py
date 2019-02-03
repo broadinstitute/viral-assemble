@@ -56,6 +56,14 @@ class _ValHolder(object):
     def __call__(self, val):
         self.val = val
 
+# NamedTuple: _Batch - a batch of calls to git-annex, involving one git-annex command with a list of different arg combos
+#   Fields:
+#      priority: a priority value; batches with higher priority will be run earlier
+#      tool_cmd: the invariant part of the command
+#      cwd: the current directory in which the batch should be invoked
+#      preproc: an optional function to call to preprocess the batch.
+_Batch = collections.namedtuple('_Batch', ['priority', 'tool_cmd', 'cwd', 'preproc'])
+
 # NamedTuple: _BatchedCall - arguments to one git-annex call in a set of batched cals, and an optional place to record call output.
 _BatchedCall = collections.namedtuple('_BatchedCall', ['batch_args', 'output_acceptor'])
 
@@ -65,6 +73,17 @@ class GitAnnexTool(tools.Tool):
 # ** class docs
 
     '''Tool wrapper for git-annex.
+
+    Notes:
+
+    The repository on which the commands operate is given implicitly by the current working directory.
+    (This may change later -- passing the repository explicitly an as object may be a better design.)
+
+
+    There is support for batching of operations.  You can start a batching context by calling the batching() method,
+    which will return a "batching" version of this GitAnnexTool.  When you invoke a command on this batching version,
+    you can indicate that it need not run immediately, by adding now=False to the argument list; the command then may be
+    run anytime between immediately and the end of the batching context.  
 
     '''
 
@@ -81,6 +100,7 @@ class GitAnnexTool(tools.Tool):
     #    - support caching of metadata?
     #    - check that batched commands are indeed independent?  (put names of affected repo paths in shared mem?)
     #    - (option to) do opos on a separate checkout in a tmp  dir and then merge?  checkout first commit if only adding dirs
+    #    - use pyfilesystem2 to deal with the different filesystems, including staging.
 
 # ** general infrastructure for running commands
 
@@ -134,7 +154,7 @@ class GitAnnexTool(tools.Tool):
                 return method(self, *args, **kw)
         return impl
 
-    def execute(self, args, batch_args=None, output_acceptor=None, now=True, tool='git-annex', priority=0):
+    def execute(self, args, batch_args=None, output_acceptor=None, now=True, tool='git-annex', priority=0, preproc=None):
         """Run the given git or git-annex command.  If batching is in effect (see self.batching()), the command is stored and will be
         executed when the batching context exits.
         
@@ -146,27 +166,34 @@ class GitAnnexTool(tools.Tool):
             now: execute instantly even if batching is in effect
             tool: git-annex or git, defaults to git-annex
             priority: when executing batched commands, commands with higher priority will be executed earlier
+            preproc: if given, called to preprocess a batch
         """
-        _log.debug('EXECUTE: args={} now={} batch_args={} self.is_batching={}'.format(args, now, batch_args, self.is_batching()))
+        _log.debug('EXECUTE: args=%s now=%s batch_args=%s self.is_batching=%s', args, now, len(batch_args or ()),
+                   self.is_batching())
+        for batch_arg in (batch_args or ()):
+            _log.debug('batch_arg: %s', batch_arg)
         with self.maybe_now(now=now or not batch_args or not self.is_batching()) as self:
-            self._add_command_to_batch(args, batch_args, output_acceptor, tool, priority)
+            self._add_command_to_batch(args=args, batch_args=batch_args, output_acceptor=output_acceptor, tool=tool,
+                                       priority=priority, preproc=preproc)
 
-    def execute_batch(self, args, batch_args, output_acceptor=None, priority=0):
+    def execute_batch(self, args, batch_args, output_acceptor=None, priority=0, preproc=None):
         """Record a git-annex command to be run at the end of the current batching context."""
-        return self.execute(args=args, batch_args=batch_args, output_acceptor=output_acceptor, now=False, priority=priority)
+        return self.execute(args=args, batch_args=batch_args, output_acceptor=output_acceptor, now=False, priority=priority,
+                            preproc=preproc)
 
     def is_batching(self):
         """Return True if batching is in effect"""
         return self._batched_cmds is not None
 
-    def _add_command_to_batch(self, args, batch_args, output_acceptor, tool, priority):
+    def _add_command_to_batch(self, args, batch_args, output_acceptor, tool, priority, preproc=None):
         """Add command to current batch."""
         if batch_args:
             util.misc.chk(tool == 'git-annex')
             args = tuple(args) + ('--batch',)
         tool_cmd = (os.path.join(self._get_bin_dir(), tool),) + tuple(map(str, args))
+        batch = _Batch(priority=priority, tool_cmd=tool_cmd, cwd=os.getcwd(), preproc=preproc)
         batched_call = _BatchedCall(batch_args=batch_args, output_acceptor=output_acceptor)
-        self._batched_cmds.setdefault((priority, tool_cmd, os.getcwd()), []).append(batched_call)
+        self._batched_cmds.setdefault(batch, []).append(batched_call)
 
     def _execute_batched_commands(self):
         """Run any saved batched commands.
@@ -177,39 +204,39 @@ class GitAnnexTool(tools.Tool):
         # TODO: figure out correct behavior if some cmds fail
 
         _log.debug('RUNNING BATCH CMDS: %s', self._batched_cmds)
-        for item in sorted(self._batched_cmds, key=operator.itemgetter(0), reverse=True):
-            (priority, tool_cmd, cmd_cwd), batch_calls = item, self._batched_cmds.pop(item)
-            with contextlib.ExitStack() as stack:
-                subprocess_call_args = {}
-                if batch_calls[0].batch_args:
-                    # This is a git-annex command with the --batch flag: prepare an input file of the
-                    # command arguments, one line per batched call.
-                    _log.debug('calling batch calls: %s %s', tool_cmd, batch_calls)
+        for batch in sorted(self._batched_cmds, key=operator.attrgetter('priority'), reverse=True):
+            batch_calls = self._batched_cmds.pop(batch)
+            if batch.preproc:
+                batch_calls = batch.preproc(batch_calls)
+            if not batch_calls: continue
+            subprocess_call_args = {}
+            if batch_calls[0].batch_args:
+                # This is a git-annex command with the --batch flag: prepare an input string of the
+                # command arguments, one line per batched call.
+                _log.debug('calling batch calls: %s %s', batch.tool_cmd, batch_calls)
 
-                    batch_inp_str = '\n'.join([' '.join(map(str, batch_call.batch_args)) for batch_call in batch_calls]) + '\n'
-                    subprocess_call_args.update(input=batch_inp_str)
+                batch_inp_str = '\n'.join([' '.join(map(str, batch_call.batch_args)) for batch_call in batch_calls]) + '\n'
+                subprocess_call_args.update(input=batch_inp_str)
 
-                if batch_calls[0].output_acceptor:
-                    subprocess_call_args.update(stdout=subprocess.PIPE)
+            if batch_calls[0].output_acceptor:
+                subprocess_call_args.update(stdout=subprocess.PIPE)
 
-                _log.debug('CALLING SUBPROCESS RUN: %s %s', tool_cmd, subprocess_call_args)
-                try:
-                    result = subprocess.run(tool_cmd, check=True, cwd=cmd_cwd, universal_newlines=True,
-                                            env=self._get_run_env(), **subprocess_call_args)
-                    _log.debug('RETURNED FROM SUBPROCESS RUN: %s %s %s', tool_cmd, subprocess_call_args, result)
-                except Exception as e:
-                    _log.debug('FAILED SUBPROCESS RUN: %s %s %s', e, tool_cmd, subprocess_call_args)
-                    raise
+            _log.debug('CALLING SUBPROCESS RUN: %s %s', batch.tool_cmd, subprocess_call_args)
+            try:
+                result = subprocess.run(batch.tool_cmd, check=True, cwd=batch.cwd, universal_newlines=True,
+                                        env=self._get_run_env(), **subprocess_call_args)
+                _log.debug('RETURNED FROM SUBPROCESS RUN: %s %s %s', batch.tool_cmd, subprocess_call_args, result)
+            except Exception as e:
+                _log.debug('FAILED SUBPROCESS RUN: %s %s %s', e, batch.tool_cmd, subprocess_call_args)
+                raise
 
-                if batch_calls[0].output_acceptor:
-                    output = util.misc.maybe_decode(result.stdout).rstrip('\n')
-                    call_outputs = output.split('\n') if batch_calls[0].batch_args else [output]
-                    util.misc.chk(len(call_outputs) == len(batch_calls))
-                    for batch_call, call_output in zip(batch_calls, call_outputs):
-                        batch_call.output_acceptor(call_output)
-                
-            # end: with contextlib.ExitStack() as stack:
-        # end: for item in sorted(self._batched_cmds, key=operator.itemgetter(0), reverse=True):
+            if batch_calls[0].output_acceptor:
+                output = util.misc.maybe_decode(result.stdout).rstrip('\n')
+                call_outputs = output.split('\n') if batch_calls[0].batch_args else [output]
+                util.misc.chk(len(call_outputs) == len(batch_calls))
+                for batch_call, call_output in zip(batch_calls, call_outputs):
+                    batch_call.output_acceptor(call_output)
+        # end: for batch in sorted(self._batched_cmds, key=operator.attrgetter('priority'), reverse=True):
         util.misc.chk(not self._batched_cmds)
     # end: def _execute_batched_commands(self):
 
@@ -287,18 +314,33 @@ class GitAnnexTool(tools.Tool):
         """Move a file from local repo to a remote"""
         self.execute(['move', fname, '--to', to_remote_name])
 
+    @classmethod
+    def _fromkey_preproc(cls, batched_calls):
+        """Aux routine for fromkey().  Eliminate duplicate attempts to set a given file to point to the same key."""
+        new_batched_calls = []
+        fnames_seen = {}
+        for batched_call in batched_calls:
+            key, fname = batched_call.batch_args
+            if fname in fnames_seen:
+                util.misc.chk(fnames_seen[fname] == key)
+                continue
+            fnames_seen[fname] = key
+            if os.path.exists(fname):
+                util.misc.chk(cls.lookupkey(fname) == key)
+                continue
+            new_batched_calls.append(batched_call)
+                
+        return new_batched_calls
+
     @_add_now_arg
     def fromkey(self, key, fname):
         """Manually set up a symlink to a given key as a given file.  If the target filename exists, and is anything
         other than an existing link to `key`, raise an error.
         """
-        if os.path.exists(fname):
-            util.misc.chk(self.is_link_into_annex(fname))  # TODO: check that it's into the same repo we have?
-            util.misc.chk(self.lookupkey(fname) == key)
-            return
-        self.execute_batch(['fromkey', '--force'], batch_args=(key, fname))
+        self.execute_batch(['fromkey', '--force'], batch_args=(key, os.path.abspath(fname)), preproc=self._fromkey_preproc)
 
-    def _get_link_into_annex(self, f):
+    @classmethod
+    def _get_link_into_annex(cls, f):
         """If `f` points to an annexed file, possibly through a chain of symlinks, return
         information about the symlink actually pointing into the annex (details below).
         If `f` does not point to an annexed file, return (f, None).
@@ -332,19 +374,22 @@ class GitAnnexTool(tools.Tool):
                 f_cur = os.path.join(os.path.dirname(f_cur), link_target)
         return f, annex_link_target
 
-    def is_link_into_annex(self, f):
+    @classmethod
+    def is_link_into_annex(cls, f):
         """Test if `f` is a file controlled by git-annex (not necessarily present in local repo)."""
-        return os.path.lexists(f) and not os.path.isdir(f) and self._get_link_into_annex(f)[1]
+        return os.path.lexists(f) and not os.path.isdir(f) and cls._get_link_into_annex(f)[1]
 
-    def is_file_in_annex(self, f):
+    @classmethod
+    def is_file_in_annex(cls, f):
         """Tests if `f` (possibly at the end of a chain of symlinks) is a file present in the local annex."""
-        return self.is_link_into_annex(f) and os.path.isfile(f)
+        return cls.is_link_into_annex(f) and os.path.isfile(f)
 
-    def lookupkey(self, f):
+    @classmethod
+    def lookupkey(cls, f):
         """Get the git-annex key of an annexed file.  Note that, unlike git-annex-lookupkey, this looks at the file in the
         working copy, not in the index; and does not deal with unlocked files."""
         
-        link_into_annex, target_of_link_into_annex = self._get_link_into_annex(f)
+        link_into_annex, target_of_link_into_annex = cls._get_link_into_annex(f)
         util.misc.chk(target_of_link_into_annex, '{} is not a link into annex'.format(os.path.abspath(f)))
         return os.path.basename(target_of_link_into_annex)
 
