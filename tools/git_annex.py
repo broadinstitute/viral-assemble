@@ -325,7 +325,7 @@ class GitAnnexTool(tools.Tool):
                 util.misc.chk(fnames_seen[fname] == key)
                 continue
             fnames_seen[fname] = key
-            if os.path.exists(fname):
+            if os.path.lexists(fname):
                 util.misc.chk(cls.lookupkey(fname) == key)
                 continue
             new_batched_calls.append(batched_call)
