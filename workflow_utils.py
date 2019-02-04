@@ -161,7 +161,7 @@ def _ord_dict(*args):
     return collections.OrderedDict(args)
 
 def _ord_dict_merge(dicts):
-    dicts_items = [d.items() for d in dicts]
+    dicts_items = [list(d.items()) for d in dicts]
     return _ord_dict(*functools.reduce(operator.concat, dicts_items, []))
 
 def _dict_rename_key(d, old_key, new_key):
@@ -968,7 +968,7 @@ def _apply_input_renamings(inps, input_name_subst, orig_workflow_name):
 def _analysis_inputs_from_analysis_dir_do(args, **kw):
     """Extract analysis inputs from an existing analysis dir."""
     workflow_name = kw['workflow_name']
-    mdata_fname = os.path.join(args.analysis_dir, 'metadata.json')
+    mdata_fname = os.path.join(args.analysis_dir, 'metadata_with_gitlinks.json')
     mdata = _json_loadf(mdata_fname) 
     inps = mdata['inputs']
 
@@ -1576,7 +1576,7 @@ def _get_docker_hash(docker_img):
     digest_lines = _run_get_output('docker', 'images', '--digests', '--no-trunc', '--format',
                                    '{{.Repository}}:{{.Tag}} {{.Digest}}', _noquote('|'), 'grep',
                                    docker_img+(':' if ':' not in docker_img else '') + ' sha256:')
-    digest_lines = [line for line in digest_lines.strip().split('\n') if docker_img in line]
+    digest_lines = [line for line in util.misc.maybe_decode(digest_lines).rstrip('\n').split('\n') if docker_img in line]
     assert len(digest_lines) == 1
     digest_line = digest_lines[0]
     _log.debug('digest_line is |||{}|||'.format(digest_line))
