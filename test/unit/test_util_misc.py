@@ -6,6 +6,8 @@ import os, random, collections
 import unittest
 import logging
 import subprocess
+import re
+import uuid
 import util.misc
 import util.file
 import pytest
@@ -349,3 +351,9 @@ def test_available_cpu_count(monkeypatch_function_result):
     with monkeypatch_function_result(util.file.slurp_file, '/sys/fs/cgroup/cpu/cpu.cfs_quota_us', patch_result='-1'), \
          monkeypatch_function_result(util.file.slurp_file, '/sys/fs/cgroup/cpu/cpu.cfs_period_us', patch_result='1'):
         assert util.misc.available_cpu_count() == reported_cpu_count
+
+def test_uuid_re():
+    UUID_RE = util.misc.UUID_RE
+    assert re.fullmatch(UUID_RE, str(uuid.uuid4()))
+    assert not re.fullmatch(UUID_RE, '0'+str(uuid.uuid4()))
+    assert not re.fullmatch(UUID_RE, str(uuid.uuid4())+'0')

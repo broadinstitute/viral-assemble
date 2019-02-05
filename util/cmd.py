@@ -44,7 +44,7 @@ def setup_logger(log_level):
     assert loglevel, "unrecognized log level: %s" % log_level
     log.setLevel(loglevel)
     h = logging.StreamHandler()
-    h.setFormatter(logging.Formatter("%(asctime)s - %(module)s:%(lineno)d:%(funcName)s - %(levelname)s - %(message)s"))
+    h.setFormatter(util.misc.MultilineFormatter("%(asctime)s - %(module)s:%(lineno)d:%(funcName)s - %(levelname)s - %(message)s"))
     log.addHandler(h)
 
 

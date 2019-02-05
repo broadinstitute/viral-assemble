@@ -803,3 +803,20 @@ def wraps(f):
 def unwrap(f):
     """Find the original function under layers of wrappers"""
     return f if not hasattr(f, '__wrapped__') else unwrap(f.__wrapped__)
+
+# UUID_RE: a regexp for UUIDs
+def _uuid_part_re(length):
+    return '[0-9a-f]{' + str(length) + '}'
+UUID_RE = '-'.join(map(_uuid_part_re, (8, 4, 4, 4, 12)))
+
+class MultilineFormatter(logging.Formatter):
+    # adapted from https://stackoverflow.com/questions/45216826/how-to-print-multiline-logs-using-python-logging-module
+    def format(self, record):
+        """Break up long lines, for easier reading in Emacs"""
+        result = super(MultilineFormatter, self).format(record)
+        LINE_LEN = int(os.environ.get('VIRAL_NGS_LOG_LINE_LEN', '0'))
+        if LINE_LEN and len(result) > LINE_LEN:
+            result = '\n'.join([('  ' if i > 0 else '') + result[i:i+LINE_LEN] for i in range(0, len(result), LINE_LEN)])
+        return result
+
+
