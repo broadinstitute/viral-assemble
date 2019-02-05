@@ -1022,6 +1022,8 @@ def _analysis_inputs_from_analysis_dirs_roots(args, **kw):
             mdata = _json_loadf(mdata_fname)
             if mdata['status'] == 'Success':
                 continue
+        if not os.path.isfile(os.path.join(analysis_dir, 'metadata_with_gitlinks.json')):
+            continue
 
         args.analysis_dir = analysis_dir
 
@@ -1956,6 +1958,14 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
 
     url2filestat = _ord_dict()
 
+    analysis_dirs = () if not analysis_dirs_roots else _get_analysis_dirs_under(analysis_dirs_roots)
+    cromwell_analysis_id_to_dir = {}
+    for analysis_dir in analysis_dirs:
+        fname = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
+        if os.path.isfile(fname):
+            cromwell_analysis_id = util.file.slurp_file(fname).split('\n')[1].split()[4]
+            cromwell_analysis_id_to_dir[cromwell_analysis_id] = analysis_dir
+    _log.info('GOT ANALYSIS IDS %s', cromwell_analysis_id_to_dir)
     git_annex_tool = tools.git_annex.GitAnnexTool()
     with git_annex_tool.batching() as git_annex_tool:
 
@@ -1969,8 +1979,9 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
             mdata = cromwell_server.get_metadata(wf['id'])
             assert mdata['id'] == wf['id']
             assert 'workflowLog' not in mdata or mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
-            if 'analysis_dir' in mdata['labels']:
-                analysis_dir = mdata['labels']['analysis_dir']
+            analysis_dir = mdata['labels'].get('analysis_dir', cromwell_analysis_id_to_dir.get(mdata['id'], None))
+            _log.info('ID %s ADIR %s', mdata['id'], analysis_dir)
+            if analysis_dir:
                 if analysis_dirs_roots and not any(_is_under_dir(analysis_dir, analysis_dirs_root)
                                                    for analysis_dirs_root in analysis_dirs_roots):
                     continue
