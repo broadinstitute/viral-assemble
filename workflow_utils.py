@@ -62,8 +62,6 @@ __commands__ = []
 
 # *** built-ins
 
-import platform
-
 import argparse
 import logging
 import json
@@ -85,6 +83,7 @@ import hashlib
 import pipes
 import shlex
 import sys
+import re
 import urllib
 try:
     from urllib import urlencode
@@ -125,7 +124,6 @@ _log = logging.getLogger(__name__)
 
 #logging.basicConfig(format="%(asctime)s - %(module)s:%(lineno)d:%(funcName)s - %(levelname)s - %(message)s")
 _log.setLevel(logging.INFO)
-
 
 # * Utils
 # ** Generic utils
@@ -1955,6 +1953,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
     processing_stats = collections.Counter()
+    status_stats = collections.Counter()
 
     url2filestat = _ord_dict()
 
@@ -1963,7 +1962,9 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
     for analysis_dir in analysis_dirs:
         fname = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
         if os.path.isfile(fname):
-            cromwell_analysis_id = util.file.slurp_file(fname).split('\n')[1].split()[4]
+            _log.info('looking at cromwell output file %s', fname)
+            cromwell_analysis_id = re.search('Workflow (?P<uuid>' + util.misc.UUID_RE + ') submitted to ',
+                                             util.file.slurp_file(fname)).group('uuid')
             cromwell_analysis_id_to_dir[cromwell_analysis_id] = analysis_dir
     _log.info('GOT ANALYSIS IDS %s', cromwell_analysis_id_to_dir)
     git_annex_tool = tools.git_annex.GitAnnexTool()
@@ -1990,7 +1991,8 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                 continue
 
             if status_only:
-                print(wf['id'], mdata['status'])
+                _log.info('WORKFLOW: %s STATUS: %s', wf['id'], mdata['status'])
+                status_stats[mdata['status']] += 1
                 continue
 
             util.file.mkdir_p(analysis_dir)
@@ -2019,6 +2021,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                 _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
                 processing_stats['saved_metata'] += 1
     _log.info('Processing stats: %s', str(processing_stats))
+    _log.info('Status stats: %s', str(status_stats))
 
 def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('--cromwellHost', dest='cromwell_host', default='localhost:8000', help='cromwell server hostname')
