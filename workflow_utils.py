@@ -2329,10 +2329,12 @@ def diff_analyses(analysis_dirs, key_prefixes=()):
         if vals[0] != vals[1]:
             def _fmt(s):
                 s = str(s)
-                if len(s) > 80:
-                    s = s[:80] + ' ...'
+                if len(s) > 120:
+                    s = s[:120] + ' ...'
                 return s
-            print('KEY: ', key, _fmt(vals[0]), _fmt(vals[1]))
+            print('KEY: ', key)
+            print('   ', _fmt(vals[0]))
+            print('   ', _fmt(vals[1]))
 
 def parser_diff_analyses(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dirs', nargs=2, help='the two analysis dirs')
