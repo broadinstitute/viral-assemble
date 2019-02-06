@@ -947,7 +947,7 @@ def _make_git_links_absolute(d, base_dir):
         if not _maps(val, '$git_link'):
             return val
         assert not os.path.isabs(val['$git_link'])
-        return {'$git_link': os.path.join(base_dir, val['$git_link'])}
+        return dict(val, **{'$git_link': os.path.join(base_dir, val['$git_link'])})
     return util.misc.transform_json_data(d, _make_git_link_absolute)
 
 def _make_git_links_relative(d, base_dir):
@@ -955,7 +955,7 @@ def _make_git_links_relative(d, base_dir):
         if not _maps(val, '$git_link'):
             return val
         assert os.path.isabs(val['$git_link'])
-        return {'$git_link': os.path.relpath(val['$git_link'], base_dir)}
+        return dict(val, **{'$git_link': os.path.relpath(val['$git_link'], base_dir)})
     return util.misc.transform_json_data(d, _make_git_link_relative)
 
 def _apply_input_renamings(inps, input_name_subst, orig_workflow_name):
@@ -2277,7 +2277,7 @@ def _load_analysis_metadata(analysis_dir, git_links_abspaths=False):
     """Read the analysis metadata from an analysis dir.  If `git_links_abspath` is True,
     paths in git links will be made absolute."""
     _log.info('loading analysis metadata from %s', analysis_dir)
-    md = _json_loadf(os.path.join(analysis_dir, 'metadata.json'))
+    md = _json_loadf(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'))
     md['analysis_dir'] = analysis_dir
     if git_links_abspaths:
         md = _make_git_links_absolute(md, base_dir=os.path.abspath(analysis_dir))
@@ -2286,7 +2286,8 @@ def _load_analysis_metadata(analysis_dir, git_links_abspaths=False):
 def _flatten_analysis_metadata_list(val, pfx=''):
     """Convert analysis metadata to a flat list of key-value pairs"""
     if _is_git_link(val):
-        return _flatten_analysis_metadata_list('md5:'+_git_link_md5(val), pfx)
+        util.misc.chk('git_annex_key' in val, 'no key: {} {}'.format(val, pfx))
+        return _flatten_analysis_metadata_list(val['git_annex_key'], pfx)
 
     def _concat(iters): return list(itertools.chain.from_iterable(iters))
 
@@ -2321,10 +2322,17 @@ def diff_analyses(analysis_dirs, key_prefixes=()):
                                               key_prefixes=key_prefixes)
                    for analysis_dir in analysis_dirs]
     all_keys = sorted(set(itertools.chain.from_iterable(flat_mdatas)))
+    print('------------------------ diffs ----------------------------')
     for key in all_keys:
+        if key.startswith('calls.'): continue
         vals = [flat_mdatas[i].get(key, None) for i in (0, 1)]
         if vals[0] != vals[1]:
-            print(key, vals[0], vals[1])
+            def _fmt(s):
+                s = str(s)
+                if len(s) > 80:
+                    s = s[:80] + ' ...'
+                return s
+            print('KEY: ', key, _fmt(vals[0]), _fmt(vals[1]))
 
 def parser_diff_analyses(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dirs', nargs=2, help='the two analysis dirs')
