@@ -52,6 +52,8 @@ Terms and abbreviations:
        path navigating through a parsed json structure: tuple of keys and indices to get from the root to a leaf value.
 
 TODO:
+  - do all bulk ops on temp clones of the repo, in a temp branch, then merge if succeed.
+  - use fewer dirs for files?  one dir per file leads to inode explosion.
   - make things work with v7 git-annex repos
 """
 
@@ -2334,98 +2336,72 @@ def parser_diff_analyses(parser=argparse.ArgumentParser()):
 __commands__.append(('diff_analyses', parser_diff_analyses))
     
 
-def compare_analysis_pairs(analysis_dirs_roots, filter_A, filter_B, metrics,
-                           key_prefixes=('inputs.', 'labels.docker_img_hash', 'status', 'succeeded'),
-                           common_keys_prefixes=()):
+def compare_analysis_pairs(analysis_dirs_roots, common, filter_A, filter_B, label, metrics):
     """Compare pairs of analyses from `analysis_dirs` where  the first analysis of the pair matches the criteria in `filter_A`,
-    the second matches the criteria in `filter_B`, and the remaining fields are equal.
-    For such pairs, show the distribution of output `metrics`.
+    the second matches the criteria in `filter_B`, and they both have the same value of `common`.
+    For such pairs, show the distribution of output `metrics`.  All expressions are in jmespath.
 
     Terms:
-       analysis group -- a group of analyses that have the same identical values at keys not in filter_A or filter_B
+       analysis group -- a group of analyses that agree on values in `common`
     """
 
     # For each distinct combination of `common_fields` values, gather the analyses with that combination.
-    filter_A = dict(filter_A)
-    filter_B = dict(filter_B)
-    _log.info('filter_A=%s', filter_A)
-    _log.info('filter_B=%s', filter_B)
-    metrics = metrics or ()
 
-    flat_analyses = [_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir, git_links_abspaths=True),
-                                                key_prefixes=key_prefixes)
-                     for analysis_dir in _get_analysis_dirs_under(analysis_dirs_roots)]
-    flat_analyses = [ f for f in flat_analyses if f['status'] in ('Succeeded', 'Failed')]
-    _log.info('len(analysis_dirs)=%d', len(analysis_dirs_roots))
-    _log.info('len(flat_analyses)=%d', len(flat_analyses))
+    processing_stats = collections.Counter()
 
-    assert filter_A.keys() == filter_B.keys(), 'Atypical usage -- probably error?'
-    
-    filter_keys = set(set(filter_A.keys()) | set(filter_B.keys()))
+    mdatas = [_json_loadf(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'))
+              for analysis_dir in _get_analysis_dirs_under(analysis_dirs_roots)
+              if os.path.isfile(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'))]
+    processing_stats['mdatas'] = len(mdatas)
 
-    print('COMMON_KEYS=', common_keys_prefixes)
-
-    def _get_analysis_group_key(flat_analysis):
-        """Get key-value pairs that should be identical for any pairs we compare"""
-        return tuple(sorted([(k, v) for k, v in flat_analysis.items() \
-                             if (common_keys_prefixes and _key_matches_prefixes(k, common_keys_prefixes))
-                             or (not common_keys_prefixes and k not in filter_keys)]))
-
-    analysis_groups = collections.defaultdict(list)
-    for a in flat_analyses:
-        group_key = _get_analysis_group_key(a)
-        if not group_key:
-            print('NO GROUP KEY')
-            print('\n'.join(map(str,a)))
-            raise RuntimeException('no group key')
-            continue
-        analysis_groups[group_key].append(a)
-
-    def _analysis_matches_filter(flat_analysis, filt):
-        return all([k not in filt or v=='*' or flat_analysis.get(k, None) == v for k, v in flat_analysis.items()])
-
+    id2mdata = {mdata['id']:mdata for mdata in mdatas}
+    id2common = {an_id:str(_qry_json(mdata, common)) for an_id, mdata in id2mdata.items()}
+    _log.info('id2common=%d %s', len(id2common), list(id2common.items())[:10])
+    common2ids = collections.defaultdict(list)
+    for an_id, common_val in id2common.items():
+        common2ids[common_val].append(an_id)
     metric2diffs = collections.defaultdict(list)
+    for common, ids in common2ids.items():
+        ids_A = [an_id for an_id in ids if _qry_json(id2mdata[an_id], filter_A)]
+        ids_B = [an_id for an_id in ids if _qry_json(id2mdata[an_id], filter_B)]
+        if not (ids_A and ids_B): continue
+        processing_stats['ids_A_{}'.format(len(ids_A))] += 1
+        processing_stats['ids_B_{}'.format(len(ids_B))] += 1
+        if len(ids_A) > 1:
+            _log.warning('MULTIPLE DIRS MATCH: ids_A={}'.format([_qry_json(id2mdata[id_A], label) for id_A in ids_A]))
+        if len(ids_B) > 1:
+            _log.warning('MULTIPLE DIRS MATCH: ids_B={}'.format([_qry_json(id2mdata[id_B], label) for id_B in ids_B]))
 
-    _log.info('filter_A=%s', filter_A)
-    _log.info('filter_B=%s', filter_B)
+        id_A = ids_A[0]
+        id_B = ids_B[0]
+        for metric in metrics:
+            metric2diffs[metric].append((_qry_json(id2mdata[id_A], metric) - _qry_json(id2mdata[id_B], metric),
+                                         _qry_json(id2mdata[id_A], label), _qry_json(id2mdata[id_B], label)))
 
-    found_pairs = 0
-    for ag, analyses in analysis_groups.items():
-        ag_A = [a for a in analyses if _analysis_matches_filter(a, filter_A)]
-        ag_B = [a for a in analyses if _analysis_matches_filter(a, filter_B)]
-        if ag_A and ag_B:
-            found_pairs += 1
-            for an_A, an_B in itertools.product(ag_A, ag_B):
-                print('\nag=', ag, '\nan_A=', an_A, '\nan_B=', an_B)
-                assert _analysis_matches_filter(an_A, filter_A)
-                assert _analysis_matches_filter(an_B, filter_B)
-                #if an_A['analysis_dir'] == an_B['analysis_dir']: continue
-                for metric in metrics:
-                    if an_A['analysis_dir'] != an_B['analysis_dir']:
-                        metric2diffs[metric].append((an_B[metric] - an_A[metric], an_A['analysis_dir'], an_B['analysis_dir']))
-                        print('AN_A is')
-                        print('\n'.join(map(str,an_A.items())))
-                        print('AN_B is')
-                        print('\n'.join(map(str,an_B.items())))
-
-                    else:
-                        _log.info('skip: %s', (an_B[metric] - an_A[metric], an_A['analysis_dir'], an_B['analysis_dir']))
-    _log.info('found_pairs=%s', found_pairs)
     for metric in metrics:
-        print('metric=', metric, 'diffs=\n')
-        print('\n'.join(map(str, sorted(metric2diffs[metric]))))
+        _log.info('metric=%s diffs:', metric)
+        for metric_delta, items in itertools.groupby(sorted(metric2diffs[metric]), operator.itemgetter(0)):
+            items = list(items)
+            _log.info('********** DELTA=%s: %d items ************', metric_delta, len(items))
+            if metric_delta != 0:
+                for item in items:
+                    _log.info('item=%s', item)
+
+    _log.info('processing_stats=%s', processing_stats)
 
 def parser_compare_analysis_pairs(parser=argparse.ArgumentParser()):
     parser.add_argument('--analysisDirsRoots', dest='analysis_dirs_roots', nargs='+', required=True,
                         help='dir roots containing analysis dirs')
-    parser.add_argument('--filterA', dest='filter_A', nargs=2, action='append', required=True)
-    parser.add_argument('--filterB', dest='filter_B', nargs=2, action='append', required=True)
+    parser.add_argument('--common', required=True)
+    parser.add_argument('--filterA', dest='filter_A', required=True)
+    parser.add_argument('--filterB', dest='filter_B', required=True)
+    parser.add_argument('--label', required=True)
     parser.add_argument('--metrics', action='append')
-    parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+',
-                        default=['inputs.', 'outputs.', 'labels.docker_img_hash', 'status', 'succeeded'],
-                        help='only consider metadata items starting with these prefixes')
-    parser.add_argument('--commonKeysPrefixes', dest='common_keys_prefixes', nargs='+',
-                        help='only compare pairs of analyses that agree on keys starting with these prefixes')
+    # parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+',
+    #                     default=['inputs.', 'outputs.', 'labels.docker_img_hash', 'status', 'succeeded'],
+    #                     help='only consider metadata items starting with these prefixes')
+    # parser.add_argument('--commonKeysPrefixes', dest='common_keys_prefixes', nargs='+',
+    #                     help='only compare pairs of analyses that agree on keys starting with these prefixes')
     util.cmd.attach_main(parser, compare_analysis_pairs, split_args=True)
     return parser
 
