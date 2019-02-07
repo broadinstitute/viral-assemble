@@ -15,6 +15,7 @@ import yaml, json
 import inspect
 import time
 import builtins
+import argparse
 
 import util.file
 
@@ -767,7 +768,7 @@ def transform_json_data(val, node_handler, path=()):
         node_handler_args['is_leaf'] = is_leaf
     handled_val = node_handler(val, **node_handler_args)
     if handled_val is not val:
-        #_log.debug('resolved %s to %s', val, handled_val)
+        #log.debug('resolved %s to %s', val, handled_val)
         return handled_val
     elif isinstance(val, list):
         return [recurse(val=v, path=path+(i,)) for i, v in enumerate(val)]
@@ -819,4 +820,59 @@ class MultilineFormatter(logging.Formatter):
             result = '\n'.join([('  ' if i > 0 else '') + result[i:i+LINE_LEN] for i in range(0, len(result), LINE_LEN)])
         return result
 
+class NestedParserAction(argparse.Action):
 
+    """Parses a list of args using a specified parser.
+
+    Code adapted from argparse._AppendAction
+    """
+
+    def __init__(self,
+                 option_strings,
+                 dest,
+                 nargs=None,
+                 const=None,
+                 default=None,
+                 type=None,
+                 choices=None,
+                 required=False,
+                 help=None,
+                 metavar=None,
+                 nested_parser=None):
+        if nested_parser is None:
+            raise ValueError('nested_parser must be specified')
+        if nargs == 0:
+            raise ValueError('nargs for append actions must be > 0; if arg '
+                             'strings are not supplying the value to append, '
+                             'the append const action may be more appropriate')
+        if const is not None:
+            raise ValueError('const should not be specified')
+        super(NestedParserAction, self).__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=nargs,
+            const=const,
+            default=default,
+            type=type,
+            choices=choices,
+            required=required,
+            help=help,
+            metavar=metavar)
+        self.nested_parser = nested_parser
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        items = copy.copy(self._argparse_ensure_value(namespace, self.dest, []))
+        log.debug('NESTED PARSING %s', values)
+        items.append(self.nested_parser.parse_args(values))
+        setattr(namespace, self.dest, items)
+
+    @staticmethod
+    def _argparse_ensure_value(namespace, name, value):
+        """Ensure that `namespace` has the attr `name`, with default value `value`,
+        and return the attri's value."""
+        if getattr(namespace, name, None) is None:
+            setattr(namespace, name, value)
+        return getattr(namespace, name)
+
+
+# end: class _NestedParserAction(argparse.Action)
