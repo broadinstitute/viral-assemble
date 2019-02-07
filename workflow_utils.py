@@ -1348,9 +1348,11 @@ def _normalize_cromwell_labels(labels):
     for k in tuple(labels):
         k_sfx = 0
         v = labels[k]
-        while len(v) > MAX_LABEL_LEN:
-            labels[k + ('' if not k_sfx else '_{}'.format(k_sfx+1))] = v[:MAX_LABEL_LEN]
-            v = v[MAX_LABEL_LEN:]
+        if len(v) > MAX_LABEL_LEN:
+            while v:
+                labels[k + ('' if not k_sfx else '_{}'.format(k_sfx))] = v[:MAX_LABEL_LEN]
+                v = v[MAX_LABEL_LEN:]
+                k_sfx += 1
     return labels
 
 def _parse_cromwell_output_str(cromwell_output_str):
@@ -1558,6 +1560,8 @@ def submit_analysis_wdl(workflow_name, inputs,
 
     analysis_labels = analysis_labels or collections.OrderedDict()
     analysis_labels['analysis_batch_id'] = _create_analysis_id(workflow_name, prefix='analyses_batch')
+    analysis_labels['command_line'] = ' '.join(sys.argv)
+    analysis_labels['submit_cwd'] = os.getcwd()
 
     def _proc(inp):
         return util.misc.make_seq(inp.func(inp, workflow_name=workflow_name),
