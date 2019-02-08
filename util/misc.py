@@ -874,5 +874,13 @@ class NestedParserAction(argparse.Action):
             setattr(namespace, name, value)
         return getattr(namespace, name)
 
-
 # end: class _NestedParserAction(argparse.Action)
+
+if hasattr(re, 'fullmatch'):
+    re_fullmatch = re.fullmatch
+else:
+    def re_fullmatch(regex, string, flags=0):
+        """Emulate python-3.4 re.fullmatch()."""
+        return re.match("(?:" + regex + r")\Z", string, flags=flags)
+
+  

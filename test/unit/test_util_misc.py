@@ -354,6 +354,7 @@ def test_available_cpu_count(monkeypatch_function_result):
 
 def test_uuid_re():
     UUID_RE = util.misc.UUID_RE
-    assert re.fullmatch(UUID_RE, str(uuid.uuid4()))
-    assert not re.fullmatch(UUID_RE, '0'+str(uuid.uuid4()))
-    assert not re.fullmatch(UUID_RE, str(uuid.uuid4())+'0')
+    re_fullmatch = util.misc.re_fullmatch
+    assert re_fullmatch(UUID_RE, str(uuid.uuid4()))
+    assert not re_fullmatch(UUID_RE, '0'+str(uuid.uuid4()))
+    assert not re_fullmatch(UUID_RE, str(uuid.uuid4())+'0')
