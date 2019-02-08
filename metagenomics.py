@@ -246,7 +246,7 @@ def sam_lca(db, sam_file, output=None, top_percent=10, unique_only=True):
             if mapped_segs:
                 tax_id = process_sam_hits(db, mapped_segs, top_percent)
                 if tax_id is None:
-                    log.warn('Query: {} has no valid taxonomy paths.'.format(query_name))
+                    log.warning('Query: {} has no valid taxonomy paths.'.format(query_name))
                     if unique_only:
                         continue
                     else:
@@ -365,7 +365,7 @@ def coverage_lca(query_ids, parents, lca_percent=100):
         while query_id != 1:
             path.append(query_id)
             if parents.get(query_id, 0) == 0:
-                log.warn('Parent for query id: {} missing'.format(query_id))
+                log.warning('Parent for query id: {} missing'.format(query_id))
                 break
             query_id = parents[query_id]
         if query_id == 1:

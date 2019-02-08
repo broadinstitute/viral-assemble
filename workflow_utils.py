@@ -88,9 +88,10 @@ import sys
 import re
 import urllib
 try:
-    from urllib import urlencode
+    from urllib import urlencode, pathname2url
 except ImportError:
     from urllib.parse import urlencode
+    from urllib.request import pathname2url
 try:
     import SimpleHTTPServer
     import SocketServer
@@ -331,7 +332,7 @@ def _dx_make_download_url(dxid, duration='2h'):
 def _standardize_dx_url(url):
     dxid = _url_to_dxid(url)
     dx_descr = _dx_describe(_url_to_dxid(url))
-    return DX_URI_PFX + dxid + '/' + urllib.pathname2url(dx_descr['name'])
+    return DX_URI_PFX + dxid + '/' + pathname2url(dx_descr['name'])
 
 
 # ** GCS-related utils
@@ -509,7 +510,10 @@ def _git_annex_get_url_key(url):
     assert uritools.isuri(url)
 
     url_parts = uritools.urisplit(url)
-    url_parts = url_parts._replace(path=uritools.uriencode(url_parts.path, safe='/'))
+    _log.info('url is %s url_parts are %s', url, url_parts)
+    path_type = type(url_parts.path)
+    url_parts = url_parts._replace(path=path_type(uritools.uriencode(url_parts.path, safe='/')))
+    _log.info('now url is %s url_parts are %s', url, url_parts)
     url = uritools.uriunsplit(url_parts)
 
     assert uritools.isuri(url)
@@ -829,7 +833,7 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
             stage2name[stage['id']] = stage['execution']['name']
 
     for mdata_rec in ('input', 'output', 'runInput'):
-        for k in mdata[mdata_rec]:
+        for k in tuple(mdata[mdata_rec]):
             stage_id = k.split('.')[0]
             if stage_id in stage2name:
                 _dict_rename_key(mdata[mdata_rec], k,
