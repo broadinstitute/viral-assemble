@@ -35,7 +35,7 @@ class DockerTool(tools.Tool):
 # ** init, execute
     def __init__(self, install_methods=None):
         if install_methods is None:
-            install_methods = [tools.PreexistingUnixCommand(path=distutils.spawn.find_executable('docker'))]
+            install_methods = [tools.PrexistingUnixCommand(path=distutils.spawn.find_executable('docker'))]
         tools.Tool.__init__(self, install_methods=install_methods)
 
     def version(self):
