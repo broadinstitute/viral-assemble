@@ -26,6 +26,7 @@ env:
   # DX_API_TOKEN (for DNAnexus builds, and for testing tools/dnanexus.py)
   - secure: "BnUw6ceEClSBFJjZgCy6GebD1ENxaHp3En05maWExdx0xyCb+T09XM1BrsCpPOv25npVUt8Q/YB6YpAiSGMT+RUwdiGj4OtaJb+I3HY/2fT1P7eCIEVITQhtGy5e/vFnavSk0eKzCV09z94c1kqjG3JnTocpPUa1W3JBxVr96vs="
   - DX_PROJECT=project-F8PQ6380xf5bK0Qk0YPjB17P
+  # enable pytest tests that rely on DNAnexus access
   - VIRAL_NGS_DX_TESTS=1
 
 cache:
