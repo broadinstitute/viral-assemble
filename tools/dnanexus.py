@@ -22,6 +22,8 @@ except ImportError:
     from urllib.parse import urlencode
     from urllib.request import pathname2url
 
+import dxpy
+
 import tools
 import util.file
 import util.misc
@@ -73,12 +75,13 @@ class DxTool(tools.Tool):
         dx_descr = _dx_describe(_url_to_dxid(url))
         return cls.DX_URI_PFX + dxid + '/' + pathname2url(dx_descr['name'])
 
-    @util.misc.memoize_persist(to_picklable=functools.partial(json.dumps, separators=(',',':')),
-                               from_picklable=_json_loads)
+#    @util.misc.memoize_persist(to_picklable=functools.partial(json.dumps, separators=(',',':')),
+#                               from_picklable=_json_loads)
     @staticmethod
     def describe(dxid):
         """Return json description for the given dxid"""
-        return _run_get_json('dx', 'describe', '--verbose', '--details', '--json', dxid)
+        return dxpy.describe(dxid)
+        #return _run_get_json('dx', 'describe', '--verbose', '--details', '--json', dxid)
 
 # * end
 # end: class DxTool(tools.Tool)
