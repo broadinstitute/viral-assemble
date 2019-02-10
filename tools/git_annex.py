@@ -661,6 +661,47 @@ class GitAnnexTool(tools.Tool):
         # end: def gather_filestats(ga_tool, url2filestat):
     # end: class GsUriRemote(object)
 
+    class DxRemote(Remote):
+        """Files stored in DNAnexus"""
+
+        EXTERNALTYPE = 'dnanexus'
+
+        def __init__(self, remote_name, remote_uuid):
+            super(GitAnnexTool.GsUriRemote, self).__init__(remote_name, remote_uuid)
+            self.dnanexus_tool = tools.dnanexus.DxTool()
+
+        def handles_url(self, url):
+            """Return True if this remote handles this URL"""
+            return uritools.isuri(url) and uritools.urisplit(url).scheme == 'dx'
+
+        def gather_filestats(self, ga_tool, url2filestat):
+            """Gather filestats for dx:// URLs.
+            """
+
+            dx_urls_needing_metadata = set()
+            for url, filestat in url2filestat.items():
+                if 'git_annex_key' in filestat: continue
+                if not self.handles_url(url): continue
+                dx_urls_needing_metadata.add(url)
+
+            _log.debug('DX URLS NEEDING METADATA: %s', '\n'.join(map(str, dx_urls_needing_metadata)))
+            url2attrs = self.gcloud_tool.get_metadata_for_objects(dx_urls_needing_metadata, ignore_errors=True)
+            _log.debug('url2ATTRS=%s %s', url2attrs, url2filestat)
+
+            for url in dx_urls_needing_metadata:
+                filestat = url2filestat[url]
+                if url in url2attrs:
+                    filestat.update(size=url2attrs[url]['size'], md5=url2attrs[url]['md5'].lower())
+                    filestat['git_annex_key'] = ga_tool.construct_key(key_attrs=dict(backend='MD5E',
+                                                                                     size=filestat['size'],
+                                                                                     md5=filestat['md5'],
+                                                                                     fname=url))
+                    ga_tool.register_key_in_remote_at_url(key=filestat['git_annex_key'],
+                                                          url=url, remote_uuid=self.remote_uuid, now=False)
+
+        # end: def gather_filestats(ga_tool, url2filestat):
+    # end: class DxRemote(object)
+
     REMOTE_TYPES = [LocalDirRemote, GsUriRemote]
 
     def get_remotes(self):
