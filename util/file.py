@@ -223,7 +223,10 @@ def destroy_tmp_dir(tempdir=None):
 
 def get_cache_dir(prefix='cache'):
     """Return a directory that can be used for caching information.  If VIRAL_NGS_CACHE_DIR environment variable is set, the cache
-    can persist between command executions."""
+    can persist between command executions.
+
+    See also: util.misc.memoize_persist
+    """
     if 'VIRAL_NGS_CACHE_DIR' in os.environ:
         return os.environ['VIRAL_NGS_CACHE_DIR']
     cache_dir = tmp_dir(prefix=prefix).__enter__()
