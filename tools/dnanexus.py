@@ -16,6 +16,12 @@ import pipes
 import time
 import platform
 
+try:
+    from urllib import urlencode, pathname2url
+except ImportError:
+    from urllib.parse import urlencode
+    from urllib.request import pathname2url
+
 import tools
 import util.file
 import util.misc
@@ -51,6 +57,28 @@ class DxTool(tools.Tool):
         """Print dx cli version"""
         self.execute(['--version'])
 
+    DX_URI_PFX='dx://'
+
+    @classmethod
+    def url_to_dxid(cls, url):
+        return os.path.splitext(url[len(cls.DX_URI_PFX):].split('/')[0])[0]
+    
+    @classmethod
+    def dx_make_download_url(cls, dxid, duration='2h'):
+        return _run_get_output('dx', 'make_download_url', dxid, '--duration', duration)
+
+    @classmethod
+    def standardize_dx_url(cls, url):
+        dxid = _url_to_dxid(url)
+        dx_descr = _dx_describe(_url_to_dxid(url))
+        return cls.DX_URI_PFX + dxid + '/' + pathname2url(dx_descr['name'])
+
+    @util.misc.memoize_persist(to_picklable=functools.partial(json.dumps, separators=(',',':')),
+                               from_picklable=_json_loads)
+    @staticmethod
+    def describe(dxid):
+        """Return json description for the given dxid"""
+        return _run_get_json('dx', 'describe', '--verbose', '--details', '--json', dxid)
+
 # * end
 # end: class DxTool(tools.Tool)
-
