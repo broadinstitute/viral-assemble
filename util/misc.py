@@ -35,26 +35,19 @@ def timer(prefix):
     elapsed = '{:.2f}'.format(finish - start)
     print(prefix + ' - ' + elapsed, file=sys.stderr)
 
-# def wraps(f):
-#     """Like functools.wraps but sets __wrapped__ even on Python 2.7"""
-#     wrapper = functools.wraps(f)
-#     def do_wrap(ff):
-#         wrapped = wrapper(ff)
-#         if not hasattr(wrapped, '__wrapped__'):
-#             setattr(wrapped, '__wrapped__', f)
-#         return wrapped
-#     return do_wrap
-
-# def unwrap(f):
-#     """Find the original function under layers of wrappers"""
-#     return f if not hasattr(f, '__wrapped__') else unwrap(getattr(f, '__wrapped__'))
-
 def get_module_name(f):
     """Get module name of a function"""
     return os.path.splitext(os.path.relpath(inspect.getsourcefile(util.misc.unwrap(f)),
                                             util.version.get_project_path()))[0].replace(os.sep, '.')
 
 def memoize(obj):
+    """Function decorator that caches function return values for given arguments, and
+    returns results from the cache when available. Must not be used for functions that are non-deterministic, have
+    side effects, or depend on external state that may change.
+
+    See also: memoize_persist()
+    """
+
     cache = obj.cache = {}
 
     @functools.wraps(obj)
@@ -66,12 +59,8 @@ def memoize(obj):
     return memoizer
 
 def identity(x):
+    """The identity function"""
     return x
-
-def _commit_sqlite(db):
-    print('COMMITTING SQLITE DB...')
-    db.commit()
-    print('COMMITTED SQLITE DB')
 
 _caches = []
 def _commit_caches():
@@ -79,43 +68,58 @@ def _commit_caches():
         cache.commit()
 
 def cleanup_misc():
+    """Do cleanup tasks for the `util.misc` module"""
     _commit_caches()
 
 def memoize_persist(to_picklable=identity, from_picklable=identity):
+    """Function decorator that caches function return values for given arguments, and
+    returns results from the cache when available.  The cache can persist on disk across
+    command executions.  Must not be used for functions that are non-deterministic, have
+    side effects, or depend on external state that may change.
 
-    def memoize_persist_do(obj):
-        cache_dir = os.path.join(util.file.get_cache_dir(), 'vngs', get_module_name(obj))
+    Note: if the implementation of the cached function or any function it calls changes,
+    the cache must be manually cleared!
+    """
+
+    def memoize_persist_do(orig_fn):
+        cache_dir = os.path.join(util.file.get_cache_dir(), 'vngs', get_module_name(orig_fn))
         util.file.mkdir_p(cache_dir)
-        key_hash2cache = {}
 
-        def get_cache(key):
+        # We store arg-to-result mappings using sqlitedict .
+        # To reduce cache contention, we split the database into many sqlite files based on key.
+
+        def _get_cache(key, key_hash2cache = {}):
+            """Return the SqliteDict for the cache responsible for storing result of `key`."""
             key_hash = '{:03d}'.format(hash(key) % 1000)
 
             if key_hash not in key_hash2cache:
-                db_dir = os.path.join(cache_dir, obj.__name__, key_hash[0], key_hash[1])
+                db_dir = os.path.join(cache_dir, orig_fn.__name__, key_hash[0], key_hash[1])
                 util.file.mkdir_p(db_dir)
                 cache = sqlitedict.SqliteDict(os.path.join(db_dir, key_hash[2]))
                 _caches.append(cache)
                 key_hash2cache[key_hash] = cache
             return key_hash2cache.get[key_hash]
 
-        @wraps(obj)
+        @wraps(orig_fn)
         def memoizer(*args, **kwargs):
-            key = "".join([str(args),str(sorted(kwargs))])
+            key = "".join([str(args),str(sorted(kwargs.items()))])
             try:
-                cache = get_cache(key)
+                cache = _get_cache(key)
             except Exception:
                 cache = {}
             if key in cache:
                 return from_picklable(cache[key])
-            result = obj(*args, **kwargs)
+            result = orig_fn(*args, **kwargs)
             try:
                 cache[key] = to_picklable(result)
             except Exception:
+                log.warning('memoize_persist: could not cache result of %s for args=%s kwargs=%s',
+                            orig_fn.__name__, args, kwargs)
                 pass
             return result
         return memoizer
     return memoize_persist_do
+# end: def memoize_persist(to_picklable=identity, from_picklable=identity)
 
 def unique(items):
     ''' Return unique items in the same order as seen in the input. '''
