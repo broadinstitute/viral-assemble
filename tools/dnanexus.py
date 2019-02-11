@@ -23,6 +23,7 @@ except ImportError:
     from urllib.request import pathname2url
 
 import dxpy
+import uritools
 
 import tools
 import util.file
@@ -63,7 +64,8 @@ class DxTool(tools.Tool):
 
     @classmethod
     def url_to_dxid(cls, url):
-        return os.path.splitext(url[len(cls.DX_URI_PFX):].split('/')[0])[0]
+        """Given a dx://file-xxx URL, return the dxid in it"""
+        return uritools.urisplit(url).authority
     
     @classmethod
     def dx_make_download_url(cls, dxid, duration='2h'):
