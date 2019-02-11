@@ -16,6 +16,7 @@ import inspect
 import time
 import builtins
 import argparse
+import concurrent.futures
 
 import util.file
 
@@ -888,3 +889,6 @@ else:
         return re.match("(?:" + regex + r")\Z", string, flags=flags)
 
   
+def maybe_wait_for_result(arg, timeout=None):
+    """If arg is a Future, wait for its result, else just return it."""
+    return arg.result(timeout=timeout) if isinstance(arg, concurrent.futures.Future) else arg

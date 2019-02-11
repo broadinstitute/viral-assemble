@@ -233,7 +233,8 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
     uris_to_import = gs_uris + ldir_uris
     #uris_to_import = ldir_uris
 
-    url2filestat = ga_tool.import_urls(urls=uris_to_import)
+    ga_tool.import_urls(urls=uris_to_import)
+    url2filestat = ga_tool.get_url2filestat()
 
     url_presence = {}
     with ga_tool.batching() as ga_tool:
@@ -258,4 +259,6 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
         ga_tool.fromkey(url2filestat[f]['git_annex_key'], fn)
         ga_tool.get(fn)
         assert os.path.isfile(fn), 'git-annex get failed for {}'.format(fn)
-        assert util.file.md5_for_file(fn).lower() in url2filestat[f]['git_annex_key']
+        assert util.file.md5_for_file(fn).lower() in util.misc.maybe_wait_for_result(url2filestat[f]['git_annex_key'],
+                                                                                     timeout=360)
+

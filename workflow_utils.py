@@ -630,9 +630,9 @@ def _resolve_link_local_path(val, git_file_dir):
 
     # what if it's a dir?  
 
-def _resolve_link_using_gathered_filestat(val, git_file_dir, url2filestat, git_annex_tool):
+def _resolve_link_using_gathered_filestat(val, git_file_dir, git_annex_tool):
     if not _is_str(val): return val
-    git_annex_key = url2filestat.get(val, {}).get('git_annex_key', None)
+    git_annex_key = git_annex_tool.get_key_for_url(val, error_if_missing=False)
     if not git_annex_key: return val
     util.file.mkdir_p(git_file_dir)
     fname = os.path.join(git_file_dir, os.path.basename(val))
@@ -1943,8 +1943,6 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
     processing_stats = collections.Counter()
     status_stats = collections.Counter()
 
-    url2filestat = _ord_dict()
-
     analysis_dirs = () if not analysis_dirs_roots else _get_analysis_dirs_under(analysis_dirs_roots)
     cromwell_analysis_id_to_dir = {}
     for analysis_dir in analysis_dirs:
@@ -1997,10 +1995,9 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
 
                 leaf_jpaths = util.misc.json_gather_leaf_jpaths(mdata)
                 str_leaves = list(filter(_is_str, util.misc.map_vals(leaf_jpaths)))
-                git_annex_tool.import_urls(str_leaves, ignore_non_urls=True, url2filestat=url2filestat, now=False)
+                git_annex_tool.import_urls(str_leaves, ignore_non_urls=True, now=False)
                 mdata_rel = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir,
                                                         methods=[functools.partial(_resolve_link_using_gathered_filestat,
-                                                                                   url2filestat=url2filestat,
                                                                                    git_annex_tool=git_annex_tool),
 #                                                                 _resolve_link_local_path,
 #                                                                 _resolve_link_gs,
