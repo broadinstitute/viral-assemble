@@ -222,7 +222,7 @@ class GitAnnexTool(tools.Tool):
                 
                 # if any are delayed calls, call them now
                 def _resolve_futures(args):
-                    return [util.misc.maybe_wait_for_result(arg, timeout=360) for arg in args]
+                    return [util.misc.maybe_wait_for_result(arg, timeout=1500) for arg in args]
                 batch_calls = [batch_call._replace(batch_args=_resolve_futures(batch_call.batch_args)) for batch_call in batch_calls]
 
                 batch_inp_str = '\n'.join([' '.join(map(str, batch_call.batch_args)) for batch_call in batch_calls]) + '\n'
