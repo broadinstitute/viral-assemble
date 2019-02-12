@@ -599,6 +599,25 @@ def _resolve_link_dx(val, git_file_dir, dx_analysis_id, _cache=None):
                 _cache[dx_file_id] = val_resolved
     return val_resolved
 
+
+def _resolve_link_dx2(val, git_file_dir, dx_analysis_id, _cache=None, git_annex_tool=None):
+    val_resolved = _resolve_dx_link_to_dx_file_id_or_value(val=val, dx_analysis_id=dx_analysis_id)
+    if _maps(val_resolved, '$dnanexus_link'):
+        dx_file_id = val_resolved['$dnanexus_link']
+        assert dx_file_id.startswith('file-')
+        if _maps(_cache, dx_file_id):
+            val_resolved = copy.deepcopy(_cache[dx_file_id])
+            #_log.debug('RESOLVED %s TO %s FROM CACHE', val, val_resolved)
+        else:
+            util.file.mkdir_p(git_file_dir)
+            # git_annex_tool.  *** CHANGE HERE
+            val_resolved = {'$git_link': import_from_url(url='dx://' + dx_file_id, git_file_path=git_file_dir, fast=False)}
+            #_log.debug('RESOLVED %s TO %s', val, val_resolved)
+            if _cache is not None:
+                _cache[dx_file_id] = val_resolved
+    return val_resolved
+
+
 def _resolve_link_gs(val, git_file_dir, fast=True):
     if not (_is_str(val) and val.startswith('gs://') and _gs_stat(val)): return val
     util.file.mkdir_p(git_file_dir)
