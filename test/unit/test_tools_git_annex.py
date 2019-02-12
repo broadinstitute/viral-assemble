@@ -42,6 +42,8 @@ def git_annex_repo(ga_tool, tmpdir_module):
             ga_tool.init_repo()
             ga_tool.initremote_external(remote_name='ldir_remote', externaltype='ldir')
             ga_tool.initremote_external(remote_name='gs_uri_remote', externaltype='gs_uri')
+            if 'VIRAL_NGS_DX_TESTS' in os.environ:
+                ga_tool.initremote_external(remote_name='dnanexus_remote', externaltype='dnanexus')
             ga_tool.execute_git(['config', 'annex.backend', 'MD5E'])
             ga_tool.execute_git(['config', '--type=int', 'annex.maxextensionlength', '5'])
             yield os.getcwd()
@@ -230,11 +232,15 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
     gs_uris = ('gs://gcp-public-data-landsat/LC08/PRE/044/034/LC80440342016259LGN00/LC80440342016259LGN00_B1.TIF',)
 
     ldir_uris = tuple(map(os.path.abspath, (file_A, file_B)))
+    dx_uris = ('dx://file-FVQ74G80f5zf4V5vK0GjB1q5',)
     uris_to_import = gs_uris + ldir_uris
+    if 'VIRAL_NGS_DX_TESTS' in os.environ:
+        uris_to_import = dx_uris
     #uris_to_import = ldir_uris
 
     ga_tool.import_urls(urls=uris_to_import)
     url2filestat = ga_tool.get_url2filestat()
+    _log.info('AFTER import_urls: url2filestat is %s', url2filestat)
 
     url_presence = {}
     with ga_tool.batching() as ga_tool:

@@ -34,9 +34,11 @@ import atexit
 import contextlib2 as contextlib
 import uritools
 import threading
+import dxpy
 
 import tools
 import tools.gcloud
+import tools.dnanexus
 import util.file
 import util.misc
 import util.version
@@ -692,12 +694,28 @@ class GitAnnexTool(tools.Tool):
         EXTERNALTYPE = 'dnanexus'
 
         def __init__(self, remote_name, remote_uuid):
-            super(GitAnnexTool.GsUriRemote, self).__init__(remote_name, remote_uuid)
-            self.dnanexus_tool = tools.dnanexus.DxTool()
+            super(GitAnnexTool.DxRemote, self).__init__(remote_name, remote_uuid)
+            self.dx_tool = tools.dnanexus.DxTool()
 
         def handles_url(self, url):
             """Return True if this remote handles this URL"""
             return uritools.isuri(url) and uritools.urisplit(url).scheme == 'dx'
+
+        @staticmethod
+        def _key_from_dx_url(url):
+            dxid = uritools.urisplit(url).authority
+            dxf = dxpy.DXFile(dxid)
+            descr = dxf.describe(fields={'parts'}, default_fields=True)
+            if len(descr['parts']) == 1:
+                md5 = descr['parts']['1']['md5']
+            else:
+                with util.file.tempfname(suffix='_dx_md5') as t_file:
+                    dxpy.dxfile_functions.download_dxfile(dxid, t_file)
+                    md5 = util.file.md5_for_file(t_file)
+            return GitAnnexTool.construct_key(key_attrs=dict(backend='MD5E',
+                                                             size=descr['size'],
+                                                             md5=md5,
+                                                             fname=descr['name']))
 
         def gather_filestats(self, ga_tool):
             """Gather filestats for dx:// URLs.
@@ -710,24 +728,17 @@ class GitAnnexTool(tools.Tool):
                 dx_urls_needing_metadata.add(url)
 
             _log.debug('DX URLS NEEDING METADATA: %s', '\n'.join(map(str, dx_urls_needing_metadata)))
-            url2attrs = self.gcloud_tool.get_metadata_for_objects(dx_urls_needing_metadata, ignore_errors=True)
-            _log.debug('url2ATTRS=%s %s', url2attrs, ga_tool._url2filestat)
 
             for url in dx_urls_needing_metadata:
-                filestat = url2filestat[url]
-                if url in url2attrs:
-                    filestat.update(size=url2attrs[url]['size'], md5=url2attrs[url]['md5'].lower())
-                    filestat['git_annex_key'] = ga_tool.construct_key(key_attrs=dict(backend='MD5E',
-                                                                                     size=filestat['size'],
-                                                                                     md5=filestat['md5'],
-                                                                                     fname=url))
-                    ga_tool.register_key_in_remote_at_url(key=filestat['git_annex_key'],
-                                                          url=url, remote_uuid=self.remote_uuid, now=False)
+                filestat = ga_tool._url2filestat[url]
+                filestat['git_annex_key'] = ga_tool._get_future(self._key_from_dx_url, url)
+                ga_tool.register_key_in_remote_at_url(key=filestat['git_annex_key'],
+                                                      url=url, remote_uuid=self.remote_uuid, now=False)
 
         # end: def gather_filestats(ga_tool):
     # end: class DxRemote(object)
 
-    REMOTE_TYPES = [LocalDirRemote, GsUriRemote]
+    REMOTE_TYPES = [LocalDirRemote, GsUriRemote, DxRemote]
 
     def get_remotes(self):
         """Load remotes from the git configuration"""
