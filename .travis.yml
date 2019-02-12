@@ -23,12 +23,6 @@ env:
   - BOTO_CONFIG=/dev/null # bogus value to override config on travis
   - _JAVA_OPTIONS="-Xmx3g" # overrides jvm opts set elsewhere; see: https://stackoverflow.com/questions/28327620/difference-between-java-options-java-tool-options-and-java-opts
 
-  # DX_API_TOKEN (for DNAnexus builds, and for testing tools/dnanexus.py)
-  - secure: "BnUw6ceEClSBFJjZgCy6GebD1ENxaHp3En05maWExdx0xyCb+T09XM1BrsCpPOv25npVUt8Q/YB6YpAiSGMT+RUwdiGj4OtaJb+I3HY/2fT1P7eCIEVITQhtGy5e/vFnavSk0eKzCV09z94c1kqjG3JnTocpPUa1W3JBxVr96vs="
-  - DX_PROJECT=project-F8PQ6380xf5bK0Qk0YPjB17P
-  # enable pytest tests that rely on DNAnexus access
-  - VIRAL_NGS_DX_TESTS=1
-
 cache:
   directories:
     - $HOME/misc_cache
@@ -167,6 +161,12 @@ jobs:
       env:
         - TRAVIS_JOB=test_py27_part1
         - PYTEST_EXTRA_OPTS="--part-num 1"
+	  # DX_API_TOKEN (for DNAnexus builds, and for testing tools/dnanexus.py)
+        - secure: "BnUw6ceEClSBFJjZgCy6GebD1ENxaHp3En05maWExdx0xyCb+T09XM1BrsCpPOv25npVUt8Q/YB6YpAiSGMT+RUwdiGj4OtaJb+I3HY/2fT1P7eCIEVITQhtGy5e/vFnavSk0eKzCV09z94c1kqjG3JnTocpPUa1W3JBxVr96vs="
+        - DX_PROJECT=project-F8PQ6380xf5bK0Qk0YPjB17P
+          # enable pytest tests that rely on DNAnexus access
+        - VIRAL_NGS_DX_TESTS=1
+
       before_install: travis/before_install.sh
       install:
         - source travis/install-conda.sh
@@ -184,6 +184,10 @@ jobs:
       env:
         - TRAVIS_JOB=test_py27_part2
         - PYTEST_EXTRA_OPTS="--part-num 2"
+        - secure: "BnUw6ceEClSBFJjZgCy6GebD1ENxaHp3En05maWExdx0xyCb+T09XM1BrsCpPOv25npVUt8Q/YB6YpAiSGMT+RUwdiGj4OtaJb+I3HY/2fT1P7eCIEVITQhtGy5e/vFnavSk0eKzCV09z94c1kqjG3JnTocpPUa1W3JBxVr96vs="
+        - DX_PROJECT=project-F8PQ6380xf5bK0Qk0YPjB17P
+          # enable pytest tests that rely on DNAnexus access
+        - VIRAL_NGS_DX_TESTS=1
       before_install: travis/before_install.sh
       install:
         - source travis/install-conda.sh
@@ -201,6 +205,10 @@ jobs:
       env:
         - TRAVIS_JOB=test_py36_part1
         - PYTEST_EXTRA_OPTS="--part-num 1"
+        - secure: "BnUw6ceEClSBFJjZgCy6GebD1ENxaHp3En05maWExdx0xyCb+T09XM1BrsCpPOv25npVUt8Q/YB6YpAiSGMT+RUwdiGj4OtaJb+I3HY/2fT1P7eCIEVITQhtGy5e/vFnavSk0eKzCV09z94c1kqjG3JnTocpPUa1W3JBxVr96vs="
+        - DX_PROJECT=project-F8PQ6380xf5bK0Qk0YPjB17P
+          # enable pytest tests that rely on DNAnexus access
+        - VIRAL_NGS_DX_TESTS=1
       before_install: travis/before_install.sh
       install:
         - source travis/install-conda.sh
@@ -221,6 +229,10 @@ jobs:
       env:
         - TRAVIS_JOB=test_py36_part2
         - PYTEST_EXTRA_OPTS="--part-num 2"
+        - secure: "BnUw6ceEClSBFJjZgCy6GebD1ENxaHp3En05maWExdx0xyCb+T09XM1BrsCpPOv25npVUt8Q/YB6YpAiSGMT+RUwdiGj4OtaJb+I3HY/2fT1P7eCIEVITQhtGy5e/vFnavSk0eKzCV09z94c1kqjG3JnTocpPUa1W3JBxVr96vs="
+        - DX_PROJECT=project-F8PQ6380xf5bK0Qk0YPjB17P
+          # enable pytest tests that rely on DNAnexus access
+        - VIRAL_NGS_DX_TESTS=1
       before_install: travis/before_install.sh
       install:
         - source travis/install-conda.sh
