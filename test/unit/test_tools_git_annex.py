@@ -266,4 +266,3 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
         assert os.path.isfile(fn), 'git-annex get failed for {}'.format(fn)
         assert util.file.md5_for_file(fn).lower() in util.misc.maybe_wait_for_result(url2filestat[f]['git_annex_key'],
                                                                                      timeout=360)
-
