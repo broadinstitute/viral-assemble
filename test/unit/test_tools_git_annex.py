@@ -235,8 +235,7 @@ def test_import_urls(ga_tool, git_annex_repo, file_A, file_B):
     dx_uris = ('dx://file-FVQ74G80f5zf4V5vK0GjB1q5',)
     uris_to_import = gs_uris + ldir_uris
     if 'VIRAL_NGS_DX_TESTS' in os.environ:
-        uris_to_import = dx_uris
-    #uris_to_import = ldir_uris
+        uris_to_import += dx_uris
 
     ga_tool.import_urls(urls=uris_to_import)
     url2filestat = ga_tool.get_url2filestat()
