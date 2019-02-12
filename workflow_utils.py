@@ -2557,4 +2557,3 @@ if __name__ == '__main__':
                                filter_B={'inputs.assemble_denovo.assemble.assembler': 'spades'}, metrics=()
         )
     util.cmd.main_argparse(__commands__, __doc__)
-
