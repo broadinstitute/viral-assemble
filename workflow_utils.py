@@ -825,15 +825,15 @@ def _resolve_links_in_json_data(val, rel_to_dir, methods, relpath='files'):
 #     return file_info
 
 # ** import_dx_analysis impl
-def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool):
+def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanexus_tool):
     """Import a DNAnexus analysis into git, in our analysis dir format."""
 
     analysis_dir = analysis_dir_pfx + dx_analysis_id
     util.file.mkdir_p(analysis_dir)
-    mdata = _dx_describe(dx_analysis_id)
-
-    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id, _cache={})]
-    mdata = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir, methods=methods)
+    mdata = dnanexus_tool.describe(dx_analysis_id)
+    mdata = dnanexus_tool.resolve_dx_links_in_dx_analysis_descr(mdata)
+#    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id, _cache={})]
+#    mdata = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir, methods=methods)
 
     # 
     # Convert DNAnexus analysis metadata to Cromwell's metadata format,
@@ -850,6 +850,9 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool):
     for stage in mdata['stages']:
         if _maps(stage, 'id', 'execution'):
             stage2name[stage['id']] = stage['execution']['name']
+            if _maps(stage['execution'], 'runInput'):
+                for k, v in stage['execution']['runInput'].items():
+                    mdata['runInput'][stage['id']+'.'+mdata['workflowName']+'.'+k] = v
 
     for mdata_rec in ('input', 'output', 'runInput'):
         for k in tuple(mdata[mdata_rec]):
@@ -857,6 +860,9 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool):
             if stage_id in stage2name:
                 _dict_rename_key(mdata[mdata_rec], k,
                                  mdata['workflowName']+'.'+stage2name[stage_id]+k[len(stage_id):])
+
+    mdata['submittedFiles'] = collections.OrderedDict()
+    mdata['submittedFiles']['inputs'] = _pretty_print_json(mdata['runInput'])
 
     _dict_rename_key(mdata, 'input', 'inputs')
     _dict_rename_key(mdata, 'output', 'outputs')
@@ -871,14 +877,30 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool):
     submission_datetime = datetime.datetime.fromtimestamp(float(mdata['created']) / 1000.0)
     mdata['submission'] = _isoformat_datetime(submission_datetime)
 
-    _write_json(os.path.join(analysis_dir, 'metadata.json'), **mdata)
+    leaf_jpaths = util.misc.json_gather_leaf_jpaths(mdata)
+    str_leaves = list(filter(_is_str, util.misc.map_vals(leaf_jpaths)))
+    git_annex_tool.import_urls(str_leaves, ignore_non_urls=True, now=False)
+    mdata_rel = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir,
+                                            methods=[functools.partial(_resolve_link_using_gathered_filestat,
+                                                                       git_annex_tool=git_annex_tool),
+                                            ], relpath='files')
+    return (os.path.join(analysis_dir, 'metadata.json'), mdata)
+#    _write_json(mdata_rel_fname, **mdata_rel)
+#    _write_json(os.path.join(analysis_dir, 'metadata.json'), **mdata)
 
 def import_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
     """Import one or more DNAnexus analyses into git, in our analysis dir format."""
     git_annex_tool = tools.git_annex.GitAnnexTool()
+    dnanexus_tool = tools.dnanexus.DxTool()
+    out = []
     with git_annex_tool.batching() as git_annex_tool:
         for dx_analysis_id in dx_analysis_ids:
-            _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool)
+            mdata_fname, mdata = _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanexus_tool)
+            out.append((mdata_fname, mdata))
+    for mdata_fname, mdata in out:
+        mdata = util.misc.transform_json_data(mdata, functools.partial(util.misc.maybe_wait_for_result, timeout=300))
+        util.file.mkdir_p(os.path.dirname(mdata_fname))
+        _write_json(mdata_fname, **mdata)
 
 def parser_import_dx_analyses(parser=argparse.ArgumentParser(fromfile_prefix_chars='@')):
     parser.add_argument('dx_analysis_ids', metavar='DX_ANALYSIS_ID', nargs='+', help='dnanexus analysis id(s)')
