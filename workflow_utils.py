@@ -825,7 +825,7 @@ def _resolve_links_in_json_data(val, rel_to_dir, methods, relpath='files'):
 #     return file_info
 
 # ** import_dx_analysis impl
-def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
+def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool):
     """Import a DNAnexus analysis into git, in our analysis dir format."""
 
     analysis_dir = analysis_dir_pfx + dx_analysis_id
@@ -875,8 +875,10 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx):
 
 def import_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
     """Import one or more DNAnexus analyses into git, in our analysis dir format."""
-    for dx_analysis_id in dx_analysis_ids:
-        _import_dx_analysis(dx_analysis_id, analysis_dir_pfx)
+    git_annex_tool = tools.git_annex.GitAnnexTool()
+    with git_annex_tool.batching() as git_annex_tool:
+        for dx_analysis_id in dx_analysis_ids:
+            _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool)
 
 def parser_import_dx_analyses(parser=argparse.ArgumentParser(fromfile_prefix_chars='@')):
     parser.add_argument('dx_analysis_ids', metavar='DX_ANALYSIS_ID', nargs='+', help='dnanexus analysis id(s)')
@@ -2557,3 +2559,4 @@ if __name__ == '__main__':
                                filter_B={'inputs.assemble_denovo.assemble.assembler': 'spades'}, metrics=()
         )
     util.cmd.main_argparse(__commands__, __doc__)
+

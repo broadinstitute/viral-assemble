@@ -358,3 +358,12 @@ def test_uuid_re():
     assert re_fullmatch(UUID_RE, str(uuid.uuid4()))
     assert not re_fullmatch(UUID_RE, '0'+str(uuid.uuid4()))
     assert not re_fullmatch(UUID_RE, str(uuid.uuid4())+'0')
+
+def test_maps():
+    maps = util.misc.maps
+    assert maps({'a': 1}, 'a')
+    assert not maps({'a': 1}, 'a', 'b')
+    assert not maps({'a'}, 'a')
+    assert not maps(('a',), 'a')
+    assert not maps({}, 'a')
+

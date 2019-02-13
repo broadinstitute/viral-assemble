@@ -211,6 +211,14 @@ class GitAnnexTool(tools.Tool):
         _log.debug('RUNNING BATCH CMDS: %s', self._batched_cmds)
         for batch in sorted(self._batched_cmds, key=operator.attrgetter('priority'), reverse=True):
             batch_calls = self._batched_cmds.pop(batch)
+            # if any are delayed calls, call them now
+            if batch_calls:
+                def _resolve_futures(args):
+                    return [util.misc.maybe_wait_for_result(arg, timeout=1500) for arg in args]
+                batch_calls = [batch_call._replace(batch_args=_resolve_futures(batch_call.batch_args)) \
+                               if batch_call.batch_args else batch_call \
+                               for batch_call in batch_calls]
+
             if batch.preproc:
                 batch_calls = batch.preproc(batch_calls)
             if not batch_calls: continue
@@ -220,10 +228,6 @@ class GitAnnexTool(tools.Tool):
                 # command arguments, one line per batched call.
                 _log.debug('calling batch calls: %s %s', batch.tool_cmd, batch_calls)
                 
-                # if any are delayed calls, call them now
-                def _resolve_futures(args):
-                    return [util.misc.maybe_wait_for_result(arg, timeout=1500) for arg in args]
-                batch_calls = [batch_call._replace(batch_args=_resolve_futures(batch_call.batch_args)) for batch_call in batch_calls]
 
                 batch_inp_str = '\n'.join([' '.join(map(str, batch_call.batch_args)) for batch_call in batch_calls]) + '\n'
                 subprocess_call_args.update(input=batch_inp_str)
@@ -425,11 +429,15 @@ class GitAnnexTool(tools.Tool):
     def _get_file_exts_for_key(fname, max_extension_length=5):
         """Determine the suffix of `fname` that would be included in the git-annex MD5E key, after the md5."""
         exts = ''
+        num_exts = 0
         while True:
             fname, ext = os.path.splitext(fname)
             if not ext or len(ext) > (max_extension_length+1):
                 break
             exts = ext + exts
+            num_exts += 1
+            if num_exts >= 2:
+                break
         return exts
 
     @staticmethod
@@ -802,5 +810,11 @@ class GitAnnexTool(tools.Tool):
                                                                        message='failed to import key {}'.format(key)),
                                      now=False)
     # end: def import_urls(self, urls, ignore_non_urls=False, check_imported=True):
+
+    @_add_now_arg
+    def from_url(self, url, fname):
+        """Import url and set fname to point to the resulting key"""
+        self.import_urls([url])
+        self.fromkey(self._url2filestat[url], os.path.abspath(fname))
 
 # end: class GitAnnexTool

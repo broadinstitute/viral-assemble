@@ -39,6 +39,3 @@ def test_describe(dx_tool, dx_file_A):
 def test_url_to_dxid(dx_tool, dx_file_A):
     assert dx_tool.url_to_dxid(dx_tool.DX_URI_PFX + dx_file_A) == dx_file_A
 
-
-
-

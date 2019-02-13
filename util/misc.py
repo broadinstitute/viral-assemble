@@ -17,6 +17,7 @@ import time
 import builtins
 import argparse
 import concurrent.futures
+import json
 
 import util.file
 
@@ -891,4 +892,36 @@ else:
   
 def maybe_wait_for_result(arg, timeout=None):
     """If arg is a Future, wait for its result, else just return it."""
+    if isinstance(arg, concurrent.futures.Future):
+        log.info('waiting for result of future %s', arg)
     return arg.result(timeout=timeout) if isinstance(arg, concurrent.futures.Future) else arg
+
+def maps(obj, *keys):
+    """Return True if `obj` is a mapping that contains al `keys`."""
+    return isinstance(obj, collections.Mapping) and all(k in obj for k in keys)
+
+_str_type = basestring if hasattr(builtins, 'basestring') else str
+
+def is_str(obj):
+    """Test if obj is a string type, in a python2/3 compatible way.
+    From https://stackoverflow.com/questions/4232111/stringtype-and-nonetype-in-python3-x
+    """
+    return isinstance(obj, _str_type)
+
+def pretty_print_json(json_dict, sort_keys=True):
+    """Return a pretty-printed version of a dict converted to json, as a string."""
+    return json.dumps(json_dict, indent=4, separators=(',', ': '), sort_keys=sort_keys)
+
+def write_json(fname, **json_dict):
+    util.file.dump_file(fname=fname, value=pretty_print_json(json_dict))
+
+def _load_dict_sorted(d):
+    return collections.OrderedDict(sorted(d.items()))
+
+def json_loads(s):
+    """Load json from a string, canonicalizing order of fields within records."""
+    return json.loads(s.strip(), object_hook=_load_dict_sorted, object_pairs_hook=collections.OrderedDict)
+
+def json_loadf(fname):
+    """Load json from a filename."""
+    return json_loads(util.file.slurp_file(fname))
