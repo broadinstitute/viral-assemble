@@ -830,10 +830,13 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
 
     analysis_dir = analysis_dir_pfx + dx_analysis_id
     util.file.mkdir_p(analysis_dir)
-    mdata = dnanexus_tool.describe(dx_analysis_id)
-    mdata = dnanexus_tool.resolve_dx_links_in_dx_analysis_descr(mdata)
-#    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id, _cache={})]
-#    mdata = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir, methods=methods)
+    mdata_orig = dnanexus_tool.describe(dx_analysis_id)
+
+    # TODO: figure out proper handling for internal runinputs
+
+    mdata = dnanexus_tool.resolve_dx_links_in_dx_analysis_descr(mdata_orig)
+    #    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id, _cache={})]
+    #    mdata = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir, methods=methods)
 
     # 
     # Convert DNAnexus analysis metadata to Cromwell's metadata format,
@@ -843,23 +846,37 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
     # 
 
     mdata['_metadata_version'] = AnalysisDir.METADATA_VERSION
-    mdata['labels'] = _ord_dict(('platform', 'dnanexus'))
+    mdata['labels'] = _ord_dict(('platform', 'dnanexus'),
+                                ('analysis_dir', analysis_dir),
+                                ('analysis_id', dx_analysis_id))
     mdata['workflowName'] = mdata['executableName']
-
+    executable_descr = dnanexus_tool.describe(mdata['executable'])
+    if 'dxWDL' in executable_descr['tags'] and executable_descr['folder'].startswith('/build/quay.io/broadinstitute/viral-ngs'):
+        exe_folder_parts = executable_descr['folder'].split('/')
+        docker_img = '/'.join(exe_folder_parts[2:5]) + ':' + exe_folder_parts[5]
+        mdata['labels']['docker_img'] = docker_img
+        mdata['labels']['docker_img_hash'] = docker_img + '@' + _get_docker_hash(mdata['labels']['docker_img'])
     stage2name = {}
     for stage in mdata['stages']:
         if _maps(stage, 'id', 'execution'):
             stage2name[stage['id']] = stage['execution']['name']
             if _maps(stage['execution'], 'runInput'):
                 for k, v in stage['execution']['runInput'].items():
-                    mdata['runInput'][stage['id']+'.'+mdata['workflowName']+'.'+k] = v
+                    mdata['runInput'][stage['id']+'.'+k] = v
+                    _log.info('ADDING RUNINPUT FROM STAGE: %s = %s', stage['id']+'.'+k, v)
 
     for mdata_rec in ('input', 'output', 'runInput'):
         for k in tuple(mdata[mdata_rec]):
             stage_id = k.split('.')[0]
             if stage_id in stage2name:
+                _log.info('RENAMING %s to %s', k, mdata['workflowName']+'.'+stage2name[stage_id]+k[len(stage_id):])
                 _dict_rename_key(mdata[mdata_rec], k,
                                  mdata['workflowName']+'.'+stage2name[stage_id]+k[len(stage_id):])
+
+    for k in tuple(mdata['runInput']):
+        if k.startswith(mdata['workflowName']+'.outputs.'):
+            _log.info('DROPPING RUNINPUT: %s', k)
+            del mdata['runInput'][k]
 
     mdata['submittedFiles'] = collections.OrderedDict()
     mdata['submittedFiles']['inputs'] = _pretty_print_json(mdata['runInput'])
@@ -876,6 +893,7 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
 
     submission_datetime = datetime.datetime.fromtimestamp(float(mdata['created']) / 1000.0)
     mdata['submission'] = _isoformat_datetime(submission_datetime)
+    
 
     leaf_jpaths = util.misc.json_gather_leaf_jpaths(mdata)
     str_leaves = list(filter(_is_str, util.misc.map_vals(leaf_jpaths)))
@@ -884,7 +902,7 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
                                             methods=[functools.partial(_resolve_link_using_gathered_filestat,
                                                                        git_annex_tool=git_annex_tool),
                                             ], relpath='files')
-    return (os.path.join(analysis_dir, 'metadata.json'), mdata)
+    return (analysis_dir, mdata, mdata_rel)
 #    _write_json(mdata_rel_fname, **mdata_rel)
 #    _write_json(os.path.join(analysis_dir, 'metadata.json'), **mdata)
 
@@ -895,12 +913,13 @@ def import_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
     out = []
     with git_annex_tool.batching() as git_annex_tool:
         for dx_analysis_id in dx_analysis_ids:
-            mdata_fname, mdata = _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanexus_tool)
-            out.append((mdata_fname, mdata))
-    for mdata_fname, mdata in out:
+            out.append(_import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanexus_tool))
+    for analysis_dir, mdata, mdata_rel in out:
         mdata = util.misc.transform_json_data(mdata, functools.partial(util.misc.maybe_wait_for_result, timeout=300))
-        util.file.mkdir_p(os.path.dirname(mdata_fname))
-        _write_json(mdata_fname, **mdata)
+        mdata_rel = util.misc.transform_json_data(mdata_rel, functools.partial(util.misc.maybe_wait_for_result, timeout=300))
+        util.file.mkdir_p(analysis_dir)
+        _write_json(os.path.join(analysis_dir, 'metadata_orig.json'), **mdata)
+        _write_json(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'), **mdata_rel)
 
 def parser_import_dx_analyses(parser=argparse.ArgumentParser(fromfile_prefix_chars='@')):
     parser.add_argument('dx_analysis_ids', metavar='DX_ANALYSIS_ID', nargs='+', help='dnanexus analysis id(s)')

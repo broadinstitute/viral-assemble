@@ -70,9 +70,12 @@ class DxTool(tools.Tool):
         return uritools.urisplit(url).authority
 
     @staticmethod
-    def dxid_to_url(dxid):
+    def dxid_to_url(dxid, include_filename=False):
         """Given a dxid, return a dx://file-xxx URL for it"""
-        return DxTool.DX_URI_PFX + dxid
+        url = DxTool.DX_URI_PFX + dxid
+        if include_filename:
+            url += '/' + DxTool.describe(dxid)['name']
+        return url
     
     # @classmethod
     # def dx_make_download_url(cls, dxid, duration='2h'):
@@ -146,7 +149,7 @@ class DxTool(tools.Tool):
         def _dx_link_to_url(val):
             if dxpy.is_dxlink(val):
                 util.misc.chk(val['$dnanexus_link'].startswith('file-'))
-                return DxTool.dxid_to_url(val['$dnanexus_link'])
+                return DxTool.dxid_to_url(val['$dnanexus_link'], include_filename=True)
             else:
                 return val
         resolved = util.misc.transform_json_data(resolved, _dx_link_to_url)
