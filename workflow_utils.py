@@ -834,6 +834,15 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
 
     # TODO: figure out proper handling for internal runinputs
 
+    # TODO: if workflow is not from the public CI project, see if individual applets are
+    # TODO: get the right original WDL, pull in the spec, and see which inputs are part of the
+    #    WDL spec.  maybe also, recompile with -inputs ; though, what if dxWDL version changed?  reuse that version.
+    #    then have the correspondence of womtool inputs to actual dx inputs.
+
+    # Note also, that can then use that to re-run things on dx, not just locally.
+
+    # TODO: cache the list of remotes (in tools/git_annex)
+
     mdata = dnanexus_tool.resolve_dx_links_in_dx_analysis_descr(mdata_orig)
     #    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id, _cache={})]
     #    mdata = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir, methods=methods)
@@ -870,8 +879,12 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
             stage_id = k.split('.')[0]
             if stage_id in stage2name:
                 _log.info('RENAMING %s to %s', k, mdata['workflowName']+'.'+stage2name[stage_id]+k[len(stage_id):])
+                # TODO: fix dependence on dxWDL internals, specifically that common stage is first
+                util.misc.chk(stage2name[stage_id] != 'common' or stage_id == 'stage-0')
                 _dict_rename_key(mdata[mdata_rec], k,
-                                 mdata['workflowName']+'.'+stage2name[stage_id]+k[len(stage_id):])
+                                 mdata['workflowName'] + \
+                                 (('.'+stage2name[stage_id]) if stage2name[stage_id] != 'common' else '') + \
+                                 k[len(stage_id):])
 
     for k in tuple(mdata['runInput']):
         if k.startswith(mdata['workflowName']+'.outputs.'):
