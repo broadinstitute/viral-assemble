@@ -880,6 +880,7 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
 
     mdata['submittedFiles'] = collections.OrderedDict()
     mdata['submittedFiles']['inputs'] = _pretty_print_json(mdata['runInput'])
+    #util.misc.chk_eq(_json_loads(mdata['submittedFiles']['inputs']), mdata['runInput'])
 
     _dict_rename_key(mdata, 'input', 'inputs')
     _dict_rename_key(mdata, 'output', 'outputs')
