@@ -432,7 +432,7 @@ class GitAnnexTool(tools.Tool):
         num_exts = 0
         while True:
             fname, ext = os.path.splitext(fname)
-            if not ext or len(ext) > (max_extension_length+1):
+            if not ext or len(ext) > (max_extension_length+1) or not ext[1:].isalnum():
                 break
             exts = ext + exts
             num_exts += 1
@@ -766,6 +766,11 @@ class GitAnnexTool(tools.Tool):
     def get_url2filestat(self):
         """Return the internal mapping of URLs to filestats"""
         return self._url2filestat
+    
+    @staticmethod
+    def _chk_present(val, key):
+        key = util.misc.maybe_wait_for_result(key)
+        util.misc.chk_eq(val,  '1', message='failed to import key {}'.format(key))
 
     @_add_now_arg
     def import_urls(self, urls, ignore_non_urls=False, check_imported=True):
@@ -803,11 +808,10 @@ class GitAnnexTool(tools.Tool):
         for url in urls:
             util.misc.chk(ignore_non_urls  or  ('git_annex_key' in self._url2filestat[url]),
                           'no key for {}: {}'.format(url, self._url2filestat))
-            if check_imported and 'git_annex_key' in self._url2filestat[url]:
+            if False and check_imported and 'git_annex_key' in self._url2filestat[url]:
                 key = self._url2filestat[url]['git_annex_key']
                 self.checkpresentkey(key=key,
-                                     output_acceptor=functools.partial(util.misc.chk_eq, '1',
-                                                                       message='failed to import key {}'.format(key)),
+                                     output_acceptor=functools.partial(GitAnnexTool._chk_present, key=key),
                                      now=False)
     # end: def import_urls(self, urls, ignore_non_urls=False, check_imported=True):
 
