@@ -1,10 +1,13 @@
 #!/bin/bash
 
-set -eu -o pipefail
+set -eu -o pipefail -x
 
 # log in to DNAnexus
 dx login --token "$DX_API_TOKEN" --noprojects
 dx select $DX_PROJECT
+dx pwd
+dx ls -l
+dx download file-FVQ74G80f5zf4V5vK0GjB1q5
 
 pytest --cov-append $PYTEST_EXTRA_OPTS test
 
