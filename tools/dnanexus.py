@@ -86,10 +86,17 @@ class DxTool(tools.Tool):
 
 #    @util.misc.memoize_persist(to_picklable=functools.partial(json.dumps, separators=(',',':')),
 #                               from_picklable=_json_loads)
+
+    _describe_result = {}
+
+
     @staticmethod
     def describe(dxid):
         """Return json description for the given dxid"""
-        return dxpy.describe(dxid)
+        if dxid not in DxTool._describe_result:
+            DxTool._describe_result[dxid] = dxpy.describe(dxid)
+
+        return DxTool._describe_result[dxid]
         #return _run_get_json('dx', 'describe', '--verbose', '--details', '--json', dxid)
 
     @staticmethod
