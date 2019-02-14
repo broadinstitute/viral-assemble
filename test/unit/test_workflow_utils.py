@@ -72,5 +72,5 @@ def cromwell_server():
         yield server
 
 def test_starting_cromwell_server(cromwell_server):
-    _log.info('SERVER HEALTH IS %s', cromwell_server.health())
-
+    hlth = cromwell_server.health()
+    _log.info('SERVER HEALTH IS %s', hlth.content)

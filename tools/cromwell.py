@@ -15,6 +15,7 @@ import tempfile
 import pipes
 import time
 import contextlib
+import collections
 
 import cromwell_tools
 import cromwell_tools.cromwell_api
@@ -70,11 +71,18 @@ class CromwellTool(tools.Tool):
 
         def is_healthy(self):
             health_response = self.health()
-            return health_response and not (400 <= health_response.status_code < 600)
+            if health_response.status_code != 200:
+                return False
+            try:
+                health_report = util.misc.json_loads(health_response.content)
+            except Exception:
+                return False
+            return isinstance(health_report, collections.Mapping) and \
+                all(status.get('ok', False) for subsystem, status in health_report.items())
 
     @contextlib.contextmanager
-    def cromwell_server(self):
-        url = 'http://localhost:8000'
+    def cromwell_server(self, url='http://localhost:8000'):
+        """Start a cromwell server, shut it down when context ends."""
         server = self.CromwellServer(cromwell_tool=self,
                                      auth=cromwell_tools.cromwell_auth.CromwellAuth.from_no_authentication(url=url))
         util.misc.chk(server.is_healthy())
