@@ -16,6 +16,7 @@ import pipes
 import time
 import contextlib
 import collections
+import time
 
 import cromwell_tools
 import cromwell_tools.cromwell_api
@@ -54,11 +55,12 @@ class CromwellTool(tools.Tool):
     class CromwellServer(object):
         """Represents a specific running cromwell server'"""
 
-        def __init__(self, cromwell_tool, auth):
+        def __init__(self, cromwell_tool, url):
             self.cromwell_tool = cromwell_tool
-            self.auth = auth
+            self.url = url
+            self.auth = cromwell_tools.cromwell_auth.CromwellAuth.from_no_authentication(url=url)
             self.api = cromwell_tools.cromwell_api.CromwellAPI()
-            self.cromwell_process = subprocess.Popen([cromwell_tool.install_and_get_path(), 'server'])
+            self.cromwell_process = subprocess.Popen([cromwell_tool.install_and_get_path(), 'server', '-h', url])
 
         def shutdown(self, timeout=300):
             """Shut down the cromwell server"""
@@ -83,11 +85,14 @@ class CromwellTool(tools.Tool):
     @contextlib.contextmanager
     def cromwell_server(self, url='http://localhost:8000'):
         """Start a cromwell server, shut it down when context ends."""
-        server = self.CromwellServer(cromwell_tool=self,
-                                     auth=cromwell_tools.cromwell_auth.CromwellAuth.from_no_authentication(url=url))
+        server = self.CromwellServer(cromwell_tool=self, url=url)
+        time.sleep(2)
+        _log.info('IN CROMWELL, AUTH IS %s HLTH IS %s', server.auth, server.health())
         util.misc.chk(server.is_healthy())
-        yield server
-        server.shutdown()
+        try:
+            yield server
+        finally:
+            server.shutdown()
 
 # ** Metadata handling
 
