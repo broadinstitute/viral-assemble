@@ -121,6 +121,12 @@ def tmpdir_function(request, tmpdir_class, monkeypatch):
         yield tmpdir
 
 @pytest.fixture
+def tmp_fname(tmpdir_function):
+    """Create one temp file name, and yield it."""
+    with util.file.tempfname(directory=tmpdir_function) as f:
+        yield f
+
+@pytest.fixture
 def monkeypatch_function_result(monkeypatch):
     """Patches result of a function for specified args"""
 

@@ -80,6 +80,14 @@ def assert_md5_equal_to_line_in_file(testCase, filename, checksum_file, msg=None
 
     testCase.assertEqual(hash_md5.hexdigest(), expected_checksum, msg=msg)
 
+def tst_input(fname):
+    '''Return the full filename for a file in the test input directory'''
+    return os.path.join(util.file.get_test_input_path(), fname)
+
+def tst_inputs(*fnames):
+    '''Return the full filenames for files in the test input directory'''
+    return [tst_input(fname) for fname in fnames]
+
 @pytest.mark.usefixtures('tmpdir_class')
 class TestCaseWithTmp(unittest.TestCase):
     'Base class for tests that use tempDir'
