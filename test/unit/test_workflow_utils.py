@@ -18,6 +18,7 @@ import util.file
 import util.misc
 import workflow_utils
 import tools.git_annex
+import tools.cromwell
 
 _log = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -63,3 +64,13 @@ class TestGatherFileMetadataFromAnalysisMetadata():
             assert set(file_mdata.items()) <= set(callCaching_crc32_mdata[file_name].items())
 
 # end: class TestGatherFileMetadataFromAnalysisMetadata()
+
+@pytest.fixture(scope='module')
+def cromwell_server():
+    """Runs a Cromwell server"""
+    with tools.cromwell.CromwellTool().cromwell_server() as server:
+        yield server
+
+def test_starting_cromwell_server(cromwell_server):
+    _log.info('SERVER HEALTH IS %s', cromwell_server.health())
+
