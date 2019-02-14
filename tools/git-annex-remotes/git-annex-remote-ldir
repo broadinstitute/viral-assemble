@@ -105,10 +105,15 @@ class LocalDirRemote(SpecialRemote):
         raise UnsupportedRequest('Not supporting whereis yet')
         
     def remove(self, key):
+        urls = self.annex.geturls(key=key, prefix=LDIR_URI_PFX)
+        self._dbg('IN DROP: urls=', urls)
+        for url in urls:
+            self._dbg('CALLING SETURLMISSING', key, url)
+            self.seturlmissing(key, url)
         # remove the key from the remote
         # raise RemoteError if it couldn't be removed
         # note that removing a not existing key isn't considered an error
-        raise RemoteError('Cannot yet remove keys')
+        #raise RemoteError('Cannot yet remove keys')
 
     def claimurl(self, url):
         return url.startswith(LDIR_URI_PFX)
@@ -117,6 +122,11 @@ class LocalDirRemote(SpecialRemote):
         if not self.claimurl(url): raise RemoteError('Cannot check non-gs URL {}'.format(url))
         path = self._url2path(url)
         if not os.path.isfile(path): return None
+        try:
+            with open(path):
+                pass
+        except Exception:
+            return None
         return [dict(size=os.path.getsize(path), filename=os.path.basename(path))]
 
 # In your ``main`` function, link your remote to the master class and initialize the protocol:
