@@ -18,7 +18,7 @@ from mock import patch
 # module-specific
 import file_utils
 import util.file
-from test import TestCaseWithTmp, assert_equal_contents
+from test import TestCaseWithTmp, assert_equal_contents, tst_inputs
 
 
 class TestCommandHelp(unittest.TestCase):
@@ -198,3 +198,12 @@ class TestTarballMerger(TestCaseWithTmp):
 
             assert_equal_contents(self, inf, outf)
 
+# end: class TestTarballMerger(TestCaseWithTmp)
+
+def test_json_to_org(tmp_fname):
+    json_fname, expected_org_fname = tst_inputs('TestFileUtils/metadata_orig.succ.json', 'TestFileUtils/metadata_orig.succ.org')
+    org_fname = tmp_fname
+    util.cmd.run_cmd(file_utils, 'json_to_org', [json_fname, org_fname])
+    assert util.file.slurp_file(org_fname) == util.file.slurp_file(expected_org_fname)
+
+                     

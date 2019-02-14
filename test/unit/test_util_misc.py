@@ -8,8 +8,12 @@ import logging
 import subprocess
 import re
 import uuid
+import concurrent.futures
+import functools
+
 import util.misc
 import util.file
+
 import pytest
 
 
@@ -359,6 +363,18 @@ def test_uuid_re():
     assert not re_fullmatch(UUID_RE, '0'+str(uuid.uuid4()))
     assert not re_fullmatch(UUID_RE, str(uuid.uuid4())+'0')
 
+def test_maybe_wait_for_result():
+    mwfr = util.misc.maybe_wait_for_result
+    assert mwfr(None) == None
+    assert mwfr(1) == 1
+    assert mwfr('') == ''
+    val = {}
+    assert id(mwfr(val)) == id(val)
+    
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        f = executor.submit(util.misc.identity, 1)
+        assert mwfr(f) == 1
+
 def test_maps():
     maps = util.misc.maps
     assert maps({'a': 1}, 'a')
@@ -367,3 +383,11 @@ def test_maps():
     assert not maps(('a',), 'a')
     assert not maps({}, 'a')
 
+def test_is_str():
+    is_str = util.misc.is_str
+    assert is_str('')
+    assert is_str('test')
+    assert is_str(r'\n')
+    assert not is_str(None)
+    assert not is_str(1)
+    assert is_str('1')

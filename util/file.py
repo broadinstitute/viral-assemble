@@ -991,8 +991,14 @@ def repack_tarballs(out_compressed_tarball,
         outfile.close()
 
 def md5_for_file(fname):
+    """Compute MD5 hash for the contents of the file `fname`.  Return it as an uppercase hex digest."""
     hash_md5 = hashlib.md5()
     with open(fname, "rb") as f:
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
     return hash_md5.hexdigest().upper()
+
+def replace_ext(fname, new_ext):
+    """Replace file extension of `fname` with `new_ext`."""
+    return os.path.splitext(fname)[0] + new_ext
+

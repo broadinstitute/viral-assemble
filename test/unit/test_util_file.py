@@ -112,7 +112,13 @@ def test_md5_for_file(tmpdir_function, content, md5):
     util.file.dump_file(fname=fname, value=content)
     assert util.file.md5_for_file(fname) == md5
 
+def test_replace_ext():
+    replace_ext = util.file.replace_ext
+    assert replace_ext('myfile.tar', '.tgz') == 'myfile.tgz'
+    assert replace_ext('/some/dir/myfile.tar', '.tgz') == '/some/dir/myfile.tgz'
+    assert replace_ext('myfile.tar', '.tar.gz') == 'myfile.tar.gz'
+    assert replace_ext('myfile.tar', '') == 'myfile'
 
-                         
-    
-    
+
+
+
