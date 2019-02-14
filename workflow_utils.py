@@ -892,9 +892,10 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
             del mdata['runInput'][k]
 
     mdata['submittedFiles'] = collections.OrderedDict()
-    mdata['submittedFiles']['inputs'] = _pretty_print_json(mdata['runInput'])
+
     #util.misc.chk_eq(_json_loads(mdata['submittedFiles']['inputs']), mdata['runInput'])
 
+    _dict_rename_key(mdata, 'runInput', 'runInputs')
     _dict_rename_key(mdata, 'input', 'inputs')
     _dict_rename_key(mdata, 'output', 'outputs')
     _dict_rename_key(mdata, 'state', 'status')
@@ -1010,6 +1011,7 @@ def _apply_input_renamings(inps, input_name_subst, orig_workflow_name):
         for inp_name in tuple(inps):
             if inp_name == orig_workflow_name+'.'+orig:
                 util.misc.chk(inp_name in inps)
+                _log.info('RENAMING INPUT %s to %s', inp_name, inp_name.replace(orig, repl))
                 _dict_rename_key(inps, inp_name, inp_name.replace(orig, repl))
 
 def _analysis_inputs_from_analysis_dir_do(args, **kw):
@@ -1021,15 +1023,18 @@ def _analysis_inputs_from_analysis_dir_do(args, **kw):
     workflow_name = kw['workflow_name']
     mdata_fname = os.path.join(args.analysis_dir, 'metadata_with_gitlinks.json')
     mdata = _json_loadf(mdata_fname) 
-    inps = _json_loads(mdata['submittedFiles']['inputs'])
+    inps = mdata['runInputs']
 
     # rename inputs, if needed
+    # TODO: automatically match inputs to related workflows, based on the task that takes the inputs
     _apply_input_renamings(inps, args.input_name_subst, mdata['workflowName'])
 
     # change the workflow name to ours, if needed
     for inp_name in tuple(inps):
         if not inp_name.startswith(workflow_name+'.'):
-            util.misc.chk(inp_name.startswith(mdata['workflowName']+'.', 'bad inp name {}'.format(inp_name)))
+            _log.info('FIXING INPUT %s', inp_name)
+            wf_name = mdata['workflowName']
+            util.misc.chk(inp_name.startswith(wf_name+'.'), 'bad inp name {}'.format(inp_name))
             inp_renamed=workflow_name+inp_name[inp_name.index('.'):]
             _dict_rename_key(inps, inp_name, inp_renamed)
 
@@ -1875,7 +1880,7 @@ def _record_file_metadata(val, analysis_dir, root_dir):
 
 def is_analysis_dir(d):
     """Test whether a given directory is an analysis dir"""
-    return all(os.path.isfile(os.path.join(d, f)) for f in ('analysis_labels.json', 'inputs.json', 'cromwell_opts.json'))
+    return all(os.path.isfile(os.path.join(d, f)) for f in ('metadata_with_gitlinks.json',))
 
 def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
     def _get_analysis_dirs(d):
@@ -2069,6 +2074,8 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                     _write_json(mdata_fname, **mdata)
                 #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
 
+                mdata['runInputs'] = util.misc.json_loads(mdata['submittedFiles']['inputs'])
+
                 leaf_jpaths = util.misc.json_gather_leaf_jpaths(mdata)
                 str_leaves = list(filter(_is_str, util.misc.map_vals(leaf_jpaths)))
                 git_annex_tool.import_urls(str_leaves, ignore_non_urls=True, now=False)
@@ -2078,6 +2085,8 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
 #                                                                 _resolve_link_local_path,
 #                                                                 _resolve_link_gs,
                                                         ], relpath='files')
+                mdata_rel = util.misc.transform_json_data(mdata_rel, functools.partial(util.misc.maybe_wait_for_result, timeout=300))
+
                 _write_json(mdata_rel_fname, **mdata_rel)
                 _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
                 processing_stats['saved_metata'] += 1
