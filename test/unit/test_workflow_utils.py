@@ -68,7 +68,7 @@ class TestGatherFileMetadataFromAnalysisMetadata():
 @pytest.fixture(scope='module')
 def cromwell_server():
     """Runs a Cromwell server"""
-    with tools.cromwell.CromwellTool().cromwell_server() as server:
+    with tools.cromwell.CromwellTool().cromwell_server(port=8001) as server:
         yield server
 
 def test_starting_cromwell_server(cromwell_server):

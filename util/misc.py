@@ -952,6 +952,7 @@ def _kill_proc_tree(pid, sig=signal.SIGTERM, include_parent=True,
 def kill_proc_tree(proc):
     """Kill a popen process tree"""
     gone, alive = _kill_proc_tree(proc.pid)
+    time.sleep(1)
     # send SIGKILL
     for p in (alive or ()):
         p.kill()
