@@ -18,10 +18,12 @@ import builtins
 import argparse
 import concurrent.futures
 import json
+import signal
 
 import util.file
 
 import sqlitedict
+import psutil
 
 log = logging.getLogger(__name__)
 
@@ -925,3 +927,34 @@ def json_loads(s):
 def json_loadf(fname):
     """Load json from a filename."""
     return json_loads(util.file.slurp_file(fname))
+
+def _kill_proc_tree(pid, sig=signal.SIGTERM, include_parent=True,
+                   timeout=None, on_terminate=None):
+    """Kill a process tree (including grandchildren) with signal
+    "sig" and return a (gone, still_alive) tuple.
+    "on_terminate", if specified, is a callabck function which is
+    called as soon as a child terminates.
+
+    From https://psutil.readthedocs.io/en/latest/
+    """
+    if pid == os.getpid():
+        raise RuntimeError("I refuse to kill myself")
+    parent = psutil.Process(pid)
+    children = parent.children(recursive=True)
+    if include_parent:
+        children.append(parent)
+    for p in children:
+        p.send_signal(sig)
+    gone, alive = psutil.wait_procs(children, timeout=timeout,
+                                    callback=on_terminate)
+    return (gone, alive)
+
+def kill_proc_tree(proc):
+    """Kill a popen process tree"""
+    gone, alive = _kill_proc_tree(proc.pid)
+    # send SIGKILL
+    for p in (alive or ()):
+        p.kill()
+    psutil.wait_procs(alive)
+
+    

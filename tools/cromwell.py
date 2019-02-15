@@ -17,6 +17,7 @@ import time
 import contextlib
 import collections
 import time
+import signal
 
 import cromwell_tools
 import cromwell_tools.cromwell_api
@@ -27,7 +28,7 @@ import util.file
 import util.misc
 
 TOOL_NAME = 'cromwell'
-TOOL_VERSION = '0.36'
+TOOL_VERSION = '0.37'
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
@@ -41,7 +42,7 @@ class CromwellTool(tools.Tool):
 # ** init, execute
     def __init__(self, install_methods=None):
         if install_methods is None:
-            install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION)]
+            install_methods = [tools.CondaPackage(TOOL_NAME, version=TOOL_VERSION, env='vngs_cromwell_env')]
         tools.Tool.__init__(self, install_methods=install_methods)
 
     def version(self):
@@ -55,17 +56,22 @@ class CromwellTool(tools.Tool):
     class CromwellServer(object):
         """Represents a specific running cromwell server'"""
 
-        def __init__(self, cromwell_tool, url):
+        def __init__(self, cromwell_tool, port=8000):
             self.cromwell_tool = cromwell_tool
-            self.url = url
-            self.auth = cromwell_tools.cromwell_auth.CromwellAuth.from_no_authentication(url=url)
+            self.url = 'http://localhost:{}'.format(port)
+            self.auth = cromwell_tools.cromwell_auth.CromwellAuth.from_no_authentication(url=self.url)
             self.api = cromwell_tools.cromwell_api.CromwellAPI()
-            self.cromwell_process = subprocess.Popen([cromwell_tool.install_and_get_path(), 'server', '-h', url])
+            args = [cromwell_tool.install_and_get_path(), '-Dwebsevice.port={}'.format(port), 'server']
+            _log.info('starting cromwell server: args=%s auth=%s', args, self.auth)
+            self.cromwell_process = subprocess.Popen(args)
+            time.sleep(2)
 
         def shutdown(self, timeout=300):
             """Shut down the cromwell server"""
-            self.cromwell_process.terminate()
+            util.misc.kill_proc_tree(self.cromwell_process)
+            _log.info('Waiting for Cromwell to terminate, timeout=%d', timeout)
             self.cromwell_process.wait(timeout=timeout)
+            _log.info('Cromwell terminated successfully')
 
         def health(self, *args, **kwargs):
             """Do nothing is the server is running fine, else raise a RuntimeError"""
@@ -83,10 +89,10 @@ class CromwellTool(tools.Tool):
                 all(status.get('ok', False) for subsystem, status in health_report.items())
 
     @contextlib.contextmanager
-    def cromwell_server(self, url='http://localhost:8000'):
+    def cromwell_server(self, port=8000):
         """Start a cromwell server, shut it down when context ends."""
-        server = self.CromwellServer(cromwell_tool=self, url=url)
-        time.sleep(2)
+        server = self.CromwellServer(cromwell_tool=self, port=port)
+        time.sleep(10)
         _log.info('IN CROMWELL, AUTH IS %s HLTH IS %s', server.auth, server.health())
         util.misc.chk(server.is_healthy())
         try:
