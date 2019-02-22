@@ -78,6 +78,7 @@ class CromwellTool(tools.Tool):
             return self.api.health(self.auth, *args, **kwargs)
 
         def is_healthy(self):
+            """Return True if the Cromwell server is accessible and reports that all its subsystems are healthy."""
             health_response = self.health()
             if health_response.status_code != 200:
                 return False
@@ -87,6 +88,8 @@ class CromwellTool(tools.Tool):
                 return False
             return isinstance(health_report, collections.Mapping) and \
                 all(status.get('ok', False) for subsystem, status in health_report.items())
+
+    # end: class CromwellServer(object)
 
     @contextlib.contextmanager
     def cromwell_server(self, port=8000):

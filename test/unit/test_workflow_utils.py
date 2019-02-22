@@ -74,3 +74,7 @@ def cromwell_server():
 def test_starting_cromwell_server(cromwell_server):
     hlth = cromwell_server.health()
     _log.info('SERVER HEALTH IS %s', hlth.content)
+
+def test_import_dx_analyses():
+    pass
+
