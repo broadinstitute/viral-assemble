@@ -61,7 +61,7 @@ class CromwellTool(tools.Tool):
             self.url = 'http://localhost:{}'.format(port)
             self.auth = cromwell_tools.cromwell_auth.CromwellAuth.from_no_authentication(url=self.url)
             self.api = cromwell_tools.cromwell_api.CromwellAPI()
-            args = [cromwell_tool.install_and_get_path(), 'server', '-Dconfig.file={}'.format(config_file)]
+            args = [cromwell_tool.install_and_get_path(), 'server', '-DLOG_LEVEL=DEBUG', '-Dconfig.file={}'.format(config_file)]
             _log.info('starting cromwell server: args=%s auth=%s', args, self.auth)
             self.cromwell_process = subprocess.Popen(args)
             time.sleep(2)
@@ -96,7 +96,9 @@ class CromwellTool(tools.Tool):
         """Start a cromwell server, shut it down when context ends."""
         with util.file.tempfname(suffix='.cromwell.conf') as cromwell_conf:
             util.file.dump_file(cromwell_conf, 'webservice.port = {}\n'.format(port))
+            _log.info('cromwell config file: %s', util.file.slurp_file(cromwell_conf))
             server = self.CromwellServer(cromwell_tool=self, port=port, config_file=cromwell_conf)
+            _log.info('Waiting for cromwell server to start up...')
             time.sleep(10)
             _log.info('IN CROMWELL, AUTH IS %s HLTH IS %s', server.auth, server.health())
             util.misc.chk(server.is_healthy())
