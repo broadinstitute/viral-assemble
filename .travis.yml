@@ -11,7 +11,7 @@ env:
   - PIP_DIR="$HOME/virtualenv"
   - GATK_PATH="$CACHE_DIR"
   - PYTHONIOENCODING=UTF8
-  - PYTEST_ADDOPTS="-rsxX -x -n 2 --durations=25 --fixture-durations=10 --junit-xml=pytest.xml --cov-report= --cov broad_utils --cov illumina --cov assembly --cov interhost --cov intrahost --cov metagenomics --cov ncbi --cov read_utils --cov kmer_utils --cov reports --cov taxon_filter --cov tools --cov util --cov file_utils --parts-tot=2"
+  - PYTEST_ADDOPTS="-rsxX -x -p no:xdist --log-cli-level=DEBUG --durations=25 --fixture-durations=10 --junit-xml=pytest.xml --cov-report= --cov broad_utils --cov illumina --cov assembly --cov interhost --cov intrahost --cov metagenomics --cov ncbi --cov read_utils --cov kmer_utils --cov reports --cov taxon_filter --cov tools --cov util --cov file_utils --parts-tot=2"
   
   - DOCKER_REGISTRY="quay.io"
   - DOCKER_REPO_PROD="quay.io/broadinstitute/viral-ngs"

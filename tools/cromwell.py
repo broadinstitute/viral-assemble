@@ -82,12 +82,18 @@ class CromwellTool(tools.Tool):
 
         def is_healthy(self):
             """Return True if the Cromwell server is accessible and reports that all its subsystems are healthy."""
-            health_response = self.health()
+            try:
+                health_response = self.health()
+            except Exception as ex:
+                _log.info('Error getting health_response: %s', ex)
+                return False
             if health_response.status_code != 200:
+                _log.info('is_healthy() got status code %d', health_response.status_code)
                 return False
             try:
                 health_report = util.misc.json_loads(health_response.content)
             except Exception:
+                _log.info('Could not parse health report: %s', health_report)
                 return False
             return isinstance(health_report, collections.Mapping) and \
                 all(status.get('ok', False) for subsystem, status in health_report.items())
@@ -95,7 +101,7 @@ class CromwellTool(tools.Tool):
     # end: class CromwellServer(object)
 
     @contextlib.contextmanager
-    def cromwell_server(self, port=8000):
+    def cromwell_server(self, port=8000, check_health=True):
         """Start a cromwell server, shut it down when context ends."""
         with util.file.tempfname(suffix='.cromwell.conf') as cromwell_conf:
             util.file.dump_file(cromwell_conf, 'webservice.port = {}\n'.format(port))
@@ -104,7 +110,7 @@ class CromwellTool(tools.Tool):
             _log.info('Waiting for cromwell server to start up...')
             time.sleep(10)
             _log.info('IN CROMWELL, AUTH IS %s HLTH IS %s', server.auth, server.health())
-            util.misc.chk(server.is_healthy())
+            util.misc.chk(not check_health or server.is_healthy())
             try:
                 yield server
             finally:
