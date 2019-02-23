@@ -109,7 +109,8 @@ class CromwellTool(tools.Tool):
             server = self.CromwellServer(cromwell_tool=self, port=port, config_file=cromwell_conf)
             _log.info('Waiting for cromwell server to start up...')
             time.sleep(10)
-            _log.info('IN CROMWELL, AUTH IS %s HLTH IS %s', server.auth, server.health())
+            _log.info('IN CROMWELL, AUTH IS %s', server.auth)
+            os.system('pstree')
             util.misc.chk(not check_health or server.is_healthy())
             try:
                 yield server
