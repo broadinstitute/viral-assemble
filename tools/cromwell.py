@@ -28,7 +28,7 @@ import util.file
 import util.misc
 
 TOOL_NAME = 'cromwell'
-TOOL_VERSION = '0.37'
+TOOL_VERSION = '0.36.1'
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
@@ -57,11 +57,14 @@ class CromwellTool(tools.Tool):
         """Represents a specific running cromwell server'"""
 
         def __init__(self, cromwell_tool, config_file, port):
+            util.misc.chk(port == 8000)
             self.cromwell_tool = cromwell_tool
             self.url = 'http://localhost:{}'.format(port)
             self.auth = cromwell_tools.cromwell_auth.CromwellAuth.from_no_authentication(url=self.url)
             self.api = cromwell_tools.cromwell_api.CromwellAPI()
-            args = [cromwell_tool.install_and_get_path(), 'server', '-DLOG_LEVEL=DEBUG', '-Dconfig.file={}'.format(config_file)]
+            args = [cromwell_tool.install_and_get_path(), 'server',
+                    #                    '-Dconfig.file={}'.format(config_file)
+            ]
             _log.info('starting cromwell server: args=%s auth=%s', args, self.auth)
             self.cromwell_process = subprocess.Popen(args)
             time.sleep(2)
