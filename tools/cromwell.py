@@ -22,6 +22,7 @@ import signal
 import cromwell_tools
 import cromwell_tools.cromwell_api
 import cromwell_tools.cromwell_auth
+import psutil
 
 import tools
 import util.file
@@ -56,7 +57,7 @@ class CromwellTool(tools.Tool):
     class CromwellServer(object):
         """Represents a specific running cromwell server'"""
 
-        def __init__(self, cromwell_tool, config_file, port):
+        def __init__(self, cromwell_tool, config_file, port, timeout=60):
             self.cromwell_tool = cromwell_tool
             self.url = 'http://localhost:{}'.format(port)
             self.auth = cromwell_tools.cromwell_auth.CromwellAuth.from_no_authentication(url=self.url)
@@ -64,7 +65,14 @@ class CromwellTool(tools.Tool):
             args = [cromwell_tool.install_and_get_path(), 'server', '-Dconfig.file={}'.format(config_file)]
             _log.info('starting cromwell server: args=%s auth=%s', args, self.auth)
             self.cromwell_process = subprocess.Popen(args)
-            time.sleep(2)
+
+            timeout_step = 5
+            time.sleep(timeout_step)
+            while not self.is_healthy() and timeout > 0:
+                _log.info('waiting for cromwell server to be healthy: timeout=%d', timeout)
+                time.sleep(timeout_step)
+                timeout -= timeout_step
+            util.misc.chk(self.is_healthy(), 'could not init cromwell server: still not healthy')
 
         def shutdown(self, timeout=300):
             """Shut down the cromwell server"""
@@ -79,6 +87,16 @@ class CromwellTool(tools.Tool):
 
         def is_healthy(self):
             """Return True if the Cromwell server is accessible and reports that all its subsystems are healthy."""
+            cromwell_proc = psutil.Process(self.cromwell_process.pid)
+            cromwell_proc_hier = [cromwell_proc] + list(cromwell_proc.children(recursive=True))
+            name = 'java'
+            if not any(p for p in cromwell_proc_hier if p.is_running() and p.status() != psutil.STATUS_ZOMBIE and
+                       (name == p.name() or \
+                        p.exe() and os.path.basename(p.exe()) == name or \
+                        p.cmdline() and p.cmdline()[0] == name)):
+                _log.info('cromwell not healthy: running java process not found')
+                return False
+
             try:
                 health_response = self.health()
             except Exception as ex:

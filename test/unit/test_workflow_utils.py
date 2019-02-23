@@ -68,7 +68,7 @@ class TestGatherFileMetadataFromAnalysisMetadata():
 @pytest.fixture(scope='module')
 def cromwell_server():
     """Runs a Cromwell server"""
-    with tools.cromwell.CromwellTool().cromwell_server(port=8001) as server:
+    with tools.cromwell.CromwellTool().cromwell_server(port=util.misc.find_free_port()) as server:
         yield server
 
 @pytest.mark.skipif('TRAVIS_JOB_ID' in os.environ, reason="cromwell server setup currently failing on Travis")
