@@ -14,7 +14,10 @@ import shlex
 import tempfile
 import pipes
 import time
-import contextlib
+try:
+    import contextlib
+except ImportError:
+    import contextlib2 as contextlib
 import collections
 import time
 import signal
@@ -58,13 +61,14 @@ class CromwellTool(tools.Tool):
         """Represents a specific running cromwell server'"""
 
         def __init__(self, cromwell_tool, config_file, port, timeout=60):
+            self.exit_stack = contextlib.ExitStack()
             self.cromwell_tool = cromwell_tool
             self.url = 'http://localhost:{}'.format(port)
             self.auth = cromwell_tools.cromwell_auth.CromwellAuth.from_no_authentication(url=self.url)
             self.api = cromwell_tools.cromwell_api.CromwellAPI()
             args = [cromwell_tool.install_and_get_path(), 'server', '-Dconfig.file={}'.format(config_file)]
             _log.info('starting cromwell server: args=%s auth=%s', args, self.auth)
-            self.cromwell_process = subprocess.Popen(args)
+            self.cromwell_process = self.exit_stack.enter_context(psutil.Popen(args))
 
             timeout_step = 5
             time.sleep(timeout_step)
@@ -76,24 +80,35 @@ class CromwellTool(tools.Tool):
 
         def shutdown(self, timeout=300):
             """Shut down the cromwell server"""
+            cromwell_java_process = self._find_cromwell_java_process()
+            if cromwell_java_process:
+                cromwell_java_process.terminate()
+                cromwell_java_process.wait(timeout=timeout)
+                
             util.misc.kill_proc_tree(self.cromwell_process)
             _log.info('Waiting for Cromwell to terminate, timeout=%d', timeout)
             self.cromwell_process.wait(timeout=timeout)
             _log.info('Cromwell terminated successfully')
+            self.exit_stack.close()
 
         def health(self, *args, **kwargs):
             """Do nothing is the server is running fine, else raise a RuntimeError"""
             return self.api.health(self.auth, *args, **kwargs)
 
+        def _find_cromwell_java_process(self):
+            """Find the cromwell java process"""
+            cromwell_proc_hier = [self.cromwell_process] + list(self.cromwell_process.children(recursive=True))
+            name = 'java'
+            java_proc = [p for p in cromwell_proc_hier if p.is_running() and p.status() != psutil.STATUS_ZOMBIE and \
+                         (name == p.name() or \
+                          p.exe() and os.path.basename(p.exe()) == name or \
+                          p.cmdline() and p.cmdline()[0] == name)]
+            util.misc.chk(len(java_proc or []) <= 1)
+            return (java_proc or [None])[0]
+
         def is_healthy(self):
             """Return True if the Cromwell server is accessible and reports that all its subsystems are healthy."""
-            cromwell_proc = psutil.Process(self.cromwell_process.pid)
-            cromwell_proc_hier = [cromwell_proc] + list(cromwell_proc.children(recursive=True))
-            name = 'java'
-            if not any(p for p in cromwell_proc_hier if p.is_running() and p.status() != psutil.STATUS_ZOMBIE and
-                       (name == p.name() or \
-                        p.exe() and os.path.basename(p.exe()) == name or \
-                        p.cmdline() and p.cmdline()[0] == name)):
+            if not self._find_cromwell_java_process():
                 _log.info('cromwell not healthy: running java process not found')
                 return False
 

@@ -960,6 +960,7 @@ def kill_proc_tree(proc):
     psutil.wait_procs(alive)
 
 def find_free_port():
+    """Find a free TCP port."""
     with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
         s.bind(('', 0))
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

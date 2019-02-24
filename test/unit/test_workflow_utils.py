@@ -71,11 +71,10 @@ def cromwell_server():
     with tools.cromwell.CromwellTool().cromwell_server(port=util.misc.find_free_port()) as server:
         yield server
 
-@pytest.mark.skipif('TRAVIS_JOB_ID' in os.environ, reason="cromwell server setup currently failing on Travis")
+#@pytest.mark.skipif('TRAVIS_JOB_ID' in os.environ, reason="cromwell server setup currently failing on Travis")
 def test_starting_cromwell_server(cromwell_server):
     hlth = cromwell_server.health()
     _log.info('SERVER HEALTH IS %s', hlth.content)
 
 def test_import_dx_analyses():
     pass
-
