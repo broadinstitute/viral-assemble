@@ -134,7 +134,7 @@ class CromwellTool(tools.Tool):
     def cromwell_server(self, port=8000, check_health=True):
         """Start a cromwell server, shut it down when context ends."""
         with util.file.tempfname(suffix='.cromwell.conf') as cromwell_conf:
-            util.file.dump_file(cromwell_conf, 'webservice.port = {}\n'.format(port))
+            util.file.dump_file(cromwell_conf, 'include required(classpath("application"))\nwebservice.port = {}\n'.format(port))
             _log.info('cromwell config file: %s', util.file.slurp_file(cromwell_conf))
             server = self.CromwellServer(cromwell_tool=self, port=port, config_file=cromwell_conf)
             _log.info('Waiting for cromwell server to start up...')
