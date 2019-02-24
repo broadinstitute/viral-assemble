@@ -14,10 +14,7 @@ import shlex
 import tempfile
 import pipes
 import time
-try:
-    import contextlib
-except ImportError:
-    import contextlib2 as contextlib
+import contextlib2 as contextlib
 import collections
 import time
 import signal

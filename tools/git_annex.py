@@ -27,12 +27,7 @@ import time
 import functools
 import operator
 import copy
-
-try:
-    import contextlib
-except ImportError:
-    import contextlib2 as contextlib
-
+import contextlib2 as contextlib
 import uritools
 import threading
 import dxpy
