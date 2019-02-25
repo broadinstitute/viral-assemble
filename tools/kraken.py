@@ -19,7 +19,7 @@ import util.misc
 from builtins import super
 
 TOOL_NAME = 'kraken'
-TOOL_VERSION = '1.0.0_fork3'
+TOOL_VERSION = '1.0.0_fork3_upd1'
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class Kraken(tools.Tool):
         self.subtool_name = self.subtool_name if hasattr(self, "subtool_name") else "kraken"
         if not install_methods:
             install_methods = []
-            install_methods.append(tools.CondaPackage(TOOL_NAME, executable=self.subtool_name, version=TOOL_VERSION, channel='broad-viral'))
+            install_methods.append(tools.CondaPackage(TOOL_NAME, executable=self.subtool_name, version=TOOL_VERSION, channel='broad-viral', env='kraken_env'))
         super(Kraken, self).__init__(install_methods=install_methods)
 
     def version(self):
