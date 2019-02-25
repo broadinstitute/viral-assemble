@@ -179,6 +179,99 @@ task filter_bam_to_taxa {
 
 }
 
+task blastn_contigs {
+  File contigs_fasta
+
+  String contigs_basename = basename(contigs_fasta, ".fasta")
+
+  command {
+    set -ex -o pipefail
+    if [ -d /mnt/tmp ]; then
+      TMPDIR=/mnt/tmp
+    fi
+    DB_DIR=$(mktemp -d)
+    TAX_DB_DIR=$(mktemp -d)
+
+    # Download latest databases from NCBI FTP
+    lftp -c "mirror --exclude-glob * --include-glob nt.*.tar.gz ftp://ftp.ncbi.nlm.nih.gov/blast/db/ $DB_DIR"
+    pigz -d $DB_DIR/*.gz
+
+    curl -s ftp://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz | tar -zx -C $TAX_DB_DIR
+
+    metagenomics.py blast_taxonomy ${contigs_fasta} \
+      --taxDb $TAX_DB_DIR \
+      --ntDb $DB_DIR \
+      --outBlastn ${contigs_basename}.blastn.m8.gz \
+      --outBlastnLca ${contigs_basename}.blastn.lca.tsv.gz \
+      --outBlastnReport ${contigs_basename}.blastn.report
+  }
+
+  output {
+    File blastn = "${contigs_basename}.blastn.m8.gz"
+    File blastn_lca = "${contigs_basename}.blastn.lca.tsv.gz"
+    File blastn_report = "${contigs_basename}.blastn.report"
+  }
+}
+
+task blastx_contigs {
+  File contigs_fasta
+
+  String contigs_basename = basename(contigs_fasta, ".fasta")
+
+  command {
+    set -ex -o pipefail
+    if [ -d /mnt/tmp ]; then
+      TMPDIR=/mnt/tmp
+    fi
+    DB_DIR=$(mktemp -d)
+    TAX_DB_DIR=$(mktemp -d)
+
+    # Download latest databases from NCBI FTP
+    lftp -c "mirror --exclude-glob * --include-glob nr.*.tar.gz ftp://ftp.ncbi.nlm.nih.gov/blast/db/ $DB_DIR"
+    pigz -d $DB_DIR/*.gz
+
+    curl -s ftp://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz | tar -zx -C $TAX_DB_DIR
+
+    metagenomics.py blast_taxonomy ${contigs_fasta} \
+      --taxDb $TAX_DB_DIR \
+      --nrDb $DB_DIR \
+      --outBlastx ${contigs_basename}.blastx.m8.gz \
+      --outBlastxLca ${contigs_basename}.blastx.lca.tsv.gz \
+      --outBlastxReport ${contigs_basename}.blastx.report
+  }
+
+  output {
+    File blastx = "${contigs_basename}.blastx.m8.gz"
+    File blastx_lca = "${contigs_basename}.blastx.lca.tsv.gz"
+    File blastx_report = "${contigs_basename}.blastx.report"
+  }
+}
+
+task rpsblast_models {
+  File contigs_fasta
+
+  String contigs_basename = basename(contigs_fasta, ".fasta")
+  command {
+    set -ex -o pipefail
+    if [ -d /mnt/tmp ]; then
+      TMPDIR=/mnt/tmp
+    fi
+    DB_DIR=$(mktemp -d)
+
+    curl -s ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/little_endian/Cdd_LE.tar.gz | tar -zx -C $DB_DIR
+
+    metagenomics.py rpsblast_models \
+      $DB_DIR \
+      ${contigs_fasta} \
+      ${contigs_basename}.cdd.report
+  }
+
+  output {
+    File cdd_report = "${contigs_basename}.cdd.report"
+  }
+}
+
+
 task diamond_contigs {
   File  contigs_fasta
   File  reads_unmapped_bam
