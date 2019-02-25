@@ -1405,7 +1405,8 @@ def _submit_analysis_wdl_do(workflow_name, inputs,
                             analysis_dir_pfx,
                             analysis_labels=None,
                             cromwell_server_url='http://localhost:8000',
-                            backend='Local'):
+                            backend='Local',
+                            prepare_only=False):
     """Submit a WDL analysis to a Cromwell server.
 
     Inputs to the analysis.
@@ -1520,6 +1521,10 @@ def _submit_analysis_wdl_do(workflow_name, inputs,
         for wdl_f in os.listdir('.'):
             if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and wdl_f != workflow_name+'.wdl':
                 os.unlink(wdl_f)
+
+        if prepare_only:
+            return
+
         try:
             cromwell_output_str = _run_get_output('cromwell', 'submit', workflow_name+'.wdl',
                                                   '-t', 'wdl', '-i', 'inputs.json', '-l', 'analysis_labels.json',
@@ -1576,7 +1581,8 @@ def submit_analysis_wdl(workflow_name, inputs,
                         analysis_dir_pfx,
                         analysis_labels=None,
                         cromwell_server_url='http://localhost:8000',
-                        backend='Local'):
+                        backend='Local',
+                        prepare_only=False):
     """Submit a WDL analysis (or a set of analyses) to a Cromwell server.
 
     Inputs to the analysis.
@@ -1607,7 +1613,7 @@ def submit_analysis_wdl(workflow_name, inputs,
     for inps in itertools.product(*map(_proc, inputs)):
         _submit_analysis_wdl_do(workflow_name, _ord_dict_merge(inps), analysis_dir_pfx,
                                 analysis_labels, cromwell_server_url,
-                                backend)
+                                backend, prepare_only=prepare_only)
         n_submitted += 1
     _log.info('{} analyses submitted.'.format(n_submitted))
     if n_submitted == 0:
@@ -1647,6 +1653,8 @@ def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('--analysisLabels', dest='analysis_labels', nargs=2, action='append',
                         help='labels to attach to the analysis')
     parser.add_argument('--backend', default='Local', help='backend on which to run')
+    parser.add_argument('--prepareOnly', dest='prepare_only', default=False, action='store_true',
+                        help='set up analysis but do not submit to cromwell')
     util.cmd.attach_main(parser, submit_analysis_wdl, split_args=True)
     return parser
 
