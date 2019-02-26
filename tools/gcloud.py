@@ -17,9 +17,13 @@ import pipes
 import time
 import binascii
 import base64
+import datetime
+import uuid
 
 import uritools
 from google.cloud import storage
+from googleapiclient import discovery
+from oauth2client.client import GoogleCredentials
 
 import tools
 import util.file
@@ -30,6 +34,62 @@ TOOL_VERSION = '1.13.0'
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
+
+def _noquote(s):
+    return '_noquote:' + str(s)
+
+def _quote(s):
+    s = str(s)
+    if s.startswith('_noquote:'): return s[len('_noquote:'):]
+    return pipes.quote(s) if hasattr(pipes, 'quote') else shlex.quote(s)
+
+def _make_cmd(cmd, *args):
+    _log.debug('ARGS=%s', args)
+    return ' '.join([cmd] + [_quote(str(arg)) for arg in args if arg not in (None, '')])
+
+def _run(cmd, *args):
+    cmd = _make_cmd(cmd, *args)
+    _log.info('running command: %s cwd=%s', cmd, os.getcwd())
+    beg_time = time.time()
+    subprocess.check_call(cmd, shell=True)
+    _log.info('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
+
+def _run_succeeds(cmd, *args):
+    try:
+        _run(cmd, *args)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+def _run_get_output(cmd, *args):
+    cmd = _make_cmd(cmd, *args)
+    _log.info('running command: %s cwd=%s', cmd, os.getcwd())
+    beg_time = time.time()
+    output = subprocess.check_output(cmd, shell=True)
+    _log.info('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
+    return output.strip()
+
+def _gs_stat(gs_url):
+    assert gs_url.startswith('gs://')
+    try:
+        stat_output = _run_get_output('gsutil', 'stat', gs_url)
+        result = {}
+        for line in stat_output.split('\n')[1:]:
+            result[line[:25].strip()] = line[25:].strip()
+
+        if 'Hash (md5):' in result:
+            result['md5'] = binascii.hexlify(result['Hash (md5):'].decode('base64'))
+
+        return result
+
+    except subprocess.CalledProcessError:
+        return {}
+
+def _gs_ls(gs_url):
+    return _run_get_output('gsutil', 'ls', gs_url).split('\n')
+
+def _get_gs_remote_uuid():
+    return '0b42380a-45f8-4b9d-82b3-e10aaf7bab6c'  # TODO determine this from git and git-annex config
 
 # * class GCloudTool
 class GCloudTool(tools.Tool):
@@ -126,5 +186,85 @@ class GCloudTool(tools.Tool):
                 uri2attrs[gs_uri] = collections.OrderedDict([('md5', _maybe_decode(md5_hex).upper()),
                                                              ('size', blob.size)])
         return uri2attrs
+
+    @staticmethod
+    def transfer_to_gcs(url, file_size, file_md5, bucket_name='sabeti-ilya-cromwell', project_id='viral-comp-dev'):
+        """Transfer given files to GCS using Google's Data Transfer Service; return their URLs."""
+
+        ##############
+
+        # Create the file manifest
+
+        with util.file.tempfname(prefix='tmp_togcs', suffix='.tsv') as manifest_fname:
+            with open(manifest_fname, 'w') as manifest:
+                manifest.write('TsvHttpData-1.0\n')
+                manifest.write('{}\t{}\t{}\n'.format(url, file_size, file_md5))
+
+            transfer_uuid = uuid.uuid4()
+            manifest_gs_uri = 'gs://{}/transfers/{}/manifest.tsv'.format(bucket_name, transfer_uuid)
+            _run('gsutil', 'cp', '-a', 'public-read', manifest_fname, manifest_gs_uri)
+            assert _gs_stat(manifest_gs_uri)
+
+        ##############
+
+            credentials = GoogleCredentials.get_application_default()
+
+            service = discovery.build('storagetransfer', 'v1', credentials=credentials)
+
+            # The ID of the Google Cloud Platform Console project that the Google service
+            # account is associated with.
+            # Required.
+
+            request = service.googleServiceAccounts().get(projectId=project_id)
+            response = request.execute()
+
+            # TODO: Change code below to process the `response` dict:
+            _log.debug('RESPONSE TO SERVICE BUILD: %s', pformat(response))
+
+            now = datetime.datetime.now()
+
+            transfer_job_body = {
+                'description': 'testing transfer',
+                'status': 'ENABLED',
+                'projectId': 'viral-comp-dev',
+                'schedule': {
+                    'scheduleStartDate': {
+                        'day': now.day,
+                        'month': now.month,
+                        'year': now.year
+                    },
+                    'scheduleEndDate': {
+                        'day': now.day,
+                        'month': now.month,
+                        'year': now.year
+                    },
+                },
+                'transferSpec': {
+                    'httpDataSource': {
+                        'listUrl': manifest_gs_uri
+                    },
+                    "gcsDataSink": {
+                        "bucketName": bucket_name
+                    }
+                }
+                    # TODO: Add desired entries to the request body.
+            }
+
+            request = service.transferJobs().create(body=transfer_job_body)
+            response = request.execute()
+
+            # TODO: Change code below to process the `response` dict:
+            print('RESPONSE TO TRANSFER REQUEST SUBMIT %s', pformat(response))
+
+            url_parts = uritools.urisplit(url)
+            gs_file_uri = 'gs://{}/{}'.format(bucket_name, url_parts.authority + url_parts.path)
+
+            while True:
+                _log.info('waiting for file transfer...')
+                time.sleep(10)
+                if _gs_stat(gs_file_uri):
+                    return gs_file_uri
+
+    # end: def transfer_to_gcs(url, file_size, file_md5, bucket_name='sabeti-ilya-cromwell', project_id='viral-comp-dev')
 
 # end: class GCloudTool
