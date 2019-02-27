@@ -608,6 +608,9 @@ def parser_import_dx_analyses(parser=argparse.ArgumentParser(fromfile_prefix_cha
 __commands__.append(('import_dx_analyses', parser_import_dx_analyses))
 
 # * submit_analysis_wdl
+#
+# Code that deals specifying sets of analyses to run, and submitting them to Cromwell.
+#
 # ** _get_workflow_inputs_spec
 
 def _extract_wdl_from_docker_img(docker_img):
@@ -640,8 +643,12 @@ def _get_workflow_inputs_spec(workflow_name, docker_img):
 # ** _construct_analysis_inputs_parser
 
 # The code here is concerned with specifying a set of analyses to run.
-# Simplest way is to explicitly specify all parameters for each analysis.
-# Another is to point to a set of previously run analyses, and say "take each analysis in this set, modify it
+# Simplest way is to explicitly specify all parameters for each analysis.  However, we often want to take a set of
+# previously run analyses, and re-run them with specific modifications of parameters -- for exampe, with a newer version
+# of viral-ngs.
+
+# So, another way to specify a set of analyses is to point to a set of previously run analyses,
+# and say "take each analysis in this set, modify it
 # in a given way, and run it."
 # Another is to split the parameter set into subsets, specify combinations of values for each subset, and then
 # generate full parameter sets by taking a combination from each subset.
@@ -651,7 +658,7 @@ def _get_workflow_inputs_spec(workflow_name, docker_img):
 def _add_input_source(inp_dict, src):
     """For each input in `inp_dict`, add a corresponding key indicating its source as `src`.
     This is for tracking the provenance of inputs, e.g. when a parameter in one analysis is taken from another analysis,
-    or from a particular file of parameters.
+    or from a particular file of parameters, or from the command line.
     """
     inp_dict_with_sources = copy.copy(inp_dict)
     for k in inp_dict:
@@ -1790,8 +1797,6 @@ __commands__.append(('git_annex_get', parser_git_annex_get))
 
 def full_parser():
     return util.cmd.make_parser(__commands__, __doc__)
-
-
 
 if __name__ == '__main__':
     #print(_pretty_print_json(_parse_cromwell_output_str(util.file.slurp_file('/dev/shm/cromwell_out/wdl_output.txt'))))
