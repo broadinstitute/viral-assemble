@@ -27,7 +27,7 @@ def db(tmpdir_factory):
 @pytest.fixture(autouse=True)
 def mocks(mocker):
 
-    mock_run = mocker.patch('util.misc.run', autospec=True)
+    mock_run = mocker.patch('subprocess.run', autospec=True)
     mock_check_call = mocker.patch('subprocess.check_call', autospec=True)
 
     mock_conda = mocker.patch('tools.CondaPackage', autospec=True)

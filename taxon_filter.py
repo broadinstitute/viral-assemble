@@ -290,7 +290,7 @@ def deplete_bmtagger_bam(inBam, db, outBam, srprism_memory=7168, JVMmemory=None)
                     '-1', inReads1, '-o', matchesFile
                 ]
                 log.debug(' '.join(cmdline))
-                util.misc.run_and_print(cmdline, check=True)
+                subprocess.run(cmdline, check=True)
 
     tools.picard.FilterSamReadsTool().execute(inBam, True, matchesFile, outBam, JVMmemory=JVMmemory)
 

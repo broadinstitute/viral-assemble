@@ -32,7 +32,7 @@ class BlastTools(tools.Tool):
     def execute(self, *args):
         cmd = [self.install_and_get_path()]
         cmd.extend(args)
-        util.misc.run_and_print(cmd, buffered=True, check=True)
+        subprocess.run(cmd, check=True)
 
 
 class BlastnTool(BlastTools):

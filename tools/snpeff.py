@@ -44,7 +44,7 @@ class SnpEff(tools.Tool):
     def version(self):
         return TOOL_VERSION
 
-    def execute(self, command, args, JVMmemory=None, stdin=None, stdout=None, stderr=None):    # pylint: disable=W0221
+    def execute(self, command, args, JVMmemory=None, stdout=None, stderr=None):    # pylint: disable=W0221
         if not JVMmemory:
             JVMmemory = self.jvmMemDefault
 
@@ -60,7 +60,9 @@ class SnpEff(tools.Tool):
             ] + args
 
         _log.debug(' '.join(tool_cmd))
-        return util.misc.run_and_print(tool_cmd, stdin=stdin, stderr=stderr, buffered=True, silent=command in ("databases","build"), check=True)
+        if command == 'build':
+            stdout = subprocess.DEVNULL
+        return subprocess.run(tool_cmd, stdout=stdout, stderr=stderr, check=True)
 
     def has_genome(self, genome):
         if not self.known_dbs:
@@ -140,26 +142,25 @@ class SnpEff(tools.Tool):
     def available_databases(self):
         # do not capture stderr, since snpEff writes 'Picked up _JAVA_OPTIONS'
         # which is not helpful for reading the stdout of the databases command
-        with open(os.devnull, "wb") as devnull:
-            command_ps = self.execute("databases", args=[], stderr=devnull)
+        command_ps = self.execute("databases", args=[], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
-            split_points = []
-            keys = ['Genome', 'Organism', 'Status', 'Bundle', 'Database']
-            self.installed_dbs = set()
-            self.known_dbs = set()
-            for line in command_ps.stdout.decode("utf-8").splitlines():
-                line = line.strip()
-                if not split_points:
-                    if not line.startswith('Genome'):
-                        raise Exception()
-                    split_points = list(line.index(key) for key in keys)
-                elif not line.startswith('----'):
-                    indexes = split_points + [len(line)]
-                    row = dict((keys[i], line[indexes[i]:indexes[i + 1]].strip()) for i in range(len(split_points)))
-                    self.known_dbs.add(row['Genome'])
-                    if row.get('Status') == 'OK':
-                        self.installed_dbs.add(row['Genome'])
-                    yield row
+        split_points = []
+        keys = ['Genome', 'Organism', 'Status', 'Bundle', 'Database']
+        self.installed_dbs = set()
+        self.known_dbs = set()
+        for line in command_ps.stdout.decode("utf-8").splitlines():
+            line = line.strip()
+            if not split_points:
+                if not line.startswith('Genome'):
+                    raise Exception()
+                split_points = list(line.index(key) for key in keys)
+            elif not line.startswith('----'):
+                indexes = split_points + [len(line)]
+                row = dict((keys[i], line[indexes[i]:indexes[i + 1]].strip()) for i in range(len(split_points)))
+                self.known_dbs.add(row['Genome'])
+                if row.get('Status') == 'OK':
+                    self.installed_dbs.add(row['Genome'])
+                yield row
 
     def annotate_vcf(self, inVcf, genomes, outVcf, emailAddress=None, JVMmemory=None):
         """
@@ -209,7 +210,7 @@ class SnpEff(tools.Tool):
             os.path.realpath(inVcf)
         ]
 
-        command_ps = self.execute('ann', args, JVMmemory=JVMmemory)
+        command_ps = self.execute('ann', args, stdout=subprocess.PIPE, JVMmemory=JVMmemory)
         if command_ps.returncode == 0:
             with open(tmpVcf, 'wt') as outf:
                outf.write(command_ps.stdout.decode("utf-8"))

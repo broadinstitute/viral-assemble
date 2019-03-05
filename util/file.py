@@ -709,7 +709,7 @@ def grep_count(file_path, to_match, additional_flags=None, fixed_mode=True, star
 
     cmd.append(file_path)
 
-    number_of_seqs = util.misc.run_and_print(cmd, silent=False, check=True, env=env)
+    number_of_seqs = subprocess.run(cmd, stdout=subprocess.PIPE, check=True, env=env)
     return int(number_of_seqs.stdout.decode("utf-8").rstrip(os.linesep))
 
 # used by count_and_sort_barcodes

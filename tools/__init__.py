@@ -227,13 +227,17 @@ class CondaPackage(InstallMethod):
         'remove',
         ]
 
-    def execute(self, cmd, loglevel=logging.DEBUG, buffered=None, check=None, silent=None):
+    def execute(self, cmd, loglevel=logging.DEBUG, check=None, silent=None):
         run_cmd = ['conda']
         if cmd[0] in self.QUIET_COMMANDS:
             run_cmd.extend(['-q', '-y'])
         run_cmd.extend(cmd)
-        result = util.misc.run_and_print(
-            run_cmd, loglevel=loglevel, env=self.conda_env, buffered=buffered, check=check, silent=silent)
+
+        stdout = subprocess.PIPE
+        stderr = subprocess.STDOUT
+        result = subprocess.run(run_cmd, env=self.conda_env, check=check, stdout=stdout, stderr=stderr)
+        if not silent:
+            print(result.stdout.decode("UTF-8"))
 
         if result.returncode == 0:
             try:
@@ -315,7 +319,7 @@ class CondaPackage(InstallMethod):
                     self.env_path = os.path.dirname(last_path_component) if last_path_component == "bin" else conda_env_path
                 else: # if conda env is an environment name, infer the path
                     #_log.debug('Conda env found is specified by name: %s' % conda_env_path)
-                    result = util.misc.run_and_print(["conda", "env", "list", "--json"], silent=True, env=os.environ)
+                    result = subprocess.run(["conda", "env", "list", "--json"], stdout=subprocess.PIPE, env=os.environ)
                     if result.returncode == 0:
                         command_output = result.stdout.decode("UTF-8")
                         data = json.loads(self._string_from_start_of_json(command_output))
@@ -430,7 +434,7 @@ class CondaPackage(InstallMethod):
                 post_verify_command = shlex.split(self.post_verify_command)
                 _log.debug("Running post-verification cmd: {}".format(self.post_verify_command))
 
-                result = util.misc.run_and_print(post_verify_command, silent=False, check=False, env=self.conda_env, cwd=self.bin_path)
+                result = subprocess.run(post_verify_command, env=self.conda_env, cwd=self.bin_path)
                 post_verify_cmd_return_code = result.returncode
                 if post_verify_cmd_return_code == self.post_verify_ret:
                     self.post_verify_cmd_executed = True

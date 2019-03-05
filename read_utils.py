@@ -14,6 +14,7 @@ import math
 import os
 import tempfile
 import shutil
+import subprocess
 import sys
 import concurrent.futures
 from contextlib import contextmanager
@@ -52,7 +53,7 @@ def purge_unmated(inFastq1, inFastq2, outFastq1, outFastq2, regex=r'^@(\S+)/[1|2
     mergeShuffledFastqSeqsPath = os.path.join(util.file.get_scripts_path(), 'mergeShuffledFastqSeqs.pl')
     cmdline = [mergeShuffledFastqSeqsPath, '-t', '-r', regex, '-f1', inFastq1, '-f2', inFastq2, '-o', tempOutput]
     log.debug(' '.join(cmdline))
-    util.misc.run_and_print(cmdline, check=True)
+    subprocess.run(cmdline, check=True)
     shutil.move(tempOutput + '.1.fastq', outFastq1)
     shutil.move(tempOutput + '.2.fastq', outFastq2)
     return 0

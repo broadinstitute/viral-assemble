@@ -142,7 +142,7 @@ class MafftTool(tools.Tool):
 
         # run the MAFFT alignment
         with open(outFile, 'w') as outf:
-            util.misc.run_and_save(tool_cmd, outf=outf)
+            subprocess.run(tool_cmd, stdout=outf)
 
         if len(tempCombinedInputFile):
             # remove temp FASTA file

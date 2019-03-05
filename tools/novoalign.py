@@ -66,7 +66,7 @@ class NovoalignTool(tools.Tool):
     def _get_tool_version(self):
         tmpf = util.file.mkstempfname('.novohelp.txt')
         with open(tmpf, 'wt') as outf:
-            util.misc.run_and_save([self.install_and_get_path(), "-V"], outf=outf, check=False)
+            subprocess.run([self.install_and_get_path(), "-V"], stdout=outf, check=False)
         with open(tmpf, 'rt') as inf:
             self.tool_version = inf.readline().strip().split()[1]
         os.unlink(tmpf)
@@ -183,7 +183,7 @@ class NovoalignTool(tools.Tool):
         cmd = cmd + ['-F', 'BAM', '-d', self._fasta_to_idx_name(refFasta), '-o', 'SAM']
         _log.debug(' '.join(cmd))
         with open(tmp_sam, 'wt') as outf:
-            util.misc.run_and_save(cmd, outf=outf)
+            subprocess.run(cmd, stdout=outf)
 
         # Samtools filter (optional)
         if min_qual:
@@ -191,7 +191,7 @@ class NovoalignTool(tools.Tool):
             cmd = [samtools.install_and_get_path(), 'view', '-b', '-S', '-1', '-q', str(min_qual), tmp_sam]
             _log.debug('%s > %s', ' '.join(cmd), tmp_bam2)
             with open(tmp_bam2, 'wb') as outf:
-                util.misc.run_and_save(cmd, outf=outf)
+                subprocess.run(cmd, stdout=outf)
             os.unlink(tmp_sam)
             tmp_sam = tmp_bam2
 

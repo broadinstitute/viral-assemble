@@ -10,7 +10,6 @@ import os
 import re
 import time, datetime
 import os.path
-import util.misc
 
 
 def get_project_path():
@@ -30,10 +29,10 @@ def call_git_describe():
     try:
         os.chdir(get_project_path())
         cmd = ['git', 'describe', '--tags', '--always', '--dirty']
-        result = util.misc.run_and_print(cmd, silent=True)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         ver = None
         if result.returncode == 0:
-            out = result.stdout    
+            out = result.stdout
             if not isinstance(out, str):
                 out = out.decode('utf-8')
             ver = out.strip()

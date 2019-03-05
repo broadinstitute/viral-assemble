@@ -75,7 +75,7 @@ class TrimmomaticTool(tools.Tool):
         )
 
         _log.debug(' '.join(javaCmd))
-        util.misc.run_and_print(javaCmd, check=True)
+        subprocess.run(javaCmd, check=True)
 
         if not unpairedOutFastq1:
             os.unlink(unpairedFastq1)

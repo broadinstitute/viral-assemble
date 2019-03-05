@@ -1,5 +1,4 @@
 '''A few miscellaneous tools. '''
-from __future__ import print_function, division  # Division of integers with / should never round!
 import collections
 import contextlib
 import itertools, functools, operator
@@ -144,84 +143,6 @@ def list_contains(sublist, list_):
     return False
 
 
-try:
-    from subprocess import run
-except ImportError:
-    CompletedProcess = collections.namedtuple(
-        'CompletedProcess', ['args', 'returncode', 'stdout', 'stderr'])
-
-    def run(args, stdin=None, stdout=None, stderr=None, shell=False,
-            env=None, cwd=None, timeout=None, check=False, executable=None):
-        '''A poor man's substitute of python 3.5's subprocess.run().
-
-        Should only be used for capturing stdout. If stdout is unneeded, a
-        simple subprocess.call should suffice.
-        '''
-        assert stdout is not None, (
-            'Why are you using this util function if not capturing stdout?')
-
-        stdout_pipe = stdout == subprocess.PIPE
-        stderr_pipe = stderr == subprocess.PIPE
-        # A little optimization when we don't need temporary files.
-        if stdout_pipe and (
-                stderr == subprocess.STDOUT or stderr is None):
-            try:
-                output = subprocess.check_output(
-                    args, stdin=stdin, stderr=stderr, shell=shell,
-                    env=env, cwd=cwd, executable=executable)
-                return CompletedProcess(args, 0, output, b'')
-            # Py3.4 doesn't have stderr attribute
-            except subprocess.CalledProcessError as e:
-                if check:
-                    raise
-                returncode = e.returncode
-                stderr_text = getattr(e, 'stderr', b'')
-                return CompletedProcess(args, e.returncode, e.output, stderr_text)
-
-        # Otherwise use temporary files as buffers, since subprocess.call
-        # cannot use PIPE.
-        if stdout_pipe:
-            stdout_fn = util.file.mkstempfname('.stdout')
-            stdout = open(stdout_fn, 'wb')
-        if stderr_pipe:
-            stderr_fn = util.file.mkstempfname('.stderr')
-            stderr = open(stderr_fn, 'wb')
-        try:
-            returncode = subprocess.call(
-                args, stdin=stdin, stdout=stdout,
-                stderr=stderr, shell=shell, env=env, cwd=cwd,
-                executable=executable)
-            if stdout_pipe:
-                stdout.close()
-                with open(stdout_fn, 'rb') as f:
-                    output = f.read()
-            else:
-                output = ''
-            if stderr_pipe:
-                stderr.close()
-                with open(stderr_fn, 'rb') as f:
-                    error = f.read()
-            else:
-                error = ''
-            if check and returncode != 0:
-                print(output.decode("utf-8"))
-                print(error.decode("utf-8"))
-                try:
-                    raise subprocess.CalledProcessError(
-                        returncode, args, output, error) #pylint: disable-msg=E1121
-                except TypeError: # py2 CalledProcessError does not accept error
-                    raise subprocess.CalledProcessError(
-                        returncode, args, output)
-            return CompletedProcess(args, returncode, output, error)
-        finally:
-            if stdout_pipe:
-                stdout.close()
-                os.remove(stdout_fn)
-            if stderr_pipe:
-                stderr.close()
-                os.remove(stderr_fn)
-
-
 def run_and_print(args, stdout=None, stderr=subprocess.STDOUT,
                   stdin=None, shell=False, env=None, cwd=None,
                   timeout=None, silent=False, buffered=False, check=False,
@@ -234,7 +155,7 @@ def run_and_print(args, stdout=None, stderr=subprocess.STDOUT,
     if not buffered:
         if check and not silent:
             try:
-                result = run(
+                result = subprocess.run(
                     args,
                     stdin=stdin,
                     stdout=subprocess.PIPE,
@@ -304,32 +225,6 @@ def run_and_print(args, stdout=None, stderr=subprocess.STDOUT,
             args, process.returncode, b''.join(output), b'')
 
     return result
-
-
-def run_and_save(args, stdout=None, stdin=None,
-                 outf=None, stderr=None, preexec_fn=None,
-                 close_fds=False, shell=False, cwd=None, env=None, check=True):
-    assert outf is not None
-
-    sp = subprocess.Popen(args,
-                          stdin=stdin,
-                          stdout=outf,
-                          stderr=subprocess.PIPE,
-                          preexec_fn=preexec_fn,
-                          close_fds=close_fds,
-                          shell=shell,
-                          cwd=cwd,
-                          env=env)
-    out, err = sp.communicate()
-
-    # redirect stderror to stdout so it can be captured by nose
-    if err:
-        sys.stdout.write(err.decode("UTF-8"))
-
-    if sp.returncode != 0 and check:
-        raise subprocess.CalledProcessError(sp.returncode, str(args[0]))
-
-    return sp
 
 
 class FeatureSorter(object):
