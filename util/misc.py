@@ -315,8 +315,6 @@ def run_and_print(args, stdout=None, stderr=subprocess.STDOUT,
     This is useful for nose, which has difficulty capturing stdout of
     subprocess invocations.
     '''
-    if loglevel:
-        silent = False
     if not buffered:
         if check and not silent:
             try:

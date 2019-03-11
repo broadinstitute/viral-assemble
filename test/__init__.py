@@ -32,6 +32,7 @@ def assert_equal_contents(testCase, filename1, filename2):
     'Assert contents of two files are equal for a unittest.TestCase'
     testCase.assertTrue(filecmp.cmp(filename1, filename2, shallow=False))
 
+
 def assert_equal_bam_reads(testCase, bam_filename1, bam_filename2):
     ''' Assert that two bam files are equivalent
 
@@ -114,7 +115,7 @@ class TestCaseWithTmp(unittest.TestCase):
     def inputs(self, *fnames):
         '''Return the full filenames for files in the test input directory for this test class'''
         return [self.input(fname) for fname in fnames]
-        
+
 """
 When "nose" executes python scripts for automated testing, it excludes ones with
 the executable bit set (in case they aren't import safe). To prevent any of the
