@@ -304,16 +304,39 @@ class GitAnnexTool(tools.Tool):
         """Init an external special remote ldir"""
         self.execute(['initremote', remote_name, 'type=external', 'externaltype={}'.format(externaltype), 'encryption=none'])
 
+# *** git commands
+
+    def commit(self, msg):
+        """Execute git commit"""
+        self.execute_git(['commit', '-m', '"{}"'.format(msg)])
+
+    def get_first_commit(self):
+        """Return sha1 hash of first commit in repo (error if more than one)"""
+        parentless_commits = self.execute_git_and_get_output(['rev-list', '--max-parents=0', 'HEAD']).strip().split('\n')
+        util.misc.chk(len(parentless_commits) == 1)
+        return parentless_commits[0]
+
+    @contextlib.contextmanager
+    def tmp_worktree(self, directory, branch, start_branch):
+        """Make a temp worktree in a given dir"""
+        directory = os.path.abspath(directory)
+        with util.file.tmp_dir(dir=directory, suffix='_worktree') as temp_worktree_dir:
+            self.execute_git(['worktree', 'add', '-b', branch, directory, start_branch])
+            try:
+                with util.file.pushd_popd(temp_worktree_dir):
+                    yield temp_worktree_dir
+            finally:
+                if not util.file.keep_tmp():
+                    self.execute_git(['worktree', 'remove', directory])
+
+# *** git-annex commands
+
     @_add_now_arg
     def add(self, fname):
         """Add a file to git-annex"""
         _log.debug('CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
         self.execute_batch(['add'], batch_args=(fname,))
         _log.debug('RETURNED FROM CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
-
-    def commit(self, msg):
-        """Execute git commit"""
-        self.execute_git(['commit', '-m', '"{}"'.format(msg)])
 
     def initremote(self, name, remote_type, **kw):
         """Initialize a git-annex special remote"""
