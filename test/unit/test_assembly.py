@@ -154,7 +154,7 @@ class TestAssembleSpades(TestCaseWithTmp):
         inBam = os.path.join(inDir, '..', 'G5012.3.subset.bam')
         clipDb = os.path.join(inDir, 'clipDb.fasta')
         with util.file.tempfname('.fasta') as outFasta:
-            assembly.assemble_spades(in_bam=inBam, clip_db=clipDb, min_contig_len=180, out_fasta=outFasta)
+            assembly.assemble_spades(in_bam=inBam, clip_db=clipDb, min_contig_len=180, out_fasta=outFasta, threads=1)
             self.assertGreater(os.path.getsize(outFasta), 0)
             contig_lens = list(sorted(len(seq.seq) for seq in Bio.SeqIO.parse(outFasta, 'fasta')))
             #import sys
@@ -168,7 +168,7 @@ class TestAssembleSpades(TestCaseWithTmp):
         previously_assembled_contigs = os.path.join(inDir, 'trinity_contigs.fasta')
         with util.file.tempfname('.fasta') as outFasta:
             assembly.assemble_spades(in_bam=inBam, clip_db=clipDb, contigs_untrusted=previously_assembled_contigs,
-                                     out_fasta=outFasta, mem_limit_gb=1)
+                                     out_fasta=outFasta, mem_limit_gb=1, threads=1)
             self.assertGreater(os.path.getsize(outFasta), 0)
             contig_lens = list(sorted(len(seq.seq) for seq in Bio.SeqIO.parse(outFasta, 'fasta')))
             #import sys

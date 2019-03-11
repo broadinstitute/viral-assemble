@@ -65,7 +65,7 @@ def setup_dummy_simple(workdir, sample_names=('G1234', 'G5678', 'G3671.1_r1', 'G
             if v.startswith('s3://'):
                 config[k] = translate_remote_s3(v)
 
-        if util.misc.is_nonstr_iterable(v):
+        if util.misc.is_nonatom_iterable(v):
             for i, vv in enumerate(v):
                 if isinstance(vv, str):
                   if vv.startswith('s3://'):
