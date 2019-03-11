@@ -878,7 +878,7 @@ class NestedParserAction(argparse.Action):
     @staticmethod
     def _argparse_ensure_value(namespace, name, value):
         """Ensure that `namespace` has the attr `name`, with default value `value`,
-        and return the attri's value."""
+        and return the attr's value."""
         if getattr(namespace, name, None) is None:
             setattr(namespace, name, value)
         return getattr(namespace, name)
