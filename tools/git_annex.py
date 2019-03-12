@@ -321,7 +321,7 @@ class GitAnnexTool(tools.Tool):
         """Make a temp worktree in a given dir"""
         directory = os.path.abspath(directory)
         with util.file.tmp_dir(dir=directory, suffix='_worktree') as temp_worktree_dir:
-            self.execute_git(['worktree', 'add', '-b', branch, directory, start_branch])
+            self.execute_git(['worktree', 'add', '-b', branch, temp_worktree_dir, start_branch])
             try:
                 with util.file.pushd_popd(temp_worktree_dir):
                     yield temp_worktree_dir
