@@ -995,9 +995,28 @@ def submit_analysis_wdl(workflow_name, inputs,
 
 #########################
 
+# ** submit_analysis_crogit
+
+def _make_git_links_under_dir(d, base_dir, git_annex_tool):
+    """Change any git links within json struct `d` to be relative paths under `base_dir`."""
+
+    base_dir = os.path.abspath(base_dir)
+    def _make_git_link_point_under_dir(val, path):
+        if not _maps(val, '$git_link'):
+            return val
+        _log.info('PROCESSING GIT LINK at %s: %s', path, val)
+
+        git_fname_arg = ['inputs_submitted'] + list(map(str, path)) + [os.path.basename(val.get('orig_path', val['$git_link']))]
+        _log.info('git_fname_arg=%s', git_fname_arg)
+        git_fname = os.path.join(*git_fname_arg)
+        git_annex_tool.fromkey(key=val['git_annex_key'], fname=os.path.join(base_dir, git_fname), now=False)
+        return dict(val, **{'$git_link': git_fname})
+    return util.misc.transform_json_data(d, _make_git_link_point_under_dir)
+
 def _submit_analysis_crogit_do(workflow_name, inputs,
                                analysis_dir_pfx,
-                               analysis_labels=None):
+                               analysis_labels,
+                               git_annex_tool):
     """Submit a WDL analysis to a Cromwell server.
 
     Inputs to the analysis.
@@ -1034,7 +1053,7 @@ def _submit_analysis_crogit_do(workflow_name, inputs,
         _extract_wdl_from_docker_img(docker_img_hash)
         workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
         _write_json('inputs-orig.json', **inputs)
-        run_inputs = _make_git_links_relative(inputs, analysis_dir)
+        run_inputs = _make_git_links_under_dir(inputs, analysis_dir, git_annex_tool)
 
         input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
 
@@ -1109,10 +1128,13 @@ def submit_analyses_crogit(workflow_name, inputs, analysis_labels=None, temp_wor
                                      branch='/'.join(('crogit', 'submitted', crogit_batch_id)),
                                      start_branch=git_annex_tool.get_first_commit()) as tmp_worktree_dir:
 
-        for inps in full_inps:
-            _submit_analysis_crogit_do(workflow_name=workflow_name, inputs=inps,
-                                       analysis_dir_pfx=os.path.join(tmp_worktree_dir, 'crogit', 'submitted') + '/',
-                                       analysis_labels=copy.deepcopy(analysis_labels))
+        with git_annex_tool.batching() as git_annex_tool:
+            for inps in full_inps:
+                _submit_analysis_crogit_do(workflow_name=workflow_name, inputs=inps,
+                                           analysis_dir_pfx=os.path.join(tmp_worktree_dir, 'crogit', 'submitted') + '/',
+                                           analysis_labels=copy.deepcopy(analysis_labels), git_annex_tool=git_annex_tool)
+
+        # and now git-annex-add all the things we created, and make a branch for this.
 # end: def submit_analyses_crogit(workflow_name, inputs, analysis_labels=None, temp_worktree_base='../temp_worktrees')
 
 def parser_submit_analyses_crogit(parser=argparse.ArgumentParser()):
