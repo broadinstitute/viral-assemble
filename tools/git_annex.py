@@ -327,7 +327,7 @@ class GitAnnexTool(tools.Tool):
                     yield temp_worktree_dir
             finally:
                 if not util.file.keep_tmp():
-                    self.execute_git(['worktree', 'remove', directory])
+                    self.execute_git(['worktree', 'remove', temp_worktree_dir])
 
 # *** git-annex commands
 
