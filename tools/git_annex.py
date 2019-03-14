@@ -40,7 +40,7 @@ import util.misc
 import util.version
 
 TOOL_NAME = 'git-annex'
-TOOL_VERSION = '7.20181211'
+TOOL_VERSION = '7.20190219'
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
@@ -327,7 +327,10 @@ class GitAnnexTool(tools.Tool):
                     yield temp_worktree_dir
             finally:
                 if not util.file.keep_tmp():
-                    self.execute_git(['worktree', 'remove', temp_worktree_dir])
+                    try:
+                        self.execute_git(['worktree', 'remove', temp_worktree_dir])
+                    except Exception:
+                        _log.warning('Could not remove temp worktree %s', temp_worktree_dir)
 
 # *** git-annex commands
 
@@ -337,6 +340,10 @@ class GitAnnexTool(tools.Tool):
         _log.debug('CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
         self.execute_batch(['add'], batch_args=(fname,))
         _log.debug('RETURNED FROM CALL TO ADD %s; batch status = %s', fname, self._batched_cmds)
+
+    def add_cwd(self):
+        """Add files in current working directory to git-annex"""
+        self.execute(['add'])
 
     def initremote(self, name, remote_type, **kw):
         """Initialize a git-annex special remote"""
