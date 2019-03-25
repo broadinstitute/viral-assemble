@@ -39,7 +39,7 @@ else # if it does not exist, we need to install miniconda
         export PATH="$MINICONDA_DIR/bin:$PATH"
     fi
     hash -r
-    #conda update -c conda-canary conda # for pre-release conda
+    conda update -c conda-canary conda # for pre-release conda
     EXTRA_PINS="openssl=1.1.1b"
     conda config --set always_yes yes --set changeps1 no --set remote_max_retries 6
     conda config --add channels defaults
@@ -49,9 +49,9 @@ else # if it does not exist, we need to install miniconda
     # Use recommendations from https://github.com/bioconda/bioconda-recipes/issues/13774
     conda update -y conda
     # conda config --set channel_priority strict
-    conda install -y --debug pycryptosat ${EXTRA_PINS}
+    conda install -y --debug --strict-channel-priority pycryptosat ${EXTRA_PINS}
     conda config --set sat_solver pycryptosat
-    conda install --quiet -y openjdk=8.0.152 ${EXTRA_PINS}
+    conda install --quiet -y --strict-channel-priority openjdk=8.0.152 ${EXTRA_PINS}
 fi
 
 # update certs
