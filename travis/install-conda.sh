@@ -39,7 +39,7 @@ else # if it does not exist, we need to install miniconda
         export PATH="$MINICONDA_DIR/bin:$PATH"
     fi
     hash -r
-    conda update -c -y conda-canary conda # for pre-release conda
+    conda update -y -c conda-canary conda # for pre-release conda
     EXTRA_PINS="openssl=1.1.1b"
     conda config --set always_yes yes --set changeps1 no --set remote_max_retries 6 --set channel_priority strict
     conda config --add channels defaults
