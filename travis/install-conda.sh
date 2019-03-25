@@ -51,7 +51,7 @@ else # if it does not exist, we need to install miniconda
     # conda config --set channel_priority strict
     conda install -y --debug pycryptosat ${EXTRA_PINS}
     conda config --set sat_solver pycryptosat
-    conda install --quiet -y openjdk=8.0.152 ${EXTRA_PINS}
+    conda install --quiet -y openjdk ${EXTRA_PINS} # openjdk=8.0.152
 fi
 
 # update certs
