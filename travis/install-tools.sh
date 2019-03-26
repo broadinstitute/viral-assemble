@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e -o pipefail #exit on error or within pipes
 
-CONDA_CHANNEL_STRING="" #"--override-channels -c broad-viral -c conda-forge -c bioconda -c defaults"
+CONDA_CHANNEL_STRING="--override-channels -c broad-viral -c conda-forge -c bioconda -c defaults"
 CONDA_ENV="$(pwd)/tools/conda-tools/default"
 
 # Set to conda's java
@@ -30,6 +30,7 @@ conda install -y --quiet \
     --file requirements-conda.txt \
     --file requirements-conda-tests.txt \
     --file requirements-py$PYVER.txt \
+    --strict-channel-priority \
     -p $CONDA_ENV #; do
 #        let RETRIES++
 #        if [ "$RETRIES" -gt "$RETRY_LIMIT" ]; then
