@@ -20,7 +20,7 @@ mvicuna=1.0
 novoalign=3.07.00
 parallel=20160622
 picard=2.18.11
-pigz=2.4
+pigz
 prinseq=0.20.4
 samtools=1.9
 snpeff=4.3.1t
