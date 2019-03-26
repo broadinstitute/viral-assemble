@@ -18,7 +18,7 @@ mummer4=4.0.0beta2
 muscle=3.8.1551 
 mvicuna=1.0
 novoalign=3.07.00
-parallel=20160622
+parallel
 picard=2.18.11
 pigz
 prinseq=0.20.4
