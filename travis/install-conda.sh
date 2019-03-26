@@ -49,7 +49,7 @@ else # if it does not exist, we need to install miniconda
     # Use recommendations from https://github.com/bioconda/bioconda-recipes/issues/13774
     conda update -y conda
     # conda config --set channel_priority strict
-    conda install -y --debug pycryptosat ${EXTRA_PINS}
+    conda install -y pycryptosat ${EXTRA_PINS}
     conda config --set sat_solver pycryptosat
     conda install --quiet -y openjdk ${EXTRA_PINS} # openjdk=8.0.152
 fi
