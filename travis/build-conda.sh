@@ -4,7 +4,7 @@
 set -e -o pipefail
 
 # === Build conda package
-#CONDA_CHANNEL_STRING="--override-channels -c broad-viral -c conda-forge -c bioconda -c defaults"
+CONDA_CHANNEL_STRING="--override-channels -c broad-viral -c conda-forge -c bioconda -c defaults"
 CONDA_PACKAGE_OUTDIR=packaging/conda-packages
 echo "Rendering and building conda package..."
 echo "Python binary: $(which python)"
