@@ -1,2 +1,2 @@
-futures==3.2.0
+futures
 subprocess32=3.5.3
