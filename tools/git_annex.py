@@ -533,8 +533,8 @@ class GitAnnexTool(tools.Tool):
     @_add_now_arg
     def register_key_in_remote_at_url(self, key, url, remote_uuid):
         """Record that `key` is present in remote `remote_uuid` at `url`"""
-        self.registerurl(key, url, now=False)
         self.setpresentkey(key, remote_uuid, True, now=False)
+        self.registerurl(key, url, now=False)
 
     @_add_now_arg
     def checkpresentkey(self, key, output_acceptor=None, priority=-100):
@@ -743,6 +743,7 @@ class GitAnnexTool(tools.Tool):
             if len(descr['parts']) == 1:
                 md5 = descr['parts']['1']['md5']
             else:
+                # TODO: add the use of a dxid-to-key cache in git (or more generally url-to-key?)
                 with util.file.tempfname(suffix='_dx_md5') as t_file:
                     dxpy.dxfile_functions.download_dxfile(dxid, t_file)
                     md5 = util.file.md5_for_file(t_file)
@@ -781,7 +782,7 @@ class GitAnnexTool(tools.Tool):
                                                   for remote_type in self.REMOTE_TYPES], [])
 
     def get_key_for_url(self, url, error_if_missing=True):
-        """Return git-annex key for the given URL.  If not nown, raise an exception if error_if_missing is True,
+        """Return git-annex key for the given URL.  If not known, raise an exception if error_if_missing is True,
         else return None.
         """
         key = self._url2filestat.get(url, {}).get('git_annex_key', None)
