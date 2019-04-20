@@ -490,6 +490,21 @@ def _resolve_links_in_json_data(val, rel_to_dir, methods, relpath='files'):
     return util.misc.transform_json_data(val, node_handler=handle_node)
 
 # ** import_dx_analysis impl
+
+def _determine_dx_analysis_docker_img(dnanexus_tool, mdata):
+    """Determine the viral-ngs docker image used for a given dx analysis"""
+    # determine the viral-ngs version
+    executable_descr = dnanexus_tool.describe(mdata['executable'])
+    util.misc.chk('dxWDL' in executable_descr['tags'])
+    if not executable_descr['folder'].startswith('/build/quay.io/broadinstitute/viral-ngs'):
+        # the workflow may have been copied from the "Broad viral-ngs dxWDL CI - Public" project.
+        # Look at the applets.
+        executable_descr = dnanexus_tool.describe(mdata['stages'][0]['execution']['executable'])
+    exe_folder_parts = executable_descr['folder'].split('/')
+    docker_img = '/'.join(exe_folder_parts[2:5]) + ':' + exe_folder_parts[5]
+    mdata['labels']['docker_img'] = docker_img
+    mdata['labels']['docker_img_hash'] = docker_img + '@' + _get_docker_hash(mdata['labels']['docker_img'])
+
 def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanexus_tool):
     """Import a DNAnexus analysis into git, in our analysis dir format."""
 
@@ -524,12 +539,10 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
                                 ('analysis_dir', analysis_dir),
                                 ('analysis_id', dx_analysis_id))
     mdata['workflowName'] = mdata['executableName']
-    executable_descr = dnanexus_tool.describe(mdata['executable'])
-    if 'dxWDL' in executable_descr['tags'] and executable_descr['folder'].startswith('/build/quay.io/broadinstitute/viral-ngs'):
-        exe_folder_parts = executable_descr['folder'].split('/')
-        docker_img = '/'.join(exe_folder_parts[2:5]) + ':' + exe_folder_parts[5]
-        mdata['labels']['docker_img'] = docker_img
-        mdata['labels']['docker_img_hash'] = docker_img + '@' + _get_docker_hash(mdata['labels']['docker_img'])
+
+    _determine_dx_analysis_docker_img(dnanexus_tool, mdata)
+    _log.info('labels=%s', mdata['labels'])
+
     stage2name = {}
     for stage in mdata['stages']:
         if _maps(stage, 'id', 'execution'):
@@ -1176,6 +1189,50 @@ def _get_docker_hash(docker_img):
 
 ########################################################################################################################
 
+# ** Bringing benchmarks results in sync with benchmarks spec
+
+#
+# The code below takes a benchmark spec file, which specifies benchmarks and variants;
+# and makes progress towards ensuring that, for each benchmark and each variant, we have computed a result of
+# running that benchmark variant.
+#
+
+def _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def):
+    """Generate a run-ready analysis dir for the given benchmark and benchmark variant."""
+    
+
+def generate_benchmark_variant_dirs(benchmarks_spec_file):
+    """The code below takes a benchmark spec file, which specifies benchmarks (as analysis dirs) and variants,
+    and generates, under each benchmark dir and for each variant, an analysis spec obtained by
+    overriding the benchmark settings with the variant.
+
+    Args:
+      benchmarks_spec: a yaml file specifying benchmarks and variants.
+    """
+
+    benchmarks_spec_file = os.path.abspath(benchmarks_spec_file)
+    benchmarks_spec_dir = os.path.dirname(benchmarks_spec_file)
+    benchmarks_spec = util.misc.load_config(benchmarks_spec_file)
+    _log.info('benchmarks_spec=%s', benchmarks_spec)
+
+    benchmark_dirs = _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
+    _log.info('benchmark_dirs=%s', benchmark_dirs)
+
+    for benchmark_dir in benchmark_dirs:
+        for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
+            _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def)
+    
+
+def parser_generate_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
+    parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
+    util.cmd.attach_main(parser, generate_benchmark_variant_dirs, split_args=True)
+    return parser
+
+__commands__.append(('generate_benchmark_variant_dirs', parser_generate_benchmark_variant_dirs))
+
+
+########################################################################################################################
+
 def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
     parser.add_argument('workflow_name', help='Workflow name')
 
@@ -1263,7 +1320,8 @@ def _record_file_metadata(val, analysis_dir, root_dir):
 
 def is_analysis_dir(d):
     """Test whether a given directory is an analysis dir"""
-    return all(os.path.isfile(os.path.join(d, f)) for f in ('metadata_with_gitlinks.json',))
+    return all(os.path.isfile(os.path.join(d, f)) for f in ('metadata_with_gitlinks.json',)) or \
+        all(os.path.isfile(os.path.join(d, f)) for f in ('inputs-git-links.json',))
 
 def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
     def _get_analysis_dirs(d):
@@ -1916,6 +1974,33 @@ def analyze_workflows_orig():
                     show_diff('inputs')
                     show_diff('outputs')
                     print('***************************************')
+
+
+#########################################################################################################################
+
+
+
+
+def try_workflow(metadatajson):
+    z = _json_loadf(metadatajson)
+    leaf_jpaths = util.misc.json_gather_leaf_jpaths(z)
+    str_leaves = list(filter(_is_str, util.misc.map_vals(leaf_jpaths)))
+    for L in str_leaves:
+        print('LEAF:', L)
+
+    git_annex_tool = tools.git_annex.GitAnnexTool()
+    imported = git_annex_tool.import_urls(str_leaves, ignore_non_urls=True)
+    for url, filestat in imported.items():
+        if filestat:
+            print(url, str(filestat))
+
+def parser_try_workflow(parser=argparse.ArgumentParser()):
+    parser.add_argument('metadatajson', help='workflow metadata')
+    util.cmd.attach_main(parser, try_workflow, split_args=True)
+    return parser
+
+#__commands__.append(('try_workflow', parser_try_workflow))
+
 
 #########################################################################################################################
 
