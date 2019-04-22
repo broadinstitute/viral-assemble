@@ -13,12 +13,12 @@ env:
   - PYTHONIOENCODING=UTF8
   - PYTEST_ADDOPTS="-rsxX -n 2 --durations=25 --fixture-durations=10 --junit-xml=pytest.xml --cov-report= --cov broad_utils --cov illumina --cov assembly --cov interhost --cov intrahost --cov metagenomics --cov ncbi --cov read_utils --cov kmer_utils --cov reports --cov taxon_filter --cov tools --cov util --cov file_utils"
   
-  - DOCKER_REGISTRY="quay.io"
-  - DOCKER_REPO_PROD="quay.io/broadinstitute/viral-ngs"
+  - DOCKER_REGISTRY="docker.io"
+  - DOCKER_REPO_PROD="broadinstitute/viral-ngs"
   - DOCKER_REPO_DEV="quay.io/broadinstitute/viral-ngs-dev"
   
-  - DOCKER_REGISTRY_MIRROR="docker.io"
-  - DOCKER_REPO_PROD_MIRROR="broadinstitute/viral-ngs"
+  - DOCKER_REGISTRY_MIRROR="quay.io"
+  - DOCKER_REPO_PROD_MIRROR="quay.io/broadinstitute/viral-ngs"
   
   - BOTO_CONFIG=/dev/null # bogus value to override config on travis
   - _JAVA_OPTIONS="-Xmx3g" # overrides jvm opts set elsewhere; see: https://stackoverflow.com/questions/28327620/difference-between-java-options-java-tool-options-and-java-opts
