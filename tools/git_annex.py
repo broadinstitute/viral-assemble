@@ -40,7 +40,7 @@ import util.misc
 import util.version
 
 TOOL_NAME = 'git-annex'
-TOOL_VERSION = '7.20190219'
+TOOL_VERSION = '7.20190322'
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
@@ -100,6 +100,7 @@ class GitAnnexTool(tools.Tool):
     #    - check that batched commands are indeed independent?  (put names of affected repo paths in shared mem?)
     #    - (option to) do opos on a separate checkout in a tmp  dir and then merge?  checkout first commit if only adding dirs
     #    - use pyfilesystem2 to deal with the different filesystems, including staging.
+    #    - decorator to do changes on a temp branch and only merge if succeed; branch the git_annex branch as well.
 
 # ** general infrastructure for running commands
 
