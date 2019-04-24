@@ -489,8 +489,6 @@ def _resolve_links_in_json_data(val, rel_to_dir, methods, relpath='files'):
         
     return util.misc.transform_json_data(val, node_handler=handle_node)
 
-# ** import_dx_analysis impl
-
 def _determine_dx_analysis_docker_img(dnanexus_tool, mdata):
     """Determine the viral-ngs docker image used for a given dx analysis"""
     # determine the viral-ngs version
@@ -504,6 +502,20 @@ def _determine_dx_analysis_docker_img(dnanexus_tool, mdata):
     docker_img = '/'.join(exe_folder_parts[2:5]) + ':' + exe_folder_parts[5]
     mdata['labels']['docker_img'] = docker_img
     mdata['labels']['docker_img_hash'] = docker_img + '@' + _get_docker_hash(mdata['labels']['docker_img'])
+
+def _get_wdl_for_docker_img(docker_img_hash, workflow_name, out_):
+    """For given viral-ngs docker image, extract the WDL files corresponding to that image,
+    patch the WDL tasks to use that image, prepare the WDL file for the main workflow and a zip file for the
+    dependencies, and determine the input spec for the workflow.
+    """
+    with util.file.tmp_dir(suffix='_wdl') as t_dir:
+        _extract_wdl_from_docker_img(docker_img_hash)
+        
+        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_hash))
+        _run('zip imports.zip *.wdl')
+        workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
+
+# ** import_dx_analysis impl
 
 def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanexus_tool):
     """Import a DNAnexus analysis into git, in our analysis dir format."""
@@ -595,6 +607,7 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
                                             methods=[functools.partial(_resolve_link_using_gathered_filestat,
                                                                        git_annex_tool=git_annex_tool),
                                             ], relpath='files')
+
     return (analysis_dir, mdata, mdata_rel)
 #    _write_json(mdata_rel_fname, **mdata_rel)
 #    _write_json(os.path.join(analysis_dir, 'metadata.json'), **mdata)
@@ -613,6 +626,14 @@ def import_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
         util.file.mkdir_p(analysis_dir)
         _write_json(os.path.join(analysis_dir, 'metadata_orig.json'), **mdata)
         _write_json(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'), **mdata_rel)
+
+        _prepare_analysis_crogit_do(workflow_name=mdata_rel['workflowName'], 
+                                    inputs=dict(mdata_rel['runInputs'],
+                                                docker_img=mdata_rel['labels']['docker_img']),
+                                    analysis_dir=mdata_rel['labels']['analysis_dir'],
+                                    analysis_labels=mdata_rel['labels'], git_annex_tool=git_annex_tool)
+
+
 
 def parser_import_dx_analyses(parser=argparse.ArgumentParser(fromfile_prefix_chars='@')):
     parser.add_argument('dx_analysis_ids', metavar='DX_ANALYSIS_ID', nargs='+', help='dnanexus analysis id(s)')
@@ -633,9 +654,12 @@ def _extract_wdl_from_docker_img(docker_img):
     """Extracts from docker image the workflow and task .wdl files into the current directory"""
     _run('docker run --rm ' + docker_img + ' tar cf - source/pipes/WDL > wdl.tar')
     _run('tar xvf wdl.tar')
+    _log.debug('cwd=%s', os.getcwd())
     for f in glob.glob('source/pipes/WDL/workflows/*.wdl'):
+        _log.debug('copying %s to {}', f, os.getcwd())
         shutil.copy(f, '.')
     for f in glob.glob('source/pipes/WDL/workflows/tasks/*.wdl'):
+        _log.debug('copying %s to {}', f, os.getcwd())
         shutil.copy(f, '.')
     shutil.rmtree('source')
     os.unlink('wdl.tar')
@@ -1162,6 +1186,141 @@ def parser_submit_analyses_crogit(parser=argparse.ArgumentParser()):
 
 __commands__.append(('submit_analyses_crogit', parser_submit_analyses_crogit))
 
+def _prepare_analysis_crogit_do(workflow_name, inputs,
+                                analysis_dir,
+                                analysis_labels,
+                                git_annex_tool):
+    """Submit a WDL analysis to a Cromwell server.
+
+    Inputs to the analysis.
+    The analysis can be executed on either a local or a cloud Cromwell backend.  This routine will, if needed,
+    copy the inputs to the filesystem needed by the backend.
+
+    Args:
+        workflow_name: name of the workflow, from pipes/WDL/workflows
+        inputs: inputs to the workflow; also, the docker image to use.
+        analysis_dir_pfx: prefix for the analysis dir
+        analysis_labels: json file specifying any analysis labels
+
+    TODO:
+        - option to ignore input workflow name, use only stage name
+    """
+    analysis_id = _create_analysis_id(workflow_name, prefix='analysis')
+    _log.info('ANALYSIS_ID is %s', analysis_id)
+
+    docker_img = inputs['docker_img']
+
+    docker_img_hash = docker_img if re.search(r'@sha256:[0-9a-z]{64}\Z', docker_img) else \
+        docker_img + '@' + _get_docker_hash(docker_img)
+
+    util.file.mkdir_p(analysis_dir)
+    with util.file.pushd_popd(analysis_dir):
+        _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
+
+        _extract_wdl_from_docker_img(docker_img_hash)
+        workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
+        _write_json('inputs-orig.json', **inputs)
+        run_inputs = inputs # _make_git_links_under_dir(inputs, analysis_dir, git_annex_tool)
+
+        input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
+
+        run_inputs = _dict_subset(run_inputs, workflow_inputs_spec.keys())
+        _write_json('input-spec.json', **workflow_inputs_spec)
+        _write_json('inputs-git-links.json', **run_inputs)
+
+        # TODO: option to update just some of the tasks.
+        # actually, when compiling WDL, should have this option -- or, actually,
+        # should make a new workflow where older apps are reused for stages that have not changed.
+        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_hash))
+
+        analysis_labels = dict(
+            input_sources,
+            docker_img=docker_img,
+            docker_img_hash=docker_img_hash,
+            analysis_id=analysis_id,
+            analysis_dir=analysis_dir,
+            submitter=getpass.getuser())
+        analysis_labels.update(dict(analysis_labels or {}))
+        _write_json('analysis_labels.json',
+                    **_normalize_cromwell_labels(analysis_labels))
+
+        # add cromwell labels: dx project, the docker tag we ran on, etc.
+
+        _run('zip imports.zip *.wdl')
+        for wdl_f in os.listdir('.'):
+            if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and wdl_f != workflow_name+'.wdl':
+                os.unlink(wdl_f)
+
+def _get_full_inputs(workflow_name, inputs):
+    """Given a parsed specification of a set of analysis inputs, construct a list of the full inputs to each analysis."""
+    full_inps = []
+
+    def _proc(inp):
+        """Given a parsed specification of a set of partial analysis inputs, return a list of these partial analysis inputs."""
+        return util.misc.make_seq(inp.func(inp, workflow_name=workflow_name),
+                                  atom_types=collections.Mapping)
+    for inps in itertools.product(*map(_proc, inputs)):
+        full_inps.append(_ord_dict_merge(inps))
+    return full_inps
+    
+# def submit_analyses_crogit(workflow_name, inputs, analysis_labels=None, temp_worktree_base='../temp_worktrees'):
+#     """Submit a WDL analysis (or a set of analyses) to a crogit queue.
+
+#     Inputs to the analysis.
+
+#     Args:
+#         workflow_name: name of the workflow, from pipes/WDL/workflows
+#         inputs: inputs to the workflow; also, the docker image to use.
+#         analysis_labels: json file specifying any analysis labels
+
+#     TODO:
+#         - option to ignore input workflow name, use only stage name
+#     """
+
+#     crogit_batch_id = _create_analysis_id(workflow_name, prefix='analyses_batch')
+#     orig_cwd = os.getcwd()
+
+#     full_inps = _get_full_inputs(workflow_name, inputs)
+#     util.misc.chk(full_inps, "Error: no analyses specified")
+#     _log.info('%d analyses specified', len(full_inps))
+    
+#     util.file.mkdir_p(os.path.join(temp_worktree_base, 'crogit', 'submitted'))
+
+#     analysis_labels = analysis_labels or collections.OrderedDict()
+#     analysis_labels['analysis_batch_id'] = crogit_batch_id
+#     analysis_labels['command_line'] = ' '.join(sys.argv)
+#     analysis_labels['submit_cwd'] = orig_cwd
+
+#     git_annex_tool = tools.git_annex.GitAnnexTool()
+#     with git_annex_tool.tmp_worktree(directory=temp_worktree_base,
+#                                      branch='/'.join(('crogit', 'submitted', crogit_batch_id)),
+#                                      start_branch=git_annex_tool.get_first_commit()) as tmp_worktree_dir:
+
+#         with git_annex_tool.batching() as git_annex_tool:
+#             for inps in full_inps:
+#                 _prepare_analysis_crogit_do(workflow_name=workflow_name, inputs=inps,
+#                                             analysis_dir_pfx=os.path.join(tmp_worktree_dir, 'crogit', 'submitted') + '/',
+#                                             analysis_labels=copy.deepcopy(analysis_labels), git_annex_tool=git_annex_tool)
+
+#         # and now git-annex-add all the things we created, and make a branch for this.
+# # end: def prepare_analyses_crogit(workflow_name, inputs, analysis_labels=None, temp_worktree_base='../temp_worktrees')
+
+# def parser_prepare_analyses_crogit(parser=argparse.ArgumentParser()):
+#     parser.add_argument('workflow_name', help='Workflow name')
+
+#     parser.add_argument('--inputs', dest='inputs', nargs='+', action=util.misc.NestedParserAction,
+#                         nested_parser=_construct_analysis_inputs_parser())
+#     parser.add_argument('--analysisLabels', dest='analysis_labels', nargs=2, action='append',
+#                         help='labels to attach to the analysis')
+#     util.cmd.attach_main(parser, prepare_analyses_crogit, split_args=True)
+#     return parser
+
+# __commands__.append(('prepare_analyses_crogit', parser_prepare_analyses_crogit))
+
+#########################
+
+
+
 #########################
 
 
@@ -1172,6 +1331,7 @@ def _create_analysis_id(workflow_name, prefix):
                                                         uuid.uuid4(), workflow_name))))[:1024]
 
 def _get_docker_hash(docker_img):
+    """Return a docker hash, given a docker tag."""
     _run('docker pull ' + docker_img)
     if docker_img.startswith('sha256:'):
         return docker_img
