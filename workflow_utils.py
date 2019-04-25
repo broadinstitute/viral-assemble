@@ -1034,7 +1034,7 @@ def submit_analysis_wdl(workflow_name, inputs,
 
 # ** submit_analysis_crogit
 
-def _make_git_links_under_dir(d, base_dir, git_annex_tool):
+def _make_git_links_under_dir(d, base_dir, git_annex_tool, files_prefix='files'):
     """Change any git links within json struct `d` to be relative paths under `base_dir`."""
 
     base_dir = os.path.abspath(base_dir)
@@ -1042,8 +1042,9 @@ def _make_git_links_under_dir(d, base_dir, git_annex_tool):
         if not _maps(val, '$git_link'):
             return val
         _log.info('PROCESSING GIT LINK at %s: %s', path, val)
+        path = list(functools.reduce(operator.concat, [str(p).split('.') for p in path], []))
 
-        git_fname_arg = ['inputs_submitted'] + list(map(str, path)) + [os.path.basename(val.get('orig_path', val['$git_link']))]
+        git_fname_arg = [files_prefix] + path + [os.path.basename(val.get('orig_path', val['$git_link']))]
         _log.info('git_fname_arg=%s', git_fname_arg)
         git_fname = os.path.join(*git_fname_arg)
         git_annex_tool.fromkey(key=val['git_annex_key'], fname=os.path.join(base_dir, git_fname), now=False)
@@ -1090,7 +1091,7 @@ def _submit_analysis_crogit_do(workflow_name, inputs,
         _extract_wdl_from_docker_img(docker_img_hash)
         workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
         _write_json('inputs-orig.json', **inputs)
-        run_inputs = _make_git_links_under_dir(inputs, analysis_dir, git_annex_tool)
+        run_inputs = _make_git_links_under_dir(inputs, analysis_dir, git_annex_tool, files_prefix='files/runInputs')
 
         input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
 
@@ -1204,6 +1205,7 @@ def _prepare_analysis_crogit_do(inputs,
     TODO:
         - option to ignore input workflow name, use only stage name
     """
+    inputs = copy.copy(inputs)
     workflow_name = inputs['_workflow_name']
     analysis_id = _create_analysis_id(workflow_name, prefix='analysis')
     _log.info('ANALYSIS_ID is %s', analysis_id)
@@ -1212,6 +1214,7 @@ def _prepare_analysis_crogit_do(inputs,
 
     docker_img_hash = docker_img if re.search(r'@sha256:[0-9a-z]{64}\Z', docker_img) else \
         docker_img + '@' + _get_docker_hash(docker_img)
+    inputs['_docker_img'] = docker_img_hash
 
     util.file.mkdir_p(analysis_dir)
     with util.file.pushd_popd(analysis_dir):
@@ -1220,7 +1223,7 @@ def _prepare_analysis_crogit_do(inputs,
         _extract_wdl_from_docker_img(docker_img_hash)
         workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
         _write_json('inputs-orig.json', **inputs)
-        run_inputs = inputs # _make_git_links_under_dir(inputs, analysis_dir, git_annex_tool)
+        run_inputs = _make_git_links_under_dir(inputs, analysis_dir, git_annex_tool, files_prefix='files/runInputs')
 
         input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
 
@@ -1357,9 +1360,14 @@ def _get_docker_hash(docker_img):
 # running that benchmark variant.
 #
 
-def _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def):
+def _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def, git_annex_tool):
     """Generate a run-ready analysis dir for the given benchmark and benchmark variant."""
-    
+
+    analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
+    util.file.mkdir_p(analysis_dir)
+    run_inputs = _json_loadf(os.path.join(benchmark_dir, 'inputs-git-links.json'))
+    run_inputs.update(benchmark_variant_def)
+    _prepare_analysis_crogit_do(inputs=run_inputs, analysis_dir=analysis_dir, analysis_labels={}, git_annex_tool=git_annex_tool)
 
 def generate_benchmark_variant_dirs(benchmarks_spec_file):
     """The code below takes a benchmark spec file, which specifies benchmarks (as analysis dirs) and variants,
@@ -1378,10 +1386,11 @@ def generate_benchmark_variant_dirs(benchmarks_spec_file):
     benchmark_dirs = _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
     _log.info('benchmark_dirs=%s', benchmark_dirs)
 
-    for benchmark_dir in benchmark_dirs:
-        for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
-            _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def)
-    
+    git_annex_tool = tools.git_annex.GitAnnexTool()
+    with git_annex_tool.batching() as git_annex_tool:
+        for benchmark_dir in benchmark_dirs:
+            for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
+                _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def, git_annex_tool)
 
 def parser_generate_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
