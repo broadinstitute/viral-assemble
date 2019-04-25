@@ -626,10 +626,10 @@ def import_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
         util.file.mkdir_p(analysis_dir)
         _write_json(os.path.join(analysis_dir, 'metadata_orig.json'), **mdata)
         _write_json(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'), **mdata_rel)
-
-        _prepare_analysis_crogit_do(workflow_name=mdata_rel['workflowName'], 
-                                    inputs=dict(mdata_rel['runInputs'],
-                                                docker_img=mdata_rel['labels']['docker_img']),
+        run_inputs = copy.copy(mdata_rel['runInputs'])
+        run_inputs['_docker_img'] = mdata_rel['labels']['docker_img_hash']
+        run_inputs['_workflow_name'] = mdata_rel['workflowName']
+        _prepare_analysis_crogit_do(inputs=run_inputs,
                                     analysis_dir=mdata_rel['labels']['analysis_dir'],
                                     analysis_labels=mdata_rel['labels'], git_annex_tool=git_annex_tool)
 
@@ -1186,7 +1186,7 @@ def parser_submit_analyses_crogit(parser=argparse.ArgumentParser()):
 
 __commands__.append(('submit_analyses_crogit', parser_submit_analyses_crogit))
 
-def _prepare_analysis_crogit_do(workflow_name, inputs,
+def _prepare_analysis_crogit_do(inputs,
                                 analysis_dir,
                                 analysis_labels,
                                 git_annex_tool):
@@ -1197,18 +1197,18 @@ def _prepare_analysis_crogit_do(workflow_name, inputs,
     copy the inputs to the filesystem needed by the backend.
 
     Args:
-        workflow_name: name of the workflow, from pipes/WDL/workflows
-        inputs: inputs to the workflow; also, the docker image to use.
+        inputs: inputs to the workflow; special inputs specify docker image and workflow name.
         analysis_dir_pfx: prefix for the analysis dir
         analysis_labels: json file specifying any analysis labels
 
     TODO:
         - option to ignore input workflow name, use only stage name
     """
+    workflow_name = inputs['_workflow_name']
     analysis_id = _create_analysis_id(workflow_name, prefix='analysis')
     _log.info('ANALYSIS_ID is %s', analysis_id)
 
-    docker_img = inputs['docker_img']
+    docker_img = inputs['_docker_img']
 
     docker_img_hash = docker_img if re.search(r'@sha256:[0-9a-z]{64}\Z', docker_img) else \
         docker_img + '@' + _get_docker_hash(docker_img)
@@ -1224,7 +1224,7 @@ def _prepare_analysis_crogit_do(workflow_name, inputs,
 
         input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
 
-        run_inputs = _dict_subset(run_inputs, workflow_inputs_spec.keys())
+        run_inputs = _dict_subset(run_inputs, set(workflow_inputs_spec.keys()) | set(k for k in run_inputs if k.startswith('_')))
         _write_json('input-spec.json', **workflow_inputs_spec)
         _write_json('inputs-git-links.json', **run_inputs)
 
