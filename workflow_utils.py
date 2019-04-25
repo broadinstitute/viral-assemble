@@ -1352,6 +1352,13 @@ def _get_docker_hash(docker_img):
 
 ########################################################################################################################
 
+def _is_prepared_analysis_dir(analysis_dir):
+    """Check whether analysis dir has been set up for analysis"""
+    return all(os.path.isfile(os.path.join(analysis_dir, f)) or
+               os.path.islink(os.path.join(analysis_dir, f)) for f in ('inputs-git-links.json', 'imports.zip'))
+
+########################################################################################################################
+
 # ** Bringing benchmarks results in sync with benchmarks spec
 
 #
@@ -1364,6 +1371,9 @@ def _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark
     """Generate a run-ready analysis dir for the given benchmark and benchmark variant."""
 
     analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
+    if _is_prepared_analysis_dir(analysis_dir):
+        _log.info('Benchmark variant already generated, skipping: %s', analysis_dir)
+        return
     util.file.mkdir_p(analysis_dir)
     run_inputs = _json_loadf(os.path.join(benchmark_dir, 'inputs-git-links.json'))
     run_inputs.update(benchmark_variant_def)
