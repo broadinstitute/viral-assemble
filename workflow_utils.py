@@ -480,9 +480,10 @@ def _resolve_links_in_json_data(val, rel_to_dir, methods, relpath='files'):
     pointing to a git file, typically a git-annex file.
     """
     def handle_node(val, path):
+        path = list(functools.reduce(operator.concat, [str(p).split('.') for p in path], []))
         maybe_resolve_link = _resolve_link(val=val,
                                            git_file_dir=os.path.join(rel_to_dir, relpath,
-                                                                     *map(str, path)), methods=methods)
+                                                                     *path), methods=methods)
         if _maps(maybe_resolve_link, '$git_link'):
             maybe_resolve_link['$git_link'] = os.path.relpath(maybe_resolve_link['$git_link'], rel_to_dir)
         return maybe_resolve_link
@@ -1032,6 +1033,68 @@ def submit_analysis_wdl(workflow_name, inputs,
 
 #########################
 
+# ** submit_prepared_analysis
+
+def _submit_prepared_analysis(analysis_dir,
+                              cromwell_server_url='http://localhost:8000',
+                              backend='Local'):
+    """Submit prepared analysis.
+    """
+    with util.file.pushd_popd(analysis_dir):
+        _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
+        if os.path.isfile('cromwell_submit_output.txt'):
+            # TODO: check that the analysis is in cromwell and that it is still pending or running
+            _log.info('Analysis dir %s already submitted: %s', analysis_dir, util.file.slurp_file('cromwell_submit_output.txt'))
+            return
+
+        run_inputs = _json_loadf('inputs-git-links.json')
+
+        input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
+        run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
+        _write_json('inputs.json', **run_inputs_staged)
+
+        if backend == 'Local':
+            wf_opts_dict = { "backend": "Local"
+            }
+        elif backend == 'JES':
+            wf_opts_dict = {
+                "backend": "JES"
+            }
+        else:
+            raise RuntimeError('Unknown backend - ' + backend)
+        _write_json('cromwell_opts.json', **wf_opts_dict)
+        _write_json('execution_env.json', ncpus=util.misc.available_cpu_count())
+
+        # add cromwell labels: dx project, the docker tag we ran on, etc.
+
+        # _log.info('Validating workflow')
+        # _run('womtool', 'validate',  '-i',  'inputs.json', workflow_name + '.wdl')
+        workflow_name = run_inputs['_workflow_name']
+        try:
+            cromwell_output_str = _run_get_output('cromwell', 'submit', workflow_name+'.wdl',
+                                                  '-t', 'wdl', '-i', 'inputs.json', '-l', 'analysis_labels.json',
+                                                  '-o', 'cromwell_opts.json',
+                                                  '-p', 'imports.zip', '-h', cromwell_server_url)
+            cromwell_returncode = 0
+        except subprocess.CalledProcessError as called_process_error:
+            cromwell_output_str = called_process_error.output
+            cromwell_returncode = called_process_error.returncode
+
+        _log.info('Cromwell returned with return code %d', cromwell_returncode)
+        util.file.dump_file('cromwell_submit_output.txt', cromwell_output_str)
+        _log.debug('cromwell output is %s', cromwell_output_str)
+
+        if cromwell_returncode:
+            raise RuntimeError('Cromwell failed - ' + cromwell_output_str)
+
+def parser_submit_prepared_analysis(parser=argparse.ArgumentParser()):
+    parser.add_argument('analysis_dir')
+    util.cmd.attach_main(parser, _submit_prepared_analysis, split_args=True)
+    return parser
+
+__commands__.append(('submit_prepared_analysis', parser_submit_prepared_analysis))
+
+
 # ** submit_analysis_crogit
 
 def _make_git_links_under_dir(d, base_dir, git_annex_tool, files_prefix='files'):
@@ -1084,9 +1147,6 @@ def _submit_analysis_crogit_do(workflow_name, inputs,
         _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
 
         output_dir = os.path.join(analysis_dir, 'output')
-
-        input_files_dir = os.path.join(analysis_dir, 'input_files')
-        util.file.mkdir_p(input_files_dir)
 
         _extract_wdl_from_docker_img(docker_img_hash)
         workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
@@ -1401,6 +1461,10 @@ def generate_benchmark_variant_dirs(benchmarks_spec_file):
         for benchmark_dir in benchmark_dirs:
             for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
                 _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def, git_annex_tool)
+
+    for benchmark_dir in benchmark_dirs:
+        for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
+            _submit_prepared_analysis(analysis_dir=os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name))
 
 def parser_generate_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
