@@ -1303,7 +1303,7 @@ def _prepare_analysis_crogit_do(inputs,
         # actually, when compiling WDL, should have this option -- or, actually,
         # should make a new workflow where older apps are reused for stages that have not changed.
         _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs',
-                                                  tools.docker.DockerTool.strip_image_hash(docker_img_hash)))
+                                                  tools.docker.DockerTool().strip_image_hash(docker_img_hash)))
 
         analysis_labels = dict(
             input_sources,
@@ -2127,7 +2127,7 @@ def compare_analysis_pairs(analysis_dirs_roots, common, filter_A, filter_B, labe
             metric2diffs[metric].append((_qry_json(id2mdata[id_A], metric) - _qry_json(id2mdata[id_B], metric),
                                          _qry_json(id2mdata[id_A], label), _qry_json(id2mdata[id_B], label)))
 
-    for metric in metrics:
+    for metric in (metrics or ()):
         _log.info('metric=%s diffs:', metric)
         for metric_delta, items in itertools.groupby(sorted(metric2diffs[metric]), operator.itemgetter(0)):
             items = list(items)
