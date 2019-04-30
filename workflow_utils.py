@@ -494,7 +494,8 @@ def _resolve_links_in_json_data(val, rel_to_dir, methods, relpath='files'):
 def _determine_dx_analysis_docker_img(dnanexus_tool, mdata):
     """Determine the viral-ngs docker image used for a given dx analysis"""
     # determine the viral-ngs version
-    executable_descr = dnanexus_tool.describe(mdata['executable'])
+    DX_CI_PROJECT = 'project-F8PQ6380xf5bK0Qk0YPjB17P'
+    executable_descr = dnanexus_tool.describe({'$dnanexus_link': mdata['executable'], 'project': DX_CI_PROJECT})
     util.misc.chk('dxWDL' in executable_descr['tags'])
     if not executable_descr['folder'].startswith('/build/quay.io/broadinstitute/viral-ngs'):
         # the workflow may have been copied from the "Broad viral-ngs dxWDL CI - Public" project.
@@ -555,9 +556,13 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
     mdata['labels'] = _ord_dict(('platform', 'dnanexus'),
                                 ('analysis_dir', analysis_dir),
                                 ('analysis_id', dx_analysis_id))
-    mdata['workflowName'] = mdata['executableName']
+    #mdata['workflowName'] = mdata['executableName']
 
-    _determine_dx_analysis_docker_img(dnanexus_tool, mdata)
+    docker_img = dnanexus_tool.determine_viral_ngs_dx_analysis_docker_img(mdata)
+    docker_tool = tools.docker.DockerTool()
+    mdata['labels']['docker_img'] = docker_img
+    mdata['labels']['docker_img_hash'] = docker_tool.add_image_hash(docker_img)
+
     _log.info('labels=%s', mdata['labels'])
 
     stage2name = {}
@@ -2046,7 +2051,8 @@ def _flatten_analysis_metadata(mdata, key_prefixes=()):
     _log.info('mdata=%s', len(mdata))
     flat_mdata = _ord_dict(*_flatten_analysis_metadata_list(mdata))
     _log.info('flat_mdata=%s', len(flat_mdata))
-    flat_mdata['succeeded'] = int(flat_mdata['status'] == 'Succeeded')
+    if 'status' in flat_mdata:
+        flat_mdata['succeeded'] = int(flat_mdata['status'] == 'Succeeded')
     if key_prefixes:
         flat_mdata = _ord_dict(*[(key, val) for key, val in flat_mdata.items()
                                  if key=='analysis_dir' or _key_matches_prefixes(key, key_prefixes)])
@@ -2084,6 +2090,42 @@ def parser_diff_analyses(parser=argparse.ArgumentParser()):
 
 __commands__.append(('diff_analyses', parser_diff_analyses))
     
+
+
+def diff_jsons(jsons, key_prefixes=()):
+    """Print differences between two analysis dirs."""
+    assert len(jsons)==2, 'currently can only compare two analyses'
+    mdatas = [_json_loadf(json_file) for json_file in jsons]
+    mdatas[1] = mdatas[1]['workflow']
+
+    flat_mdatas = [_flatten_analysis_metadata(mdata,
+                                              key_prefixes=key_prefixes)
+                   for mdata in mdatas]
+    all_keys = sorted(set(itertools.chain.from_iterable(flat_mdatas)))
+    print('------------------------ diffs ----------------------------')
+    for key in all_keys:
+        if key.startswith('calls.'): continue
+        vals = [flat_mdatas[i].get(key, None) for i in (0, 1)]
+        if vals[0] != vals[1]:
+            def _fmt(s):
+                s = str(s)
+                if len(s) > 120:
+                    s = s[:120] + ' ...'
+                return s
+            print('KEY: ', key)
+            print('   ', _fmt(vals[0]))
+            print('   ', _fmt(vals[1]))
+
+def parser_diff_jsons(parser=argparse.ArgumentParser()):
+    parser.add_argument('jsons', nargs=2, help='the two json files')
+    parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+',
+                        help='only consider metadata items starting with these prefixes')
+    util.cmd.attach_main(parser, diff_jsons, split_args=True)
+    return parser
+
+__commands__.append(('diff_jsons', parser_diff_jsons))
+    
+
 
 def compare_analysis_pairs(analysis_dirs_roots, common, filter_A, filter_B, label, metrics):
     """Compare pairs of analyses from `analysis_dirs` where  the first analysis of the pair matches the criteria in `filter_A`,

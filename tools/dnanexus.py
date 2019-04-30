@@ -17,6 +17,8 @@ import time
 import platform
 import functools
 import collections
+import copy
+import json
 
 try:
     from urllib import urlencode, pathname2url
@@ -25,6 +27,8 @@ except ImportError:
     from urllib.request import pathname2url
 
 import dxpy
+import dxpy.bindings.dxproject
+import dxpy.exceptions
 import uritools
 
 import tools
@@ -94,13 +98,54 @@ class DxTool(tools.Tool):
 
 
     @staticmethod
-    def describe(dxid):
+    def describe(dxid_or_link):
         """Return json description for the given dxid"""
-        if dxid not in DxTool._describe_result:
-            DxTool._describe_result[dxid] = dxpy.describe(dxid)
+        key = json.dumps(dxid_or_link, sort_keys=True)
+        if key not in DxTool._describe_result:
+            DxTool._describe_result[key] = dxpy.describe(dxid_or_link)
 
-        return DxTool._describe_result[dxid]
+        return DxTool._describe_result[key]
         #return _run_get_json('dx', 'describe', '--verbose', '--details', '--json', dxid)
+
+    VIRAL_NGS_DX_CI_PROJECT = 'project-F8PQ6380xf5bK0Qk0YPjB17P' # viral-ngs public CI project
+    
+
+    def determine_viral_ngs_dx_analysis_docker_img(self, mdata):
+        """Determine the viral-ngs docker image used for a given dx analysis"""
+        # determine the viral-ngs version
+        executable_descr = self.describe(dxpy.dxlink(object_id=mdata['stages'][0]['execution']['executable'],
+                                                            project_id=self.VIRAL_NGS_DX_CI_PROJECT))
+        util.misc.chk('dxWDL' in executable_descr['tags'])
+        util.misc.chk(executable_descr['createdBy'] == {'user': 'user-sabeti_ci'})
+        util.misc.chk(executable_descr['folder'].startswith('/build/quay.io/broadinstitute/viral-ngs'))
+
+        exe_folder_parts = executable_descr['folder'].split('/')
+        docker_img = '/'.join(exe_folder_parts[2:5]) + ':' + exe_folder_parts[5]
+
+        # determine an update to runInputs
+        ci_proj = dxpy.dxproject.DXProject(self.VIRAL_NGS_DX_CI_PROJECT)
+        orig_ci_workflow = [item['id'] for item in ci_proj.list_folder(executable_descr['folder'])['objects']
+                            if item['id'].startswith('workflow')][0]
+        orig_workflow_descr = self.describe(orig_ci_workflow)
+        mdata['workflowName'] = orig_workflow_descr['name']
+        this_workflow_descr = mdata['workflow']
+        util.misc.chk(len(this_workflow_descr['stages']) == len(orig_workflow_descr['stages']))
+        for this_stage, orig_stage in zip(this_workflow_descr['stages'], orig_workflow_descr['stages']):
+            util.misc.chk(this_stage['id'] == orig_stage['id'])
+            util.misc.chk(this_stage['name'] == orig_stage['name'])
+            util.misc.chk(this_stage['executable'] == orig_stage['executable'])
+            
+        util.misc.chk(len(this_workflow_descr['inputSpec']) == len(orig_workflow_descr['inputSpec']))
+        for this_input_spec, orig_input_spec in zip(this_workflow_descr['inputSpec'], orig_workflow_descr['inputSpec']):
+            util.misc.chk(this_input_spec['name'] == orig_input_spec['name'])
+            util.misc.chk(this_input_spec['class'] == orig_input_spec['class'])
+            util.misc.chk(this_input_spec['group'] == orig_input_spec['group'])
+            if 'default' in this_input_spec and this_input_spec['default'] != orig_input_spec.get('default', None) and \
+               this_input_spec['name'] in mdata['input'] and \
+               this_input_spec['name'] not in mdata['runInput']:
+                mdata['runInput'][this_input_spec['name']] = copy.deepcopy(mdata['input'][this_input_spec['name']])
+
+        return docker_img
 
     @staticmethod
     def resolve_dx_link_to_dx_file_id_or_value(val, dx_analysis_id):
