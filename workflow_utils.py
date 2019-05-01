@@ -70,6 +70,7 @@ __commands__ = []
 import argparse
 import logging
 import json
+import yaml
 import subprocess
 import os
 import os.path
@@ -110,6 +111,7 @@ import binascii
 # *** 3rd-party
 
 import jmespath
+import jmespath.functions
 
 import dxpy
 import dxpy.bindings.dxfile_functions
@@ -133,6 +135,8 @@ _log.setLevel(logging.INFO)
 # * Utils
 # ** Generic utils
 
+# *** type identification
+
 _str_type = basestring if hasattr(builtins, 'basestring') else str
 _long_type = long if hasattr(builtins, 'long') else int
 _scalar_types = (type(None), _str_type, _long_type, int, bool, float)
@@ -148,11 +152,13 @@ def _is_str(obj):
 def _is_mapping(obj):
     return isinstance(obj, collections.Mapping)
 
-def _maps(obj, *keys):
-    return _is_mapping(obj) and all(k in obj for k in keys)
-
 def _is_scalar(val):
     isinstance(val, _scalar_types)
+
+# *** maps and dicts utils
+
+def _maps(obj, *keys):
+    return _is_mapping(obj) and all(k in obj for k in keys)
 
 def _dict_subset(d, keys):
     """Return a newly allocated shallow copy of a mapping `d` restricted to keys in `keys`."""
@@ -176,25 +182,47 @@ def _dict_rename_key(d, old_key, new_key):
         del d[old_key]
     return d
 
-def _is_under_dir(path, base_dir):
-    """Tests whether `path` is somewhere in the dir tree under `base_dir`"""
-    path_parts = os.path.realpath(path).split(os.path.sep)
-    base_parts = os.path.realpath(base_dir).split(os.path.sep)
-    return path_parts[:len(base_parts)] == base_parts
+# *** json processing
 
-def _md5_base64(s):
-    return hashlib.md5(s).digest().encode('base64').strip()
+# **** jmespath-related
 
+# 1. Create a subclass of functions.Functions.
+#    The function.Functions base class has logic
+#    that introspects all of its methods and automatically
+#    registers your custom functions in its function table.
+class JmesPathCustomFunctions(jmespath.functions.Functions):
 
-def _is_valid_md5(s):
-    return _is_str(s) and len(s) == 32 and set(s) <= set('0123456789ABCDEF')
+    """Custom functions for use in jmespath queries"""
+
+    @jmespath.functions.signature({'types': ['string']}, {'types': ['string']}, {'types': ['string']})
+    def _func_re_sub(self, pattern, repl, s):
+        """Substitute a regexp in a string"""
+        return re.sub(pattern, repl, s)
+
+    @jmespath.functions.signature({'types': ['expref']}, {'types': ['object']})
+    def _func_map_keys(self, expref, obj):
+        result = collections.OrderedDict()
+        for key, val in obj.items():
+            key_mapped = expref.visit(expref.expression, key)
+            result[key_mapped] = val
+        return result
+
+    @jmespath.functions.signature({'types': ['object']}, {'types': ['string']}, {'types': ['string']})
+    def _func_replace_keys(self, obj, patt, repl):
+        """Replace a string in all keys of an object"""
+        return { k.replace(patt, repl): v for k, v in obj.items()}
+
+# end: class JmesPathCustomFunctions(jmespath.functions.Functions)
 
 def _qry_json(json_data, jmespath_expr, dflt=None):
     """Return the result of a jmespath query `jmespath_expr` on `json_data`,
     or `dflt` if the query returns None."""
     res =  jmespath.search(jmespath_expr, json_data,
-                           jmespath.Options(dict_cls=collections.OrderedDict))
+                           jmespath.Options(dict_cls=collections.OrderedDict,
+                                            custom_functions=JmesPathCustomFunctions()))
     return res if res is not None else dflt
+
+# **** json I/O
 
 def _pretty_print_json(json_dict, sort_keys=True):
     """Return a pretty-printed version of a dict converted to json, as a string."""
@@ -203,12 +231,25 @@ def _pretty_print_json(json_dict, sort_keys=True):
 def _write_json(fname, **json_dict):
     util.file.dump_file(fname=fname, value=_pretty_print_json(json_dict))
 
+def _load_dict_sorted(d):
+    return collections.OrderedDict(sorted(d.items()))
+
+def _json_loads(s):
+    return json.loads(s.strip(), object_hook=_load_dict_sorted, object_pairs_hook=collections.OrderedDict)
+
+def _json_loadf(fname):
+    return _json_loads(util.file.slurp_file(fname))
+
+# *** timestamps processing
+
 _tz_eastern = pytz.timezone('US/Eastern')
 def _isoformat_datetime(dt):
     return _tz_eastern.localize(dt).isoformat('T')
 
 def _isoformat_ago(**timedelta_args):
     return (datetime.datetime.now(_tz_eastern) - datetime.timedelta(**timedelta_args)).isoformat('T')
+
+# *** running commands
 
 def _noquote(s):
     return '_noquote:' + str(s)
@@ -244,17 +285,22 @@ def _run_get_output(cmd, *args):
     _log.info('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
     return output.strip()
 
-def _load_dict_sorted(d):
-    return collections.OrderedDict(sorted(d.items()))
-
-def _json_loads(s):
-    return json.loads(s.strip(), object_hook=_load_dict_sorted, object_pairs_hook=collections.OrderedDict)
-
-def _json_loadf(fname):
-    return _json_loads(util.file.slurp_file(fname))
-
 def _run_get_json(cmd, *args):
     return _json_loads(_run_get_output(cmd, *args))
+
+# *** misc utils
+
+def _is_under_dir(path, base_dir):
+    """Tests whether `path` is somewhere in the dir tree under `base_dir`"""
+    path_parts = os.path.realpath(path).split(os.path.sep)
+    base_parts = os.path.realpath(base_dir).split(os.path.sep)
+    return path_parts[:len(base_parts)] == base_parts
+
+def _md5_base64(s):
+    return hashlib.md5(s).digest().encode('base64').strip()
+
+def _is_valid_md5(s):
+    return _is_str(s) and len(s) == 32 and set(s) <= set('0123456789ABCDEF')
 
 @util.misc.memoize
 def _running_on_aws():
@@ -2198,6 +2244,27 @@ def parser_compare_analysis_pairs(parser=argparse.ArgumentParser()):
 
 __commands__.append(('compare_analysis_pairs', parser_compare_analysis_pairs))
 
+
+# * transform_json
+
+def _transform_json(json_file, jmespath_expr):
+    """Transform a parsed json structure using jmespath.
+    """
+    if json_file.upper().endswith('.YAML'):
+        with open(json_file) as json_f:
+            json_data = yaml.safe_load(json_f) or {}
+    else:
+        json_data = _json_loadf(json_file)
+    print(_pretty_print_json(_qry_json(json_data=json_data, jmespath_expr=jmespath_expr)))
+
+def parser_transform_json(parser=argparse.ArgumentParser()):
+    parser.add_argument('json_file', help='json file to import')
+    parser.add_argument('jmespath_expr', help='jmespath expr',
+                        nargs='?')
+    util.cmd.attach_main(parser, _transform_json, split_args=True)
+    return parser
+
+__commands__.append(('transform_json', parser_transform_json))
 
 # ** analyze_workflows_orig
 
