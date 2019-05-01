@@ -1529,16 +1529,40 @@ def generate_benchmark_variant_dirs(benchmarks_spec_file):
             for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
                 _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def, git_annex_tool)
 
-    for benchmark_dir in benchmark_dirs:
-        for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
-            _submit_prepared_analysis(analysis_dir=os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name))
-
 def parser_generate_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
     util.cmd.attach_main(parser, generate_benchmark_variant_dirs, split_args=True)
     return parser
 
 __commands__.append(('generate_benchmark_variant_dirs', parser_generate_benchmark_variant_dirs))
+
+def submit_benchmark_variant_dirs(benchmarks_spec_file):
+    """The code below takes a benchmark spec file, which specifies benchmarks (as analysis dirs) and variants,
+    and generates, under each benchmark dir and for each variant, an analysis spec obtained by
+    overriding the benchmark settings with the variant.
+
+    Args:
+      benchmarks_spec: a yaml file specifying benchmarks and variants.
+    """
+
+    benchmarks_spec_file = os.path.abspath(benchmarks_spec_file)
+    benchmarks_spec_dir = os.path.dirname(benchmarks_spec_file)
+    benchmarks_spec = util.misc.load_config(benchmarks_spec_file)
+    _log.info('benchmarks_spec=%s', benchmarks_spec)
+
+    benchmark_dirs = _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
+    _log.info('benchmark_dirs=%s', benchmark_dirs)
+
+    for benchmark_dir in benchmark_dirs:
+        for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
+            _submit_prepared_analysis(analysis_dir=os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name))
+
+def parser_submit_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
+    parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
+    util.cmd.attach_main(parser, submit_benchmark_variant_dirs, split_args=True)
+    return parser
+
+__commands__.append(('submit_benchmark_variant_dirs', parser_submit_benchmark_variant_dirs))
 
 
 ########################################################################################################################
