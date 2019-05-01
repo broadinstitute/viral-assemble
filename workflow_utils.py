@@ -882,12 +882,12 @@ def _construct_analysis_inputs_parser():
 
 # ** _stage_inputs_for_backend
 
-def _stage_inputs_for_backend(inputs, backend):
+def _stage_inputs_for_backend(inputs, backend, skip_get=False):
     """Stage inputs with git links for backend"""
     def _stage_git_link(inp):
         if not _maps(inp, '$git_link'):
             return inp
-        return _stage_file_for_backend(git_file_path=inp['$git_link'], backend=backend)
+        return _stage_file_for_backend(git_file_path=inp['$git_link'], backend=backend, skip_get=skip_get)
     return util.misc.transform_json_data(inputs, _stage_git_link)
 
 def _normalize_cromwell_labels(labels):
@@ -1369,6 +1369,10 @@ def _prepare_analysis_crogit_do(inputs,
 
         # add cromwell labels: dx project, the docker tag we ran on, etc.
 
+        _log.info('Validating workflow')
+        run_inputs_staged_local = _stage_inputs_for_backend(run_inputs, backend='Local', skip_get=True)
+        _write_json('inputs-local.json', **{k:v for k, v in run_inputs_staged_local.items() if not k.startswith('_')})
+        _run('womtool', 'validate',  '-i',  'inputs-local.json', workflow_name + '.wdl')
         _run('zip imports.zip *.wdl')
         for wdl_f in os.listdir('.'):
             if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and wdl_f != workflow_name+'.wdl':
@@ -1496,7 +1500,10 @@ def _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark
         return
     util.file.mkdir_p(analysis_dir)
     run_inputs = _json_loadf(os.path.join(benchmark_dir, 'inputs-git-links.json'))
-    run_inputs.update(benchmark_variant_def)
+    metadata = _json_loadf(os.path.join(benchmark_dir, 'metadata_with_gitlinks.json')) \
+        if os.path.isfile(os.path.join(benchmark_dir, 'metadata_with_gitlinks.json')) else {}
+    run_inputs = _qry_json(json_data=dict(run_inputs=run_inputs, metadata=metadata),
+                           jmespath_expr=benchmark_variant_def)
     _prepare_analysis_crogit_do(inputs=run_inputs, analysis_dir=analysis_dir, analysis_labels={}, git_annex_tool=git_annex_tool)
 
 def generate_benchmark_variant_dirs(benchmarks_spec_file):
@@ -2036,11 +2043,12 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
     assert _git_annex_checkpresentkey(key, gs_remote_uuid)
     return urls_with_right_fname[0]
 
-def _stage_file_for_backend(git_file_path, backend):
+def _stage_file_for_backend(git_file_path, backend, skip_get=False):
     """Ensure file exists in filesystem of the given Cromwell backend, and return the path to the file
     (local or cloud, depending on the backend)."""
     if backend == 'Local':
-        tools.git_annex.GitAnnexTool().get(git_file_path)
+        if not skip_get:
+            tools.git_annex.GitAnnexTool().get(git_file_path)
         return os.path.abspath(git_file_path)
     elif backend == 'JES':
         return _copy_to_gs(git_file_path)
