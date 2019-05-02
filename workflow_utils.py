@@ -1571,6 +1571,41 @@ def parser_submit_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
 __commands__.append(('submit_benchmark_variant_dirs', parser_submit_benchmark_variant_dirs))
 
 
+def cmp_benchmark_variants(benchmarks_spec_file, variants, metric):
+    """Print a report from comparing two benchmarks.
+    """
+
+    benchmarks_spec_file = os.path.abspath(benchmarks_spec_file)
+    benchmarks_spec_dir = os.path.dirname(benchmarks_spec_file)
+    benchmarks_spec = util.misc.load_config(benchmarks_spec_file)
+    _log.info('benchmarks_spec=%s', benchmarks_spec)
+
+    benchmark_dirs = _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
+    _log.info('benchmark_dirs=%s', benchmark_dirs)
+
+    deltas = []
+
+    for benchmark_dir in benchmark_dirs:
+        variant_analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
+                                 for benchmark_variant_name in variants]
+        mdatas = [os.path.join(d, 'metadata_with_gitlinks.json') for d in variant_analysis_dirs]
+        if all(map(os.path.isfile, mdatas)):
+            mdatas = list(map(_json_loadf, mdatas))
+            deltas.append(mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0))
+
+    print(sorted(deltas))
+
+def parser_cmp_benchmark_variants(parser=argparse.ArgumentParser()):
+    parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
+    parser.add_argument('variants', nargs=2, help='the names of the variants')
+    parser.add_argument('metric', help='the metric')
+    util.cmd.attach_main(parser, cmp_benchmark_variants, split_args=True)
+    return parser
+
+__commands__.append(('cmp_benchmark_variants', parser_cmp_benchmark_variants))
+
+
+
 ########################################################################################################################
 
 def parser_submit_analysis_wdl(parser=argparse.ArgumentParser()):
