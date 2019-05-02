@@ -1138,11 +1138,13 @@ def _submit_prepared_analysis(analysis_dir,
             cromwell_returncode = called_process_error.returncode
 
         _log.info('Cromwell returned with return code %d', cromwell_returncode)
-        cromwell_analysis_id = re.search('Workflow (?P<uuid>' + util.misc.UUID_RE + ') submitted to ',
-                                         cromwell_output_str).group('uuid')
-        util.misc.chk(cromwell_analysis_id, 'Cromwell analysis id not found in cromwell submit output')
 
         util.file.dump_file('cromwell_submit_output.txt', cromwell_output_str)
+        time.sleep(.5)
+        cromwell_analysis_id = re.search('Workflow (?P<uuid>' + util.misc.UUID_RE + ') submitted to ',
+                                         util.file.slurp_file('cromwell_submit_output.txt')).group('uuid')
+        util.misc.chk(cromwell_analysis_id, 'Cromwell analysis id not found in cromwell submit output')
+
         _log.debug('cromwell output is %s', cromwell_output_str)
 
         if cromwell_returncode:
