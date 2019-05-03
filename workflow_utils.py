@@ -675,7 +675,14 @@ def import_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
     out = []
     with git_annex_tool.batching() as git_annex_tool:
         for dx_analysis_id in dx_analysis_ids:
-            out.append(_import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanexus_tool))
+            try:
+                out.append(_import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanexus_tool))
+            except Exception as e:
+                _log.warning('Could not import %s: %s', dx_analysis_id, e,
+                             ''.join(traceback.format_exception(type(e),
+                                                                e, e.__traceback__))
+                             if hasattr(e, '__traceback__') else '')
+                    
     for analysis_dir, mdata, mdata_rel in out:
         mdata = util.misc.transform_json_data(mdata, functools.partial(util.misc.maybe_wait_for_result, timeout=300))
         mdata_rel = util.misc.transform_json_data(mdata_rel, functools.partial(util.misc.maybe_wait_for_result, timeout=300))
@@ -1591,9 +1598,12 @@ def cmp_benchmark_variants(benchmarks_spec_file, variants, metric):
         mdatas = [os.path.join(d, 'metadata_with_gitlinks.json') for d in variant_analysis_dirs]
         if all(map(os.path.isfile, mdatas)):
             mdatas = list(map(_json_loadf, mdatas))
-            deltas.append(mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0))
+            delta = mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0)
+            if abs(delta) > 50:
+                deltas.append((delta,) + tuple(variant_analysis_dirs))
 
-    print(sorted(deltas))
+    print('\n' + '\n'.join(map(str, sorted(deltas))))
+    
 
 def parser_cmp_benchmark_variants(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
