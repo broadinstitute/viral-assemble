@@ -262,7 +262,7 @@ class GitAnnexTool(tools.Tool):
         _log.debug('ENTERING BATCHING CONTEXT; was batching? {}'.format(self.is_batching()))
         self = copy.copy(self)
         self._batched_cmds = collections.OrderedDict()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as self._executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=util.misc.available_cpu_count()) as self._executor:
             yield self
             _log.debug('EXITING BATCHING CONTEXT; cmds are: {}'.format(self._batched_cmds))
             self._execute_batched_commands()
