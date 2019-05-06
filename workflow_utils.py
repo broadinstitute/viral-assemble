@@ -750,17 +750,20 @@ def _import_dx_analysis_and_commit(dx_analysis_id, analysis_dir_pfx, script, tem
     _run('git', 'annex', 'add', '.', cwd=temp_worktree_dir)
     _run('git', 'commit', '-m', '"imported dx analysis {}"'.format(dx_analysis_id), cwd=temp_worktree_dir)
 
+def _set_up_worktree(dx_analysis_id, exit_stack, git_annex_tool, worktree_group_id):
+    return (dx_analysis_id,) + exit_stack.enter_context(git_annex_tool._in_tmp_worktree(worktree_group_id=worktree_group_id,
+                                                                                        chdir=False))
+
 def import_mult_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
     """Import one or more DNAnexus analyses into git, in our analysis dir format."""
 
     git_annex_tool = tools.git_annex.GitAnnexTool()
     with contextlib2.ExitStack() as exit_stack:
-        worktree_group_id = 'impdx_{:06d}'.format(random.randint(0,999999))
-        temps = [(dx_analysis_id,) + exit_stack.enter_context(git_annex_tool._in_tmp_worktree(worktree_group_id=worktree_group_id,
-                                                                                              chdir=False))
-                 for dx_analysis_id in dx_analysis_ids]
         executor = exit_stack.enter_context(concurrent.futures.ThreadPoolExecutor(max_workers=min(len(dx_analysis_ids),
                                                                                                   util.misc.available_cpu_count())))
+        worktree_group_id = 'impdx_{:06d}'.format(random.randint(0,999999))
+        temps = list(executor.map(functools.partial(_set_up_worktree, exit_stack=exit_stack, git_annex_tool=git_annex_tool,
+                                                    worktree_group_id=worktree_group_id), dx_analysis_ids))
         script = os.path.join(util.version.get_project_path(), os.path.basename(__file__))
         util.misc.chk(os.path.isabs(script) and os.path.samefile(script, __file__))
         futures = [executor.submit(_import_dx_analysis_and_commit,
