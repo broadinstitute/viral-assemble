@@ -90,6 +90,7 @@ import pipes
 import shlex
 import sys
 import re
+import random
 import urllib
 try:
     from urllib import urlencode, pathname2url
@@ -107,6 +108,7 @@ import traceback
 import copy
 from pprint import pformat
 import binascii
+import concurrent.futures
 
 # *** 3rd-party
 
@@ -118,11 +120,13 @@ import dxpy.bindings.dxfile_functions
 
 import uritools
 import pytz
+import contextlib2
 
 # *** intra-module
 import util.cmd
 import util.file
 import util.misc
+import util.version
 import tools.git_annex
 import tools.gcloud
 import tools.docker
@@ -263,11 +267,11 @@ def _make_cmd(cmd, *args):
     _log.debug('ARGS=%s', args)
     return ' '.join([cmd] + [_quote(str(arg)) for arg in args if arg not in (None, '')])
 
-def _run(cmd, *args):
+def _run(cmd, *args, **kw):
     cmd = _make_cmd(cmd, *args)
     _log.info('running command: %s cwd=%s', cmd, os.getcwd())
     beg_time = time.time()
-    subprocess.check_call(cmd, shell=True)
+    subprocess.check_call(cmd, shell=True, **kw)
     _log.info('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
 
 def _run_succeeds(cmd, *args):
@@ -310,6 +314,12 @@ def _running_on_aws():
 def workflow_utils_init():
     """Install the dependencies: cromwell and dxpy and git-annex."""
     _run('conda install cromwell dxpy git-annex')
+
+
+def _format_exc(e):
+    return ''.join(traceback.format_exception(type(e),
+                                              e, e.__traceback__)) \
+                                              if hasattr(e, '__traceback__') else ''
 
 
 # ** AnalysisDir
@@ -668,7 +678,7 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
 #    _write_json(mdata_rel_fname, **mdata_rel)
 #    _write_json(os.path.join(analysis_dir, 'metadata.json'), **mdata)
 
-def import_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
+def _import_dx_analyses_orig(dx_analysis_ids, analysis_dir_pfx):
     """Import one or more DNAnexus analyses into git, in our analysis dir format."""
     git_annex_tool = tools.git_annex.GitAnnexTool()
     dnanexus_tool = tools.dnanexus.DxTool()
@@ -697,6 +707,19 @@ def import_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
                                     analysis_labels=mdata_rel['labels'], git_annex_tool=git_annex_tool)
 
 
+def import_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
+    """Import one or more DNAnexus analyses into git, in our analysis dir format."""
+    git_annex_tool = tools.git_annex.GitAnnexTool()
+    succ = False
+    with git_annex_tool._in_tmp_worktree() as branch:
+        try:
+            _import_dx_analyses_orig(dx_analysis_ids, analysis_dir_pfx)
+            git_annex_tool.add_cwd()
+            git_annex_tool.execute_git(['commit', '.', '-m', 'temp_commit'])
+            _log.info('COMMITTED IMPORT %s', dx_analysis_ids)
+            succ = True
+        except Exception:
+            _log.warning('Failed to import %s', dx_analysis_ids)
 
 def parser_import_dx_analyses(parser=argparse.ArgumentParser(fromfile_prefix_chars='@')):
     parser.add_argument('dx_analysis_ids', metavar='DX_ANALYSIS_ID', nargs='+', help='dnanexus analysis id(s)')
@@ -706,6 +729,126 @@ def parser_import_dx_analyses(parser=argparse.ArgumentParser(fromfile_prefix_cha
     return parser
 
 __commands__.append(('import_dx_analyses', parser_import_dx_analyses))
+
+
+def import_one_dx_analysis(dx_analysis_id, analysis_dir_pfx):
+    """Import one or more DNAnexus analyses into git, in our analysis dir format."""
+    _import_dx_analyses_orig([dx_analysis_id], analysis_dir_pfx)
+
+def parser_import_one_dx_analysis(parser=argparse.ArgumentParser(fromfile_prefix_chars='@')):
+    parser.add_argument('dx_analysis_id', metavar='DX_ANALYSIS_ID', help='dnanexus analysis id')
+    parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/dxan-',
+                        help='analysis dir prefix; analysis id will be added to it.')
+    util.cmd.attach_main(parser, import_one_dx_analysis, split_args=True)
+    return parser
+
+__commands__.append(('import_one_dx_analysis', parser_import_one_dx_analysis))
+
+def _import_dx_analysis_and_commit(dx_analysis_id, analysis_dir_pfx, script, temp_worktree_dir):
+    _run(script, 'import_one_dx_analysis', '--analysisDirPfx', analysis_dir_pfx,
+         dx_analysis_id, cwd=temp_worktree_dir)
+    _run('git', 'annex', 'add', '.', cwd=temp_worktree_dir)
+    _run('git', 'commit', '-m', '"imported dx analysis {}"'.format(dx_analysis_id), cwd=temp_worktree_dir)
+
+def import_mult_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
+    """Import one or more DNAnexus analyses into git, in our analysis dir format."""
+
+    git_annex_tool = tools.git_annex.GitAnnexTool()
+    with contextlib2.ExitStack() as exit_stack:
+        worktree_group_id = 'impdx_{:06d}'.format(random.randint(0,999999))
+        temps = [(dx_analysis_id,) + exit_stack.enter_context(git_annex_tool._in_tmp_worktree(worktree_group_id=worktree_group_id,
+                                                                                              chdir=False))
+                 for dx_analysis_id in dx_analysis_ids]
+        executor = exit_stack.enter_context(concurrent.futures.ThreadPoolExecutor(max_workers=min(len(dx_analysis_ids),
+                                                                                                  util.misc.available_cpu_count())))
+        script = os.path.join(util.version.get_project_path(), os.path.basename(__file__))
+        util.misc.chk(os.path.isabs(script) and os.path.samefile(script, __file__))
+        futures = [executor.submit(_import_dx_analysis_and_commit,
+                                   dx_analysis_id=dx_analysis_id, analysis_dir_pfx=analysis_dir_pfx,
+                                   script=script, temp_worktree_dir=temp_worktree_dir)
+                   for dx_analysis_id, temp_branch, temp_worktree_dir in temps]
+        wait_res = concurrent.futures.wait(futures)
+        done_fail_branches = {'done': [], 'fail': []}
+        for future, (dx_analysis_id, temp_branch, temp_worktree_dir) in zip(futures, temps):
+            if future in wait_res.done:
+                try:
+                    res = future.result()
+                    done_fail_branches['done'].append(temp_branch)
+                    _log.info('DONE imported: %s %s %s', dx_analysis_id, temp_branch, temp_worktree_dir)
+                except Exception as e:
+                    _log.warning('Got exception when importing %s: %s; branch=%s, worktree=%s',
+                                 dx_analysis_id, _format_exc(e), temp_branch, temp_worktree_dir)
+                    done_fail_branches['fail'].append(temp_branch)
+
+        for which in 'done', 'fail':
+            with git_annex_tool._in_tmp_worktree(worktree_group_id=worktree_group_id+'_'+which, keep=True) as\
+                 (summary_branch, summary_worktree):
+                _log.info('SUMMARY: %d branches %s', len(done_fail_branches[which]), which)
+                if done_fail_branches[which]:
+                    git_annex_tool.execute_git(['merge',
+                                                '-m', '"saving {} {} branches"'.format(len(done_fail_branches[which]),
+                                                                                       which)] + done_fail_branches[which])
+
+def parser_import_mult_dx_analyses(parser=argparse.ArgumentParser(fromfile_prefix_chars='@')):
+    parser.add_argument('dx_analysis_ids', nargs='+', metavar='DX_ANALYSIS_ID', help='dnanexus analysis id(s)')
+    parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/dxan-',
+                        help='analysis dir prefix; analysis id will be added to it.')
+    util.cmd.attach_main(parser, import_mult_dx_analyses, split_args=True)
+    return parser
+
+__commands__.append(('import_mult_dx_analyses', parser_import_mult_dx_analyses))
+
+
+# def _import_dx_analysis_one(dx_analysis_ids, analysis_dir_pfx):
+#     """Import one or more DNAnexus analyses into git, in our analysis dir format."""
+#     git_annex_tool = tools.git_annex.GitAnnexTool()
+#     dnanexus_tool = tools.dnanexus.DxTool()
+#     out = []
+#     with git_annex_tool.batching() as git_annex_tool:
+#         for dx_analysis_id in dx_analysis_ids:
+#             try:
+#                 out.append(_import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanexus_tool))
+#             except Exception as e:
+#                 _log.warning('Could not import %s: %s', dx_analysis_id, e,
+#                              ''.join(traceback.format_exception(type(e),
+#                                                                 e, e.__traceback__))
+#                              if hasattr(e, '__traceback__') else '')
+                    
+#     for analysis_dir, mdata, mdata_rel in out:
+#         mdata = util.misc.transform_json_data(mdata, functools.partial(util.misc.maybe_wait_for_result, timeout=300))
+#         mdata_rel = util.misc.transform_json_data(mdata_rel, functools.partial(util.misc.maybe_wait_for_result, timeout=300))
+#         util.file.mkdir_p(analysis_dir)
+#         _write_json(os.path.join(analysis_dir, 'metadata_orig.json'), **mdata)
+#         _write_json(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'), **mdata_rel)
+#         run_inputs = copy.copy(mdata_rel['runInputs'])
+#         run_inputs['_docker_img'] = mdata_rel['labels']['docker_img_hash']
+#         run_inputs['_workflow_name'] = mdata_rel['workflowName']
+#         _prepare_analysis_crogit_do(inputs=run_inputs,
+#                                     analysis_dir=mdata_rel['labels']['analysis_dir'],
+#                                     analysis_labels=mdata_rel['labels'], git_annex_tool=git_annex_tool)
+
+# def import_dx_analyses_mult(dx_analysis_ids, analysis_dir_pfx):
+#     git_annex_tool = tools.git_annex.GitAnnexTool()
+#     with contextlib2.ExitStack() as stk:
+        
+#         with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(dx_analysis_ids)),
+#                                                    util.misc.available_cpu_count()) as executor:
+#             for dx_analysis_id in dx_analysis_ids:
+#                 executor.submit(_import_dx_analysis_one, [dx_analysis_id], analysis_dir_pfx)
+                                               
+    
+
+
+# def parser_import_dx_analyses_mult(parser=argparse.ArgumentParser(fromfile_prefix_chars='@')):
+#     parser.add_argument('dx_analysis_ids', metavar='DX_ANALYSIS_ID', nargs='+', help='dnanexus analysis id(s)')
+#     parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/dxan-',
+#                         help='analysis dir prefix; analysis id will be added to it.')
+#     util.cmd.attach_main(parser, import_dx_analyses_mult, split_args=True)
+#     return parser
+
+# __commands__.append(('import_dx_analyses_mult', parser_import_dx_analyses_mult))
+
+
 
 # * submit_analysis_wdl
 #

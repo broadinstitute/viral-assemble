@@ -12,6 +12,9 @@ import os.path
 import sys
 import stat
 import concurrent.futures
+import uuid
+import contextlib2
+import random
 
 if os.name == 'posix' and sys.version_info[0] < 3:
     import subprocess32 as subprocess
@@ -65,6 +68,8 @@ _Batch = collections.namedtuple('_Batch', ['priority', 'tool_cmd', 'cwd', 'prepr
 
 # NamedTuple: _BatchedCall - arguments to one git-annex call in a set of batched cals, and an optional place to record call output.
 _BatchedCall = collections.namedtuple('_BatchedCall', ['batch_args', 'output_acceptor'])
+
+
 
 # * class GitAnnexTool
 class GitAnnexTool(tools.Tool):
@@ -332,6 +337,66 @@ class GitAnnexTool(tools.Tool):
                         self.execute_git(['worktree', 'remove', temp_worktree_dir])
                     except Exception:
                         _log.warning('Could not remove temp worktree %s', temp_worktree_dir)
+
+    @contextlib.contextmanager
+    def _tmp_worktree(self, directory, branch, start_branch):
+        """Make a temp worktree in a given dir"""
+        directory = os.path.abspath(directory)
+        with util.file.tmp_dir(dir=directory, suffix='_worktree') as temp_worktree_dir:
+            self.execute_git(['worktree', 'add', '-b', branch, temp_worktree_dir, start_branch])
+            try:
+                with util.file.pushd_popd(temp_worktree_dir):
+                    yield temp_worktree_dir
+                    
+            finally:
+                if not util.file.keep_tmp():
+                    try:
+                        self.execute_git(['worktree', 'remove', temp_worktree_dir])
+                    except Exception:
+                        _log.warning('Could not remove temp worktree %s', temp_worktree_dir)
+
+    @contextlib.contextmanager
+    def _in_tmp_worktree(self, worktree_group_id='', chdir=True, keep=False):
+        """Create a temp branch in a temp worktree, chdir to it; then, on context exit, add everything in it to git-annex"""
+        temp_branch = os.path.join('tmp_wtree', worktree_group_id, str(uuid.uuid4()))
+        temp_worktree_dir = os.path.join('tmp', temp_branch)
+        self.execute_git(['worktree', 'add', '-b', temp_branch, temp_worktree_dir, self.get_first_commit()])
+        dot_git = os.path.join(temp_worktree_dir, '.git')
+        save_dot_git = util.file.slurp_file(dot_git)
+        try:
+            with contextlib2.ExitStack() as exit_stack:
+                if chdir:
+                    exit_stack.enter_context(util.file.pushd_popd(temp_worktree_dir))
+                yield temp_branch, temp_worktree_dir
+        finally:
+            os.remove(dot_git)
+            util.file.dump_file(dot_git, save_dot_git)
+            if not keep and not util.file.keep_tmp():
+                try:
+                    self.execute_git(['worktree', 'remove', temp_worktree_dir])
+                    self.execute_git(['branch', '-D', temp_branch])
+                except Exception:
+                    _log.warning('Could not remove temp worktree %s', temp_worktree_dir)
+
+    def _call_f(self, f, arg_tuple):
+        with self._in_tmp_worktree() as branch:
+            try:
+                f(arg_tuple)
+            except Exception:
+                return None
+            
+    # def in_tmp_worktrees(self, f, arg_tuples):
+    #     """For each arg_tuple, call f(arg_tuple) on a temp branch in a temp worktree, checked out to an empty tree;
+    #     then commit, and merge the results.
+    #     """
+    #     arg_tuples = tuple(arg_tuples)
+    #     with contextlib2.ExitStack() as stk, \
+    #          concurrent.futures.ThreadPoolExecutor(max_workers=min(len(arg_tuples), util.misc.available_cpu_count())) \
+    #          as executor:
+    #         worktree_group_id = '{:06d}'.format(random.randint(0,999999))
+    #         temp_branches = [stk.enter_context(self._in_tmp_worktree(workree_group_id=worktree_group_id)) for arg_tuple in arg_tuples]
+            
+    #         result = filter(None, list(executor.map(functools.partial(GitAnnexTool._call_f, self=self, f=f), arg_tuples)))
 
 # *** git-annex commands
 
