@@ -1512,8 +1512,10 @@ def _prepare_analysis_crogit_do(inputs,
         # TODO: option to update just some of the tasks.
         # actually, when compiling WDL, should have this option -- or, actually,
         # should make a new workflow where older apps are reused for stages that have not changed.
-        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs',
-                                                  tools.docker.DockerTool().strip_image_hash(docker_img_hash)))
+        docker_img_no_hash = tools.docker.DockerTool().strip_image_hash(docker_img_hash)
+        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_no_hash))
+        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('viral-ngs_version_unknown',
+                                                  docker_img_no_hash.split(':')[1]))
 
         analysis_labels = dict(
             input_sources,
