@@ -1273,7 +1273,7 @@ def _submit_prepared_analysis(analysis_dir,
         else:
             raise RuntimeError('Unknown backend - ' + backend)
         _write_json('cromwell_opts.json', **wf_opts_dict)
-        _write_json('execution_env.json', ncpus=util.misc.available_cpu_count())
+        #_write_json('execution_env.json', ncpus=util.misc.available_cpu_count())
 
         # add cromwell labels: dx project, the docker tag we ran on, etc.
 
@@ -1759,6 +1759,73 @@ def parser_cmp_benchmark_variants(parser=argparse.ArgumentParser()):
     return parser
 
 __commands__.append(('cmp_benchmark_variants', parser_cmp_benchmark_variants))
+
+
+def generate_benchmark_variant_comparisons(benchmarks_spec_file):
+    """Generate/update reports of benchmark comparisons.
+    """
+
+    benchmarks_spec_file = os.path.abspath(benchmarks_spec_file)
+    benchmarks_spec_dir = os.path.dirname(benchmarks_spec_file)
+    benchmarks_spec = util.misc.load_config(benchmarks_spec_file)
+    _log.info('benchmarks_spec=%s', benchmarks_spec)
+
+    benchmark_dirs = [d for d in _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
+                      if os.path.isdir(os.path.join(d, 'benchmark_variants'))]
+    _log.info('benchmark_dirs=%s', benchmark_dirs)
+
+    variant_pairs = [(variant_1, variant_2)
+                     for variant_1, variant_2s in benchmarks_spec.get('compare_variants', {}).items() for variant_2 in variant_2s]
+    _log.info('variant_paris=%s', variant_pairs)
+
+    for variants in variant_pairs:
+    
+        deltas = []
+        metric = benchmarks_spec['compare_metrics'][0]
+
+        for benchmark_dir in benchmark_dirs:
+            variant_analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
+                                     for benchmark_variant_name in variants]
+            mdatas_fnames = [os.path.join(d, 'metadata_with_gitlinks.json') for d in variant_analysis_dirs]
+            if all(map(os.path.isfile, mdatas_fnames)):
+                mdatas = list(map(_json_loadf, mdatas_fnames))
+                delta = mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0)
+                if abs(delta) > 50:
+                    deltas.append((delta,) + tuple(variant_analysis_dirs))
+            else:
+                _log.info('skipping %s: %s', benchmark_dir, mdatas_fnames)
+
+        print('\n' + '\n'.join(map(str, sorted(deltas))))
+    
+
+def parser_generate_benchmark_variant_comparisons(parser=argparse.ArgumentParser()):
+    parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
+    util.cmd.attach_main(parser, generate_benchmark_variant_comparisons, split_args=True)
+    return parser
+
+__commands__.append(('generate_benchmark_variant_comparisons', parser_generate_benchmark_variant_comparisons))
+
+
+def print_analysis_stats(analysis_dirs_roots, qry_expr):
+    """Print analysis stats for given analyses"""
+    analysis_dirs = analysis_dirs_roots # _get_analysis_dirs_under(analysis_dirs_roots)
+    analyses = []
+    for analysis_dir in analysis_dirs:
+        mdata_fname = os.path.join(analysis_dir, 'metadata_with_gitlinks.json')
+        if os.path.isfile(mdata_fname):
+            analyses.append(_json_loadf(mdata_fname))
+    print(_qry_json(json_data=analyses, jmespath_expr=qry_expr))
+
+def parser_print_analysis_stats(parser=argparse.ArgumentParser()):
+    parser.add_argument('qry_expr', help='jmespath expr')
+    parser.add_argument('analysis_dirs_roots', nargs='+', help='analysis dirs roots')
+    
+    util.cmd.attach_main(parser, print_analysis_stats, split_args=True)
+    return parser
+
+__commands__.append(('print_analysis_stats', parser_print_analysis_stats))
+
+
 
 
 
