@@ -1252,15 +1252,19 @@ def _submit_prepared_analysis(analysis_dir,
     """
     with util.file.pushd_popd(analysis_dir):
         _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
-        if os.path.isfile('cromwell_submit_output.txt'):
+        if os.path.lexists('cromwell_submit_output.txt'):
             # TODO: check that the analysis is in cromwell and that it is still pending or running
             _log.info('Analysis dir %s already submitted: %s', analysis_dir, util.file.slurp_file('cromwell_submit_output.txt'))
             return
-
+        
+        _run('git', 'annex', 'get', 'inputs-git-links.json')
         run_inputs = _json_loadf('inputs-git-links.json')
 
         input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
         run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
+        if os.path.lexists('inputs.json'):
+            os.remove('inputs.json')
+        util.misc.chk(not os.path.exists('inputs.json'), 'inputs.json should not yet exist')
         _write_json('inputs.json', **{k:v for k, v in run_inputs_staged.items() if not k.startswith('_')})
 
         if backend == 'Local':
@@ -1272,6 +1276,9 @@ def _submit_prepared_analysis(analysis_dir,
             }
         else:
             raise RuntimeError('Unknown backend - ' + backend)
+        if os.path.lexists('cromwell_opts.json'):
+            os.remove('cromwell_opts.json')
+        util.misc.chk(not os.path.exists('cromwell_opts.json'), 'cromwell_opts should not yet exist')
         _write_json('cromwell_opts.json', **wf_opts_dict)
         #_write_json('execution_env.json', ncpus=util.misc.available_cpu_count())
 
