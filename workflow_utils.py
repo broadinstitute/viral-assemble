@@ -1900,7 +1900,7 @@ class CromwellServer(object):
 
     def _api(self, endpoint, query=()):
         query_str = ('?' + urlencode(query)) if query else ''
-        return _run_get_json('curl', '-s', '-X', 'GET', 'http://{}/api/workflows/v1/{}{}'.format(self.host, endpoint, query_str),
+        return _run_get_json('curl', '-s', '-X', 'GET', '{}/api/workflows/v1/{}{}'.format(self.host, endpoint, query_str),
                              '-H', 'accept: application/json')
 
     def get_workflows(self, query=()):
