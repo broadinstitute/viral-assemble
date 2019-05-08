@@ -18,6 +18,7 @@ import contextlib2 as contextlib
 import collections
 import time
 import signal
+import re
 
 import cromwell_tools
 import cromwell_tools.cromwell_api
@@ -143,6 +144,13 @@ class CromwellTool(tools.Tool):
                 yield server
             finally:
                 server.shutdown()
+    # end: def cromwell_server(self, port=8000, check_health=True)
+
+    def parse_cromwell_submit_output(self, fname):
+        """Parse the output of cromwell submission"""
+        cromwell_analysis_id = re.search('Workflow (?P<uuid>' + util.misc.UUID_RE + ') submitted to ',
+                                         util.file.slurp_file(fname)).group('uuid')
+        return cromwell_analysis_id
 
 # ** Metadata handling
 

@@ -130,6 +130,7 @@ import util.version
 import tools.git_annex
 import tools.gcloud
 import tools.docker
+import tools.cromwell
 
 _log = logging.getLogger(__name__)
 
@@ -853,7 +854,7 @@ __commands__.append(('import_mult_dx_analyses', parser_import_mult_dx_analyses))
 
 
 
-# * submit_analysis_wdl
+# * submitting analyses
 #
 # Code that deals specifying sets of analyses to run, and submitting them to Cromwell.
 #
@@ -1247,15 +1248,34 @@ def submit_analysis_wdl(workflow_name, inputs,
 
 def _submit_prepared_analysis(analysis_dir,
                               cromwell_server_url='http://localhost:8000',
-                              backend='Local'):
+                              backend='Local',
+                              processing_stats=collections.Counter()):
     """Submit prepared analysis.
     """
+    cromwell_tool = tools.cromwell.CromwellTool()
+    cromwell_server = CromwellServer(host=cromwell_server_url)
     with util.file.pushd_popd(analysis_dir):
         _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
-        if os.path.lexists('cromwell_submit_output.txt'):
-            # TODO: check that the analysis is in cromwell and that it is still pending or running
-            _log.info('Analysis dir %s already submitted: %s', analysis_dir, util.file.slurp_file('cromwell_submit_output.txt'))
+        if os.path.lexists('metadata_with_gitlinks.json'):
+            _log.info('Analysis dir %s already completed, not submitting', analysis_dir)
             return
+        if os.path.lexists('cromwell_submit_output.txt'):
+            try:
+                _run('git', 'annex', 'get', 'cromwell_submit_output.txt')
+                cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output('cromwell_submit_output.txt')
+                mdata = cromwell_server.get_metadata(cromwell_analysis_id)
+                if mdata.get('status', None) in ('Running', 'Succeeded', 'Failed'):
+                    _log.info('Analysis dir %s completed though not yet finalized; status=%s', analysis_dir, mdata['status'])
+                    return
+            except Exception:
+                _log.info('Could not determine status for analysis dir %s', analysis_dir)
+            # TODO: check that the analysis is in cromwell and that it is still pending or running
+
+            _log.info('Resubmitting analysis dir: %s', analysis_dir)
+            processing_stats['submitted_but_not_completed'] += 1
+            for f in ('cromwell_submit_output.txt', 'cromwell_opts.json'):
+                _run('git', 'annex', 'edit', f)
+                os.remove(f)
         
         _run('git', 'annex', 'get', 'inputs-git-links.json')
         run_inputs = _json_loadf('inputs-git-links.json')
@@ -1301,8 +1321,7 @@ def _submit_prepared_analysis(analysis_dir,
 
         util.file.dump_file('cromwell_submit_output.txt', cromwell_output_str)
         time.sleep(.5)
-        cromwell_analysis_id = re.search('Workflow (?P<uuid>' + util.misc.UUID_RE + ') submitted to ',
-                                         util.file.slurp_file('cromwell_submit_output.txt')).group('uuid')
+        cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output('cromwell_submit_output.txt')
         util.misc.chk(cromwell_analysis_id, 'Cromwell analysis id not found in cromwell submit output')
 
         _log.debug('cromwell output is %s', cromwell_output_str)
@@ -1659,6 +1678,8 @@ def _is_prepared_analysis_dir(analysis_dir):
 # running that benchmark variant.
 #
 
+# *** generate_benchmark_variant_dirs
+
 def _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def, git_annex_tool):
     """Generate a run-ready analysis dir for the given benchmark and benchmark variant."""
 
@@ -1704,6 +1725,8 @@ def parser_generate_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
 
 __commands__.append(('generate_benchmark_variant_dirs', parser_generate_benchmark_variant_dirs))
 
+# *** submit_benchmark_variant_dirs
+
 def submit_benchmark_variant_dirs(benchmarks_spec_file):
     """The code below takes a benchmark spec file, which specifies benchmarks (as analysis dirs) and variants,
     and generates, under each benchmark dir and for each variant, an analysis spec obtained by
@@ -1721,9 +1744,12 @@ def submit_benchmark_variant_dirs(benchmarks_spec_file):
     benchmark_dirs = _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
     _log.info('benchmark_dirs=%s', benchmark_dirs)
 
+    processing_stats = collections.Counter()
+
     for benchmark_dir in benchmark_dirs:
         for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
-            _submit_prepared_analysis(analysis_dir=os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name))
+            _submit_prepared_analysis(analysis_dir=os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name),
+                                      processing_stats=processing_stats)
 
 def parser_submit_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
@@ -1732,7 +1758,7 @@ def parser_submit_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
 
 __commands__.append(('submit_benchmark_variant_dirs', parser_submit_benchmark_variant_dirs))
 
-
+# ** cmp_benchmark_variants
 def cmp_benchmark_variants(benchmarks_spec_file, variants, metric):
     """Print a report from comparing two benchmarks.
     """
@@ -1769,7 +1795,7 @@ def parser_cmp_benchmark_variants(parser=argparse.ArgumentParser()):
 
 __commands__.append(('cmp_benchmark_variants', parser_cmp_benchmark_variants))
 
-
+# ** generate_benchmark_variant_comparisons
 def generate_benchmark_variant_comparisons(benchmarks_spec_file):
     """Generate/update reports of benchmark comparisons.
     """
@@ -1814,7 +1840,7 @@ def parser_generate_benchmark_variant_comparisons(parser=argparse.ArgumentParser
 
 __commands__.append(('generate_benchmark_variant_comparisons', parser_generate_benchmark_variant_comparisons))
 
-
+# ** print_analysis_stats
 def print_analysis_stats(analysis_dirs_roots, qry_expr):
     """Print analysis stats for given analyses"""
     analysis_dirs = analysis_dirs_roots # _get_analysis_dirs_under(analysis_dirs_roots)
