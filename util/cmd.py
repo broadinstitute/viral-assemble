@@ -217,6 +217,7 @@ def _main_argparse_do(commands, description):
         os.environ['TMPDIR'] = tempfile.tempdir  # this is for running R
         try:
             ret = args.func_main(args)
+            log.debug("Command %s finished with exit code %s", args.command, ret)
         finally:
             if (hasattr(args, 'tmp_dirKeep') and args.tmp_dirKeep) or util.file.keep_tmp():
                 log.debug("After running %s, saving tmp_dir at %s", args.command, tempfile.tempdir)
