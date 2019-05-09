@@ -1804,7 +1804,9 @@ def generate_benchmark_variant_comparisons(benchmarks_spec_file):
     benchmarks_spec_dir = os.path.dirname(benchmarks_spec_file)
     benchmarks_spec = util.misc.load_config(benchmarks_spec_file)
     _log.info('benchmarks_spec=%s', benchmarks_spec)
-
+    
+    for d in benchmarks_spec['benchmark_dirs_roots']:
+        _run('git', 'annex', 'get', '--include=metadata_with_gitlinks.json', d)
     benchmark_dirs = [d for d in _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
                       if os.path.isdir(os.path.join(d, 'benchmark_variants'))]
     _log.info('benchmark_dirs=%s', benchmark_dirs)
@@ -1812,6 +1814,7 @@ def generate_benchmark_variant_comparisons(benchmarks_spec_file):
     variant_pairs = [(variant_1, variant_2)
                      for variant_1, variant_2s in benchmarks_spec.get('compare_variants', {}).items() for variant_2 in variant_2s]
     _log.info('variant_paris=%s', variant_pairs)
+    processing_stats = collections.Counter()
 
     for variants in variant_pairs:
     
@@ -1822,10 +1825,15 @@ def generate_benchmark_variant_comparisons(benchmarks_spec_file):
             variant_analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
                                      for benchmark_variant_name in variants]
             mdatas_fnames = [os.path.join(d, 'metadata_with_gitlinks.json') for d in variant_analysis_dirs]
-            if all(map(os.path.isfile, mdatas_fnames)):
+            if all(map(os.path.lexists, mdatas_fnames)):
+                _log.info('Both exist: %s', mdatas_fnames)
                 mdatas = list(map(_json_loadf, mdatas_fnames))
+                util.misc.chk(mdatas[0]['status'] == 'Failed' or metric in mdatas[0]['outputs'],
+                              'no {} in {}'.format(metric, variant_analysis_dirs[0]))
+                util.misc.chk(mdatas[1]['status'] == 'Failed' or metric in mdatas[1]['outputs'],
+                              'no {} in {}'.format(metric, variant_analysis_dirs[1]))
                 delta = mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0)
-                if abs(delta) > 50:
+                if True or abs(delta) > 50:
                     deltas.append((delta,) + tuple(variant_analysis_dirs))
             else:
                 _log.info('skipping %s: %s', benchmark_dir, mdatas_fnames)
