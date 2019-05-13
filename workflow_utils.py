@@ -243,7 +243,7 @@ def _json_loads(s):
     return json.loads(s.strip(), object_hook=_load_dict_sorted, object_pairs_hook=collections.OrderedDict)
 
 def _json_loadf(fname):
-    return _json_loads(util.file.slurp_file(fname))
+    return _json_loads(util.file.slurp_file(fname, maxSizeMb=1000))
 
 # *** timestamps processing
 
@@ -270,10 +270,15 @@ def _make_cmd(cmd, *args):
 
 def _run(cmd, *args, **kw):
     cmd = _make_cmd(cmd, *args)
-    _log.info('running command: %s cwd=%s', cmd, os.getcwd())
+    _log.info('running command: %s cwd=%s kw=%s', cmd, os.getcwd(), kw)
     beg_time = time.time()
-    subprocess.check_call(cmd, shell=True, **kw)
-    _log.info('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
+    succeeded = False
+    try:
+        subprocess.check_call(cmd, shell=True, **kw)
+        succeeded = True
+    finally:
+        _log.info('command (cwd={}, kw={}) {} in {}s: {}'.format(os.getcwd(), kw, 'SUCCEEDED' if succeeded else 'FAILED',
+                                                                 time.time()-beg_time, cmd))
 
 def _run_succeeds(cmd, *args):
     try:
@@ -689,7 +694,7 @@ def _import_dx_analyses_orig(dx_analysis_ids, analysis_dir_pfx):
             try:
                 out.append(_import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanexus_tool))
             except Exception as e:
-                _log.warning('Could not import %s: %s', dx_analysis_id, e,
+                _log.warning('Could not import %s: %s %s', dx_analysis_id, e,
                              ''.join(traceback.format_exception(type(e),
                                                                 e, e.__traceback__))
                              if hasattr(e, '__traceback__') else '')
@@ -740,22 +745,27 @@ def parser_import_one_dx_analysis(parser=argparse.ArgumentParser(fromfile_prefix
     parser.add_argument('dx_analysis_id', metavar='DX_ANALYSIS_ID', help='dnanexus analysis id')
     parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/dxan-',
                         help='analysis dir prefix; analysis id will be added to it.')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, import_one_dx_analysis, split_args=True)
     return parser
 
 __commands__.append(('import_one_dx_analysis', parser_import_one_dx_analysis))
 
 def _import_dx_analysis_and_commit(dx_analysis_id, analysis_dir_pfx, script, temp_worktree_dir):
-    _run(script, 'import_one_dx_analysis', '--analysisDirPfx', analysis_dir_pfx,
-         dx_analysis_id, cwd=temp_worktree_dir)
-    _run('git', 'annex', 'add', '.', cwd=temp_worktree_dir)
-    _run('git', 'commit', '-m', '"imported dx analysis {}"'.format(dx_analysis_id), cwd=temp_worktree_dir)
+    #util.file.mkdir_p(os.path.join(temp_worktree_dir, 'tmp'))
+    #log_fname = os.path.join(temp_worktree_dir, 'tmp', 'import_dx.log.' + os.path.basename(temp_worktree_dir))
+    try:
+        _run(script, 'import_one_dx_analysis', '--analysisDirPfx', analysis_dir_pfx,
+             dx_analysis_id, cwd=temp_worktree_dir)
+    finally:
+        _run('git', 'annex', 'add', '.', cwd=temp_worktree_dir)
+        _run('git', 'commit', '-m', '"imported dx analysis {}"'.format(dx_analysis_id), cwd=temp_worktree_dir)
 
 def _set_up_worktree(dx_analysis_id, exit_stack, git_annex_tool, worktree_group_id):
     return (dx_analysis_id,) + exit_stack.enter_context(git_annex_tool._in_tmp_worktree(worktree_group_id=worktree_group_id,
                                                                                         chdir=False))
 
-def import_mult_dx_analyses(dx_analysis_ids, analysis_dir_pfx):
+def import_mult_dx_analyses(dx_analysis_ids, analysis_dir_pfx, set_tmp_dir):
     """Import one or more DNAnexus analyses into git, in our analysis dir format."""
 
     git_annex_tool = tools.git_annex.GitAnnexTool()
@@ -797,6 +807,8 @@ def parser_import_mult_dx_analyses(parser=argparse.ArgumentParser(fromfile_prefi
     parser.add_argument('dx_analysis_ids', nargs='+', metavar='DX_ANALYSIS_ID', help='dnanexus analysis id(s)')
     parser.add_argument('--analysisDirPfx', dest='analysis_dir_pfx', default='pipelines/dxan-',
                         help='analysis dir prefix; analysis id will be added to it.')
+    parser.add_argument('--setTmpDir', dest='set_tmp_dir', help='use this temp dir')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, import_mult_dx_analyses, split_args=True)
     return parser
 
@@ -865,12 +877,14 @@ def _extract_wdl_from_docker_img(docker_img):
     _run('docker run --rm ' + docker_img + ' tar cf - source/pipes/WDL > wdl.tar')
     _run('tar xvf wdl.tar')
     _log.debug('cwd=%s', os.getcwd())
+    util.file.mkdir_p('tasks')
     for f in glob.glob('source/pipes/WDL/workflows/*.wdl'):
         _log.debug('copying %s to {}', f, os.getcwd())
         shutil.copy(f, '.')
     for f in glob.glob('source/pipes/WDL/workflows/tasks/*.wdl'):
         _log.debug('copying %s to {}', f, os.getcwd())
         shutil.copy(f, '.')
+        shutil.copy(f, './tasks/')
     shutil.rmtree('source')
     os.unlink('wdl.tar')
 
@@ -1539,9 +1553,9 @@ def _prepare_analysis_crogit_do(inputs,
         # actually, when compiling WDL, should have this option -- or, actually,
         # should make a new workflow where older apps are reused for stages that have not changed.
         docker_img_no_hash = tools.docker.DockerTool().strip_image_hash(docker_img_hash)
-        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_no_hash))
-        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('viral-ngs_version_unknown',
-                                                  docker_img_no_hash.split(':')[1]))
+        _run('sed -i -- "s|{}|{}|g" *.wdl tasks/*.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_no_hash))
+        _run('sed -i -- "s|{}|{}|g" *.wdl tasks/*.wdl'.format('viral-ngs_version_unknown',
+                                                              docker_img_no_hash.split(':')[1]))
 
         analysis_labels = dict(
             input_sources,
@@ -1560,10 +1574,11 @@ def _prepare_analysis_crogit_do(inputs,
         run_inputs_staged_local = _stage_inputs_for_backend(run_inputs, backend='Local', skip_get=True)
         _write_json('inputs-local.json', **{k:v for k, v in run_inputs_staged_local.items() if not k.startswith('_')})
         _run('womtool', 'validate',  '-i',  'inputs-local.json', workflow_name + '.wdl')
-        _run('zip imports.zip *.wdl')
+        _run('zip imports.zip *.wdl tasks/*.wdl')
         for wdl_f in os.listdir('.'):
             if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and wdl_f != workflow_name+'.wdl':
                 os.unlink(wdl_f)
+        _run('rm -rf tasks')
 
 def _get_full_inputs(workflow_name, inputs):
     """Given a parsed specification of a set of analysis inputs, construct a list of the full inputs to each analysis."""
