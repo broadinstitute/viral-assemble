@@ -161,7 +161,7 @@ class GitAnnexTool(tools.Tool):
                 return method(self, *args, **kw)
         return impl
 
-    def execute(self, args, batch_args=None, output_acceptor=None, now=True, tool='git-annex', priority=0, preproc=None):
+    def execute(self, args, batch_args=None, output_acceptor=None, now=True, tool='git-annex', priority=0, preproc=None, cwd=None):
         """Run the given git or git-annex command.  If batching is in effect (see self.batching()), the command is stored and will be
         executed when the batching context exits.
         
@@ -181,24 +181,24 @@ class GitAnnexTool(tools.Tool):
             _log.debug('batch_arg: %s', batch_arg)
         with self.maybe_now(now=now or not batch_args or not self.is_batching()) as self:
             self._add_command_to_batch(args=args, batch_args=batch_args, output_acceptor=output_acceptor, tool=tool,
-                                       priority=priority, preproc=preproc)
+                                       priority=priority, preproc=preproc, cwd=cwd)
 
-    def execute_batch(self, args, batch_args, output_acceptor=None, priority=0, preproc=None):
+    def execute_batch(self, args, batch_args, output_acceptor=None, priority=0, preproc=None, cwd=None):
         """Record a git-annex command to be run at the end of the current batching context."""
         return self.execute(args=args, batch_args=batch_args, output_acceptor=output_acceptor, now=False, priority=priority,
-                            preproc=preproc)
+                            preproc=preproc, cwd=cwd)
 
     def is_batching(self):
         """Return True if batching is in effect"""
         return self._batched_cmds is not None
 
-    def _add_command_to_batch(self, args, batch_args, output_acceptor, tool, priority, preproc=None):
+    def _add_command_to_batch(self, args, batch_args, output_acceptor, tool, priority, preproc=None, cwd=None):
         """Add command to current batch."""
         if batch_args:
             util.misc.chk(tool == 'git-annex')
             args = tuple(args) + ('--batch',)
         tool_cmd = (os.path.join(self._get_bin_dir(), tool),) + tuple(map(str, args))
-        batch = _Batch(priority=priority, tool_cmd=tool_cmd, cwd=os.getcwd(), preproc=preproc)
+        batch = _Batch(priority=priority, tool_cmd=tool_cmd, cwd=cwd or os.getcwd(), preproc=preproc)
         batched_call = _BatchedCall(batch_args=batch_args, output_acceptor=output_acceptor)
         self._batched_cmds.setdefault(batch, []).append(batched_call)
 
@@ -237,7 +237,7 @@ class GitAnnexTool(tools.Tool):
             if batch_calls[0].output_acceptor:
                 subprocess_call_args.update(stdout=subprocess.PIPE)
 
-            _log.debug('CALLING SUBPROCESS RUN: %s %s', batch.tool_cmd, subprocess_call_args)
+            _log.debug('CALLING SUBPROCESS RUN in %s: %s %s', batch.cwd, batch.tool_cmd, subprocess_call_args)
             try:
                 result = subprocess.run(batch.tool_cmd, check=True, cwd=batch.cwd, universal_newlines=True,
                                         env=self._get_run_env(), **subprocess_call_args)
@@ -565,8 +565,15 @@ class GitAnnexTool(tools.Tool):
         assert os.path.islink(f)
         f, link_target = self._get_link_into_annex(f)
         if not os.path.isfile(f):
-            with util.file.pushd_popd(os.path.dirname(os.path.abspath(f))):
-                self.execute_batch(['get'], (os.path.basename(f),))
+            _log.debug('LOOK: f=%s link_target=%s cwd=%s abspath=%s dirname=%s',
+                       f, link_target, os.getcwd(), os.path.abspath(f), os.path.dirname(os.path.abspath(f)))
+            self.execute_batch(['get'], batch_args=(os.path.basename(f),), cwd=os.path.dirname(os.path.abspath(f)))
+
+    def maybe_get(self, f):
+        """Get file if can"""
+        if not os.path.isfile(f) and self.is_link_into_annex(f):
+            self.get(f)
+        return os.path.isfile(f)
 
     def drop(self, f):
         """Drop the file from its local repo."""
@@ -574,8 +581,7 @@ class GitAnnexTool(tools.Tool):
         assert os.path.islink(f)
         f, link_target = self._get_link_into_annex(f)
         if os.path.isfile(f):
-            with util.file.pushd_popd(os.path.dirname(os.path.abspath(f))):
-                self.execute(['drop', os.path.basename(f)])
+            self.execute(['drop', os.path.basename(f)], cwd=os.path.dirname(os.path.abspath(f)))
         assert os.path.islink(f)
         assert not os.path.isfile(f)
 
