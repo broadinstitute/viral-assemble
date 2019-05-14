@@ -889,7 +889,7 @@ def _extract_wdl_from_docker_img(docker_img):
     for f in glob.glob('source/pipes/WDL/workflows/tasks/*.wdl'):
         _log.debug('copying %s to {}', f, os.getcwd())
         shutil.copy(f, '.')
-        shutil.copy(f, './tasks/')
+        #shutil.copy(f, './tasks/')
     shutil.rmtree('source')
     os.unlink('wdl.tar')
 
@@ -1558,9 +1558,9 @@ def _prepare_analysis_crogit_do(inputs,
         # actually, when compiling WDL, should have this option -- or, actually,
         # should make a new workflow where older apps are reused for stages that have not changed.
         docker_img_no_hash = tools.docker.DockerTool().strip_image_hash(docker_img_hash)
-        _run('sed -i -- "s|{}|{}|g" *.wdl tasks/*.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_no_hash))
-        _run('sed -i -- "s|{}|{}|g" *.wdl tasks/*.wdl'.format('viral-ngs_version_unknown',
-                                                              docker_img_no_hash.split(':')[1]))
+        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_no_hash))
+        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('viral-ngs_version_unknown',
+                                                  docker_img_no_hash.split(':')[1]))
 
         analysis_labels = dict(
             input_sources,
@@ -1579,11 +1579,10 @@ def _prepare_analysis_crogit_do(inputs,
         run_inputs_staged_local = _stage_inputs_for_backend(run_inputs, backend='Local', skip_get=True)
         _write_json('inputs-local.json', **{k:v for k, v in run_inputs_staged_local.items() if not k.startswith('_')})
         _run('womtool', 'validate',  '-i',  'inputs-local.json', workflow_name + '.wdl')
-        _run('zip imports.zip *.wdl tasks/*.wdl')
+        _run('zip imports.zip *.wdl')
         for wdl_f in os.listdir('.'):
             if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and wdl_f != workflow_name+'.wdl':
                 os.unlink(wdl_f)
-        _run('rm -rf tasks')
 
 def _get_full_inputs(workflow_name, inputs):
     """Given a parsed specification of a set of analysis inputs, construct a list of the full inputs to each analysis."""
