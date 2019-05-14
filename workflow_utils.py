@@ -2122,6 +2122,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
+    cromwell_tool = tools.cromwell.CromwellTool()
     processing_stats = collections.Counter()
     status_stats = collections.Counter()
 
@@ -2129,10 +2130,10 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
     cromwell_analysis_id_to_dir = {}
     for analysis_dir in analysis_dirs:
         fname = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
+        _log.info('looking at cromwell output file %s; exists? %s', fname, os.path.isfile(fname))
         if os.path.isfile(fname):
             _log.info('looking at cromwell output file %s', fname)
-            cromwell_analysis_id = re.search('Workflow (?P<uuid>' + util.misc.UUID_RE + ') submitted to ',
-                                             util.file.slurp_file(fname)).group('uuid')
+            cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output(fname)
             cromwell_analysis_id_to_dir[cromwell_analysis_id] = analysis_dir
     _log.info('GOT ANALYSIS IDS %s', cromwell_analysis_id_to_dir)
     git_annex_tool = tools.git_annex.GitAnnexTool()
@@ -2153,7 +2154,16 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
             if analysis_dir:
                 if analysis_dirs_roots and not any(_is_under_dir(analysis_dir, analysis_dirs_root)
                                                    for analysis_dirs_root in analysis_dirs_roots):
+                    processing_stats['notUnderAnalysisDirsRoots'] += 1
                     continue
+                cromwell_output_file = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
+                if git_annex_tool.maybe_get(cromwell_output_file):
+                    id_from_analysis_dir = cromwell_tool.parse_cromwell_submit_output(cromwell_output_file)
+                    if id_from_analysis_dir != mdata['id']:
+                        processing_stats['id from analysis dir does not match metadata id'] += 1
+                        _log.info('MISMATCH: analysis_dir=%s id=%s id_from_dir=%s',
+                                  analysis_dir, mdata['id'], id_from_analysis_dir)
+                        continue
             else:
                 processing_stats['noAnalysisDirForWorkflow'] += 1
                 continue
