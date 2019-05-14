@@ -810,10 +810,11 @@ class GitAnnexTool(tools.Tool):
                 md5 = descr['parts']['1']['md5']
             else:
                 # TODO: add the use of a dxid-to-key cache in git (or more generally url-to-key?)
-                with util.file.tempfname(suffix='_dx_md5') as t_file:
-                    _log.info('downloading {} to {} for md5 computation; cwd={}'.format(dxid, t_file, os.getcwd()))
-                    dxpy.dxfile_functions.download_dxfile(dxid, t_file)
-                    md5 = util.file.md5_for_file(t_file)
+                md5_cmd = 'wget -q -O - `dx make_download_url {}` | md5sum'.format(dxid)
+                _log.info('RUNNING MD5 COMMAND: %s', md5_cmd)
+                md5 = util.misc.maybe_decode(subprocess.check_output(md5_cmd, shell=True)).split()[0]
+                _log.info('GOT MD5 RESULT: %s', md5)
+                #md5 = util.file.md5_for_file(t_file)
             return GitAnnexTool.construct_key(key_attrs=dict(backend='MD5E',
                                                              size=descr['size'],
                                                              md5=md5,

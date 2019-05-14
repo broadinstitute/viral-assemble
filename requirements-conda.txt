@@ -45,6 +45,7 @@ trinity=date.2011_11_26
 unzip=6.0
 uritools
 vphaser2=2.0
+wget=1.20.1
 # Python packages below
 arrow=0.12.1
 bedtools=2.27.1

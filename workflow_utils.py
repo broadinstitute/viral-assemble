@@ -603,7 +603,9 @@ def _import_dx_analysis(dx_analysis_id, analysis_dir_pfx, git_annex_tool, dnanex
 
     # TODO: cache the list of remotes (in tools/git_annex)
 
+    _log.info('CALLING RESOLVE_DX_LINKS_IN_DX_ANALYSIS_DESCR')
     mdata = dnanexus_tool.resolve_dx_links_in_dx_analysis_descr(mdata_orig)
+    _log.info('RETURNED FROM RESOLVE_DX_LINKS_IN_DX_ANALYSIS_DESCR')
     #    methods = [functools.partial(_resolve_link_dx, dx_analysis_id=dx_analysis_id, _cache={})]
     #    mdata = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir, methods=methods)
 
@@ -753,13 +755,16 @@ __commands__.append(('import_one_dx_analysis', parser_import_one_dx_analysis))
 
 def _import_dx_analysis_and_commit(dx_analysis_id, analysis_dir_pfx, script, temp_worktree_dir):
     #util.file.mkdir_p(os.path.join(temp_worktree_dir, 'tmp'))
-    #log_fname = os.path.join(temp_worktree_dir, 'tmp', 'import_dx.log.' + os.path.basename(temp_worktree_dir))
+    log_fname = os.path.join(temp_worktree_dir, analysis_dir_pfx + dx_analysis_id,
+                             'import_dx.log')
+    util.file.mkdir_p(os.path.dirname(log_fname))
     try:
-        _run(script, 'import_one_dx_analysis', '--analysisDirPfx', analysis_dir_pfx,
-             dx_analysis_id, cwd=temp_worktree_dir)
+        with open(log_fname + '.out.txt', 'wt') as _out_stdout, open(log_fname + '.err.txt', 'wt') as _out_stderr:
+            _run(script, 'import_one_dx_analysis', '--analysisDirPfx', analysis_dir_pfx,
+                 dx_analysis_id, cwd=temp_worktree_dir, stdout=_out_stdout, stderr=_out_stderr)
     finally:
         _run('git', 'annex', 'add', '.', cwd=temp_worktree_dir)
-        _run('git', 'commit', '-m', '"imported dx analysis {}"'.format(dx_analysis_id), cwd=temp_worktree_dir)
+        _run('git', 'commit', '-m', 'imported dx analysis {}'.format(dx_analysis_id), cwd=temp_worktree_dir)
 
 def _set_up_worktree(dx_analysis_id, exit_stack, git_annex_tool, worktree_group_id):
     return (dx_analysis_id,) + exit_stack.enter_context(git_annex_tool._in_tmp_worktree(worktree_group_id=worktree_group_id,
@@ -774,7 +779,7 @@ def import_mult_dx_analyses(dx_analysis_ids, analysis_dir_pfx, set_tmp_dir):
                                                                                                   util.misc.available_cpu_count())))
         worktree_group_id = 'impdx_{:06d}'.format(random.randint(0,999999))
         temps = list(executor.map(functools.partial(_set_up_worktree, exit_stack=exit_stack, git_annex_tool=git_annex_tool,
-                                                    worktree_group_id=worktree_group_id), dx_analysis_ids))
+                                                    worktree_group_id=worktree_group_id+'/imp'), dx_analysis_ids))
         script = os.path.join(util.version.get_project_path(), os.path.basename(__file__))
         util.misc.chk(os.path.isabs(script) and os.path.samefile(script, __file__))
         futures = [executor.submit(_import_dx_analysis_and_commit,
@@ -795,7 +800,7 @@ def import_mult_dx_analyses(dx_analysis_ids, analysis_dir_pfx, set_tmp_dir):
                     done_fail_branches['fail'].append(temp_branch)
 
         for which in 'done', 'fail':
-            with git_annex_tool._in_tmp_worktree(worktree_group_id=worktree_group_id+'_'+which, keep=True) as\
+            with git_annex_tool._in_tmp_worktree(worktree_group_id=worktree_group_id+'/'+which, keep=True) as\
                  (summary_branch, summary_worktree):
                 _log.info('SUMMARY: %d branches %s', len(done_fail_branches[which]), which)
                 if done_fail_branches[which]:
