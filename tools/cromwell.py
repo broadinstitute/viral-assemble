@@ -30,7 +30,7 @@ import util.file
 import util.misc
 
 TOOL_NAME = 'cromwell'
-TOOL_VERSION = '0.36.1'
+TOOL_VERSION = '41'
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
