@@ -122,6 +122,8 @@ import uritools
 import pytz
 import contextlib2
 
+import yattag
+
 # *** intra-module
 import util.cmd
 import util.file
@@ -1835,30 +1837,49 @@ def generate_benchmark_variant_comparisons(benchmarks_spec_file):
     _log.info('variant_paris=%s', variant_pairs)
     processing_stats = collections.Counter()
 
-    for variants in variant_pairs:
-    
-        deltas = []
-        metric = benchmarks_spec['compare_metrics'][0]
+    org = util.misc.Org()
+    org.directive('TITLE', 'Benchmark comparisons')
+    with org.headline('Comparisons'):
+        for variants in variant_pairs:
+            with org.headline('{} vs {}'.format(variants[0], variants [1])):
+                for metric in benchmarks_spec['compare_metrics']:
+                    with org.headline('Metric: {}'.format(metric)):
 
-        for benchmark_dir in benchmark_dirs:
-            variant_analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
-                                     for benchmark_variant_name in variants]
-            mdatas_fnames = [os.path.join(d, 'metadata_with_gitlinks.json') for d in variant_analysis_dirs]
-            if all(map(os.path.lexists, mdatas_fnames)):
-                _log.info('Both exist: %s', mdatas_fnames)
-                mdatas = list(map(_json_loadf, mdatas_fnames))
-                util.misc.chk(mdatas[0]['status'] == 'Failed' or metric in mdatas[0]['outputs'],
-                              'no {} in {}'.format(metric, variant_analysis_dirs[0]))
-                util.misc.chk(mdatas[1]['status'] == 'Failed' or metric in mdatas[1]['outputs'],
-                              'no {} in {}'.format(metric, variant_analysis_dirs[1]))
-                delta = mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0)
-                if True or abs(delta) > 50:
-                    deltas.append((delta,) + tuple(variant_analysis_dirs))
-            else:
-                _log.info('skipping %s: %s', benchmark_dir, mdatas_fnames)
+                        deltas = []
 
-        print('\n' + '\n'.join(map(str, sorted(deltas))))
-    
+                        for benchmark_dir in benchmark_dirs:
+                            variant_analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
+                                                     for benchmark_variant_name in variants]
+                            mdatas_fnames = [os.path.join(d, 'metadata_with_gitlinks.json') for d in variant_analysis_dirs]
+                            if all(map(os.path.lexists, mdatas_fnames)):
+                                _log.info('Both exist: %s', mdatas_fnames)
+                                mdatas = list(map(_json_loadf, mdatas_fnames))
+                                util.misc.chk(mdatas[0]['status'] == 'Failed' or metric in mdatas[0]['outputs'],
+                                              'no {} in {}'.format(metric, variant_analysis_dirs[0]))
+                                util.misc.chk(mdatas[1]['status'] == 'Failed' or metric in mdatas[1]['outputs'],
+                                              'no {} in {}'.format(metric, variant_analysis_dirs[1]))
+                                delta = mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0)
+                                if True or abs(delta) > 50:
+                                    deltas.append((delta, tuple(variant_analysis_dirs)))
+                            else:
+                                _log.info('skipping %s: %s', benchmark_dir, mdatas_fnames)
+                                
+                        for delta_val, delta_infos in itertools.groupby(sorted(deltas),
+                                                                        key=operator.itemgetter(0)):
+                            delta_infos = list(delta_infos)
+                            with org.headline('{} (x{})'.format(delta_val, len(delta_infos))):
+                                _log.info('delta_infos=%s', delta_infos)
+                                for delta, variant_analysis_dirs in delta_infos:
+                                    t = ' '.join('pair [[{}][{}]] '.format(variant_analysis_dir, 'ab'[i])
+                                                 for i, variant_analysis_dir in enumerate(variant_analysis_dirs))
+                                    _log.info('t=%s', t)
+                                    with org.headline(t):
+                                        pass
+
+        cmp_output_dir = benchmarks_spec['compare_output_dir']
+        util.file.mkdir_p(cmp_output_dir)
+        cmp_output_fname = os.path.join(cmp_output_dir, 'index.org')
+        util.file.dump_file(cmp_output_fname, str(org))
 
 def parser_generate_benchmark_variant_comparisons(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')

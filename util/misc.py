@@ -963,3 +963,27 @@ def find_free_port():
         s.bind(('', 0))
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         return s.getsockname()[1]
+
+class Org(object):
+    """Helper for creating org mode files"""
+
+    def __init__(self):
+        self.lines = []
+        self.level = 1
+
+    @contextlib.contextmanager
+    def headline(self, text):
+        self.lines.append(('*' * (1 + self.level - 1)) + ' ' + text)
+        save_level = self.level
+        self.level += 2
+        yield
+        self.level = save_level
+
+    def directive(self, name, text):
+        self.lines.append('#+' + name + ': ' + text)
+
+    def text(self, txt):
+        self.lines.append(txt)
+        
+    def __str__(self):
+        return '\n'.join(self.lines)
