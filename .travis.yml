@@ -150,7 +150,7 @@ jobs:
         - source travis/install-conda.sh
         - travis/install-conda-build.sh
       script:
-        - travis/build-conda.sh
+        - travis_wait travis/build-conda.sh
       before_cache:
         - conda clean --all --yes
 
