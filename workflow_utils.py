@@ -133,6 +133,7 @@ import tools.git_annex
 import tools.gcloud
 import tools.docker
 import tools.cromwell
+import tools.muscle
 
 _log = logging.getLogger(__name__)
 
@@ -1837,8 +1838,11 @@ def generate_benchmark_variant_comparisons(benchmarks_spec_file):
     _log.info('variant_paris=%s', variant_pairs)
     processing_stats = collections.Counter()
 
+    muscle_tool = tools.muscle.MuscleTool()
+
     org = util.misc.Org()
     org.directive('TITLE', 'Benchmark comparisons')
+    org.text('')
     with org.headline('Comparisons'):
         for variants in variant_pairs:
             with org.headline('{} vs {}'.format(variants[0], variants [1])):
@@ -1851,16 +1855,24 @@ def generate_benchmark_variant_comparisons(benchmarks_spec_file):
                             variant_analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
                                                      for benchmark_variant_name in variants]
                             mdatas_fnames = [os.path.join(d, 'metadata_with_gitlinks.json') for d in variant_analysis_dirs]
+                            sample_name = ''
                             if all(map(os.path.lexists, mdatas_fnames)):
                                 _log.info('Both exist: %s', mdatas_fnames)
                                 mdatas = list(map(_json_loadf, mdatas_fnames))
+                                for mdata in mdatas:
+                                    contigs_fasta = str(_qry_json(mdata, 'outputs."assemble_denovo.assemble.contigs_fasta"."$git_link"'))
+                                    if contigs_fasta.endswith('fasta'):
+                                        sample_name_here = os.path.basename(contigs_fasta).split('.')[0]
+                                        util.misc.chk(not sample_name or sample_name_here == sample_name)
+                                        sample_name = sample_name_here
+                                        mdata['labels']['sample_name'] = sample_name
                                 util.misc.chk(mdatas[0]['status'] == 'Failed' or metric in mdatas[0]['outputs'],
                                               'no {} in {}'.format(metric, variant_analysis_dirs[0]))
                                 util.misc.chk(mdatas[1]['status'] == 'Failed' or metric in mdatas[1]['outputs'],
                                               'no {} in {}'.format(metric, variant_analysis_dirs[1]))
                                 delta = mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0)
                                 if True or abs(delta) > 50:
-                                    deltas.append((delta, tuple(variant_analysis_dirs)))
+                                    deltas.append((delta, tuple(variant_analysis_dirs), sample_name))
                             else:
                                 _log.info('skipping %s: %s', benchmark_dir, mdatas_fnames)
                                 
@@ -1869,12 +1881,11 @@ def generate_benchmark_variant_comparisons(benchmarks_spec_file):
                             delta_infos = list(delta_infos)
                             with org.headline('{} (x{})'.format(delta_val, len(delta_infos))):
                                 _log.info('delta_infos=%s', delta_infos)
-                                for delta, variant_analysis_dirs in delta_infos:
-                                    t = ' '.join('pair [[{}][{}]] '.format(variant_analysis_dir, 'ab'[i])
+                                for delta, variant_analysis_dirs, sample_name in delta_infos:
+                                    t = ' '.join('[[{}][{}]] '.format(variant_analysis_dir, 'ab'[i])
                                                  for i, variant_analysis_dir in enumerate(variant_analysis_dirs))
-                                    _log.info('t=%s', t)
-                                    with org.headline(t):
-                                        pass
+                                    with org.headline(sample_name + ' ' + t):
+                                        _diff_analyses_org(analysis_dirs=variant_analysis_dirs, org=org)
 
         cmp_output_dir = benchmarks_spec['compare_output_dir']
         util.file.mkdir_p(cmp_output_dir)
@@ -2515,6 +2526,32 @@ def diff_analyses(analysis_dirs, key_prefixes=()):
             print('KEY: ', key)
             print('   ', _fmt(vals[0]))
             print('   ', _fmt(vals[1]))
+
+def _diff_analyses_org(analysis_dirs, org, key_prefixes=()):
+    """Generate an org view of differences between two analysis dirs."""
+    assert len(analysis_dirs)==2, 'currently can only compare two analyses'
+
+    flat_mdatas = [_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir,
+                                                                      git_links_abspaths=True),
+                                              key_prefixes=key_prefixes)
+                   for analysis_dir in analysis_dirs]
+    all_keys = sorted(set(itertools.chain.from_iterable(flat_mdatas)))
+
+    for key in all_keys:
+        if key.startswith('calls.'): continue
+        if key.startswith('labels.') and not (key.startswith('labels.docker_img') or key.startswith('labels.sample_name')): continue
+        if key in ('analysis_dir', 'end', 'id', 'start', 'submission', 'submittedFiles.inputs', 'submittedFiles.labels',
+                   'workflowRoot', 'runInputs'): continue
+        vals = [flat_mdatas[i].get(key, None) for i in (0, 1)]
+        if vals[0] != vals[1]:
+            def _fmt(s):
+                s = str(s)
+                if False and len(s) > 120:
+                    s = s[:120] + ' ...'
+                return s
+            with org.headline('{}'.format(key)):
+                org.text(_fmt(vals[0]))
+                org.text(_fmt(vals[1]))
 
 def parser_diff_analyses(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dirs', nargs=2, help='the two analysis dirs')
