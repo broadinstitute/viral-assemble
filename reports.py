@@ -244,7 +244,7 @@ def coverage_only(mapped_bams, out_report, cov_thresholds=(1, 5, 20, 100)):
 __commands__.append(('coverage_only', parser_coverage_only))
 
 
-def alignment_summary(inFastaFileOne, inFastaFileTwo, outfileName=None, printCounts=False):
+def alignment_summary(inFastaFileOne, inFastaFileTwo, outfileName=None, printCounts=False, saveAlignsTo=None):
     """ Write or print pairwise alignment summary information for sequences in two FASTA
         files, including SNPs, ambiguous bases, and indels.
     """
@@ -264,7 +264,7 @@ def alignment_summary(inFastaFileOne, inFastaFileTwo, outfileName=None, printCou
     results["ambig_both"]    = 0
     results["unambig_both"]  = 0
 
-    for chr_fasta in per_chr_fastas:
+    for chr_num, chr_fasta in enumerate(per_chr_fastas):
         same_unambig  = 0
         snp_unambig   = 0
         indel_unambig = 0
@@ -274,7 +274,10 @@ def alignment_summary(inFastaFileOne, inFastaFileTwo, outfileName=None, printCou
         ambig_both    = 0
         unambig_both  = 0
 
-        alignOutFileName = util.file.mkstempfname('.fasta')
+        if saveAlignsTo:
+            alignOutFileName = '{}.{}.html'.format(saveAlignsTo, chr_num)
+            aligner.execute(chr_fasta, alignOutFileName, fmt="html")
+        alignOutFileName = '{}.{}.fasta'.format(saveAlignsTo, chr_num) if saveAlignsTo else util.file.mkstempfname('.fasta')
         aligner.execute(chr_fasta, alignOutFileName, fmt="clw")
 
         with open(alignOutFileName, "r") as f:
@@ -354,6 +357,7 @@ def parser_alignment_summary(parser=argparse.ArgumentParser()):
     parser.add_argument('inFastaFileOne', help='First fasta file for an alignment')
     parser.add_argument('inFastaFileTwo', help='First fasta file for an alignment')
     parser.add_argument('--outfileName', help='Output file for counts in TSV format')
+    parser.add_argument('--saveAlignsTo', help='Save alignment here')
     parser.add_argument('--printCounts', help='', action='store_true')
     util.cmd.attach_main(parser, alignment_summary, split_args=True)
     return parser
