@@ -79,6 +79,9 @@ class SpadesTool(tools.Tool):
         util.file.make_empty(contigs_out)
         contigs_cumul_count = 0
 
+        if spades_mode == 'meta':
+            kmer_sizes = (0,)  # use defaults
+
         if ((reads_fwd and reads_bwd and os.path.getsize(reads_fwd) > 0 and os.path.getsize(reads_bwd) > 0) or
             (reads_unpaired and os.path.getsize(reads_unpaired) > 0)):
 
@@ -96,15 +99,23 @@ class SpadesTool(tools.Tool):
                         else:
                             args += [ '--s1', reads_unpaired ]
                             
-                    if contigs_trusted: args += [ '--trusted-contigs', contigs_trusted ]
-                    if contigs_untrusted: args += [ '--untrusted-contigs', contigs_untrusted ]
+                    if contigs_trusted: 
+                        if spades_mode == 'meta':
+                            log.warning('SPAdes: ignoring trusted contigs in metaSPAdes mode')
+                        else:
+                            args += [ '--trusted-contigs', contigs_trusted ]
+                    if contigs_untrusted: 
+                        if spades_mode == 'meta':
+                            log.warning('SPAdes: ignoring untrusted contigs in metaSPAdes mode')
+                        else:
+                            args += [ '--untrusted-contigs', contigs_untrusted ]
                     if kmer_size: args += [ '-k', kmer_size ]
                     if spades_opts: args += shlex.split(spades_opts)
                     args += [ '--' + spades_mode, '-m' + str(mem_limit_gb), '-t', str(threads), '-o', spades_dir ]
 
                     transcripts_fname = os.path.join(spades_dir,
-                                                     ('hard_filtered_' if filter_contigs else '') + 'transcripts.fasta') \
-                                        if spades_mode == 'rna' else 'contigs.fasta'
+                                                     (('hard_filtered_' if filter_contigs else '') + 'transcripts.fasta') \
+                                                     if spades_mode == 'rna' else 'contigs.fasta')
 
                     try:
                         self.execute(args=args)
@@ -117,7 +128,7 @@ class SpadesTool(tools.Tool):
 
                     # work around the bug that spades may succeed yet not create the transcripts.fasta file
                     if not os.path.isfile(transcripts_fname):
-                        msg = 'SPAdes failed to make transcripts.fasta for k={}'.format(kmer_size)
+                        msg = 'SPAdes failed to make {} for k={}'.format(transcripts_fname, kmer_size)
                         if always_succeed:
                             log.warning(msg)
                             util.file.make_empty(transcripts_fname)
