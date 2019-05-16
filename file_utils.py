@@ -65,10 +65,14 @@ __commands__.append(('merge_tarballs', parser_merge_tarballs))
 
 # * json_to_org
 
-def _json_to_org(val, org_file, depth=1, heading='root'):
+def _json_to_org(val, org_file, depth=1, heading='root', title=None, json_file=None):
     """Transform a parsed json structure to an Org mode outliner file (see https://orgmode.org/ ).
     """
     with open(org_file, 'w') as out:
+        if title:
+            out.write('#+TITLE: {}\n\n'.format(title))
+        if json_file:
+            out.write('json file: [[{}]]\n\n'.format(json_file))
         def _recurse(val, heading, depth):
             def _header(s): out.write('*'*depth + ' ' + str(s) + '\n')
             def _line(s): out.write(' '*depth + str(s) + '\n')
@@ -97,7 +101,7 @@ def json_to_org(json_fname, org_fname=None):
     """Transform a parsed json structure to an Org mode outliner file (see https://orgmode.org/ ).
     """
     org_fname = org_fname or util.file.replace_ext(json_fname, '.org')
-    _json_to_org(val=util.misc.json_loadf(json_fname), org_file=org_fname)
+    _json_to_org(val=util.misc.json_loadf(json_fname), org_file=org_fname, json_file=json_fname)
 
 def parser_json_to_org(parser=argparse.ArgumentParser()):
     parser.add_argument('json_fname', help='json file to import')
