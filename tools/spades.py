@@ -43,7 +43,8 @@ class SpadesTool(tools.Tool):
 
     def assemble(self, reads_fwd, reads_bwd, contigs_out, reads_unpaired=None, contigs_trusted=None,
                  contigs_untrusted=None, kmer_sizes=(55,65), always_succeed=False, max_kmer_sizes=1, 
-                 filter_contigs=False, min_contig_len=0, mem_limit_gb=8, threads=None, spades_opts=''):
+                 filter_contigs=False, min_contig_len=0, mem_limit_gb=8, threads=None, spades_opts='',
+                 spades_mode='rna'):
         '''Assemble contigs from RNA-seq reads and (optionally) pre-existing contigs.
 
         Inputs:
@@ -63,6 +64,7 @@ class SpadesTool(tools.Tool):
             mem_limit_gb: max memory to use, in gigabytes
             threads: number of threads to use
             spades_opts: additional options to pass to spades
+            spades_mode: whether to use rnaSPAdes (spades_mode=="rna") or metaSPAdes (spades_mode=="meta")
         Outputs:
             contigs_out: assembled contigs in fasta format.  Note that, since we use the
                 RNA-seq assembly mode, for some genome regions we may get several contigs
@@ -89,14 +91,20 @@ class SpadesTool(tools.Tool):
                     if reads_fwd and reads_bwd and os.path.getsize(reads_fwd) > 0 and os.path.getsize(reads_bwd) > 0:
                         args += ['-1', reads_fwd, '-2', reads_bwd ]
                     if reads_unpaired and os.path.getsize(reads_unpaired) > 0:
-                        args += [ '--s1', reads_unpaired ]
+                        if spades_mode == 'meta':
+                            log.warning('SPAdes: ignoring unpaired reads in metaSPAdes mode')
+                        else:
+                            args += [ '--s1', reads_unpaired ]
+                            
                     if contigs_trusted: args += [ '--trusted-contigs', contigs_trusted ]
                     if contigs_untrusted: args += [ '--untrusted-contigs', contigs_untrusted ]
                     if kmer_size: args += [ '-k', kmer_size ]
                     if spades_opts: args += shlex.split(spades_opts)
-                    args += [ '--rna', '-m' + str(mem_limit_gb), '-t', str(threads), '-o', spades_dir ]
+                    args += [ '--' + spades_mode, '-m' + str(mem_limit_gb), '-t', str(threads), '-o', spades_dir ]
 
-                    transcripts_fname = os.path.join(spades_dir, ('hard_filtered_' if filter_contigs else '') + 'transcripts.fasta')
+                    transcripts_fname = os.path.join(spades_dir,
+                                                     ('hard_filtered_' if filter_contigs else '') + 'transcripts.fasta') \
+                                        if spades_mode == 'rna' else 'contigs.fasta'
 
                     try:
                         self.execute(args=args)

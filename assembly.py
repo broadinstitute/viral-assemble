@@ -354,6 +354,7 @@ def assemble_spades(
     filter_contigs=False,
     min_contig_len=0,
     kmer_sizes=(55,65),
+    spades_mode='rna',
     n_reads=10000000,
     outReads=None,
     always_succeed=False,
@@ -378,7 +379,7 @@ def assemble_spades(
             tools.spades.SpadesTool().assemble(reads_fwd=reads_fwd, reads_bwd=reads_bwd, reads_unpaired=reads_unpaired,
                                                contigs_untrusted=contigs_untrusted, contigs_trusted=contigs_trusted,
                                                contigs_out=out_fasta, filter_contigs=filter_contigs,
-                                               min_contig_len=min_contig_len,
+                                               min_contig_len=min_contig_len, spades_mode=spades_mode,
                                                kmer_sizes=kmer_sizes, always_succeed=always_succeed, max_kmer_sizes=max_kmer_sizes,
                                                spades_opts=spades_opts, mem_limit_gb=mem_limit_gb,
                                                threads=threads)
@@ -403,6 +404,8 @@ def parser_assemble_spades(parser=argparse.ArgumentParser()):
     parser.add_argument('--outReads', default=None, help='Save the trimmomatic/prinseq/subsamp reads to a BAM file')
     parser.add_argument('--filterContigs', dest='filter_contigs', default=False, action='store_true', 
                         help='only output contigs SPAdes is sure of (drop lesser-quality contigs from output)')
+    parser.add_argument('--spadesMode', dest='spades_mode', choices=('rna', 'meta'), default='meta',
+                        help='which SPAdes mode to use (rnaSPAdes or metaSPAdes)')
     parser.add_argument('--alwaysSucceed', dest='always_succeed', default=False, action='store_true',
                         help='if assembly fails for any reason, output an empty contigs file, rather than failing with '
                         'an error code')

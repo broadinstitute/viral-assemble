@@ -5,6 +5,7 @@ task assemble {
     Int?    trinity_n_reads=250000
     Int?    spades_n_reads=10000000
     Int?    spades_min_contig_len=0
+    String? spades_mode="rna"
 
     String? assembler="trinity"  # trinity, spades, or trinity-spades
     Boolean? always_succeed=false
@@ -39,6 +40,7 @@ task assemble {
             ${'--nReads=' + spades_n_reads} \
 	    ${true="--alwaysSucceed" false="" always_succeed} \
             ${'--minContigLen=' + spades_min_contig_len} \
+            ${'--spadesMode=' + spades_mode} \
             --memLimitGb $mem_in_gb \
             --outReads=${sample_name}.subsamp.bam \
             --loglevel=DEBUG
@@ -61,6 +63,7 @@ task assemble {
             ${'--nReads=' + spades_n_reads} \
      	    ${true='--alwaysSucceed' false='' always_succeed} \
             ${'--minContigLen=' + spades_min_contig_len} \
+            ${'--spadesMode=' + spades_mode} \
             --memLimitGb $mem_in_gb \
             --loglevel=DEBUG
 
