@@ -123,6 +123,10 @@ import pytz
 import contextlib2
 
 import yattag
+import pandas as pd
+import matplotlib
+matplotlib.use('svg')
+import matplotlib.pyplot as pp
 
 # *** intra-module
 import util.cmd
@@ -1840,16 +1844,21 @@ def generate_benchmark_variant_comparisons(benchmarks_spec_file):
 
     muscle_tool = tools.muscle.MuscleTool()
 
+    cmp_output_dir = benchmarks_spec['compare_output_dir']
+    util.file.mkdir_p(cmp_output_dir)
+
     org = util.misc.Org()
     org.directive('TITLE', 'Benchmark comparisons')
     org.text('')
-    with org.headline('Comparisons'):
+    with org.headline('Comparisons: created {}'.format(datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))):
         for variants in variant_pairs:
-            with org.headline('{} vs {}'.format(variants[0], variants [1])):
+            with org.headline('={}= vs ={}='.format(variants[0], variants [1])):
                 for metric in benchmarks_spec['compare_metrics']:
-                    with org.headline('Metric: {}'.format(metric)):
+                    with org.headline('Metric: ={}='.format(metric)):
 
                         deltas = []
+                        no_change = 0
+                        total = 0
 
                         for benchmark_dir in benchmark_dirs:
                             variant_analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
@@ -1871,13 +1880,24 @@ def generate_benchmark_variant_comparisons(benchmarks_spec_file):
                                 util.misc.chk(mdatas[1]['status'] == 'Failed' or metric in mdatas[1]['outputs'],
                                               'no {} in {}'.format(metric, variant_analysis_dirs[1]))
                                 delta = mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0)
-                                if True or abs(delta) > 50:
+                                total += 1
+                                if delta == 0:
+                                    no_change += 1
+                                if abs(delta) > 10:
                                     deltas.append((delta, tuple(variant_analysis_dirs), sample_name))
                             else:
                                 _log.info('skipping %s: %s', benchmark_dir, mdatas_fnames)
+
+                        org.text('Total: {}.  No change: {}.'.format(total, no_change))
+                        org.text('')
+
+                        deltas_series = pd.Series(map(operator.itemgetter(0), deltas))
+                        deltas_series.hist(bins=20)
+                        fn = os.path.join(cmp_output_dir, 'fig{}.svg'.format(random.randint(0,10000)))
+                        pp.savefig(fn)
+                        org.text('[[file:{}]]'.format(os.path.basename(fn)))
                                 
-                        for delta_val, delta_infos in itertools.groupby(sorted(deltas),
-                                                                        key=operator.itemgetter(0)):
+                        for delta_val, delta_infos in (): # itertools.groupby(sorted(deltas), key=operator.itemgetter(0)):
                             delta_infos = list(delta_infos)
                             with org.headline('{} (x{})'.format(delta_val, len(delta_infos))):
                                 _log.info('delta_infos=%s', delta_infos)
@@ -1887,10 +1907,9 @@ def generate_benchmark_variant_comparisons(benchmarks_spec_file):
                                     with org.headline(sample_name + ' ' + t):
                                         _diff_analyses_org(analysis_dirs=variant_analysis_dirs, org=org)
 
-        cmp_output_dir = benchmarks_spec['compare_output_dir']
-        util.file.mkdir_p(cmp_output_dir)
         cmp_output_fname = os.path.join(cmp_output_dir, 'index.org')
         util.file.dump_file(cmp_output_fname, str(org))
+        _run('emacs -Q --batch --eval \'(progn (find-file "{}") (org-html-export-to-html))\''.format(cmp_output_fname))
 
 def parser_generate_benchmark_variant_comparisons(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
