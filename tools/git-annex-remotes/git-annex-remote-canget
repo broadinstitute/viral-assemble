@@ -1,0 +1,134 @@
+#!/usr/bin/env python
+
+# conda execute
+# env:
+#  - annexremote
+# channels:
+#  - conda-forge
+#  - nodefaults
+# run_with: python
+
+from __future__ import print_function
+import subprocess
+import time
+import json
+import sys
+import os
+import os.path
+
+from annexremote import Master
+from annexremote import SpecialRemote
+from annexremote import RemoteError
+from annexremote import UnsupportedRequest
+
+#Now create your special remote class. It must subtype ``SpecialRemote`` and implement at least the 6 basic methods:
+
+def _msg(*args):
+    print(*args, file=sys.stderr)
+
+
+
+class CanGetRemote(SpecialRemote):
+
+    def _run(self, cmd, **kw):
+        self._dbg('running command: ', cmd, 'cwd=', os.getcwd(), 'kw=', kw)
+        beg_time = time.time()
+        try:
+            subprocess.check_call(cmd, shell=True, stdout=subprocess.DEVNULL, **kw)
+            self._dbg('command {} succeeded in {}s: {}'.format(cmd, time.time()-beg_time, cmd))
+        except subprocess.CalledProcessError:
+            raise RemoteError('Error running canget cmd {}'.format(cmd))
+
+    def _run_get_output(self, cmd, **kw):
+        self._dbg('running command: ', cmd)
+        beg_time = time.time()
+        try:
+            output = subprocess.check_output(cmd, shell=True, **kw).decode('utf-8')
+            self._dbg('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
+            return output
+        except subprocess.CalledProcessError:
+            raise RemoteError('Error running canget cmd {}'.format(cmd))
+
+    def _run_get_json(self, cmd):
+        return json.loads(_run_get_output(cmd).strip())
+
+    def initremote(self):
+        # initialize the remote, eg. create the folders
+        # raise RemoteError if the remote couldn't be initialized
+        pass
+
+    def prepare(self):
+        # prepare to be used, eg. open TCP connection, authenticate with the server etc.
+        # raise RemoteError if not ready to use
+        self._dbg('IN PREPARE')
+        self.repo = self.annex.getconfig('repo')
+        if not os.path.isabs(self.repo):
+            self.repo = os.path.join(self.getgitdir(), self.repo)
+        if not os.path.isabs(self.repo):
+            raise RemoteError('Could not get absolute path for repo: {}'.format(self.repo))
+        if not os.path.isdir(self.repo):
+            raise RemoteError('Repo dir not found: {}'.format(self.repo))
+        self._dbg('PREPARED WITH {}'.format(self.repo))
+
+    def getavailability(self):
+        return 'local'
+
+    def transfer_store(self, key, filename):
+        # store the file in `filename` to a unique location derived from `key`
+        # raise RemoteError if the file couldn't be stored
+        raise RemoteError('Cannot yet store files')
+
+    def _dbg(self, *args):
+        pass
+        #self.annex.debug(' '.join(map(str, args)))
+
+    def transfer_retrieve(self, key, filename):
+        # get the file identified by `key` and store it to `filename`
+        # raise RemoteError if the file couldn't be retrieved
+
+        try:
+            self._dbg('IN RETRIEVE')
+            self._dbg('TRANSFER_RETRIEVE: {} {}'.format(key, filename))
+            self._run('git annex get --key={}'.format(key), cwd=self.repo)
+            self._dbg('BACK IN TRANSFER_RETRIEVE')
+            content_location = self._run_get_output('git annex contentlocation {}'.format(key), cwd=self.repo).strip()
+            self._dbg('GOT CONTENT LOC AS {}'.format(content_location))
+            self._dbg('CONSTRUCTING CP CMD:', self.repo, content_location, filename)
+            cp_cmd = 'ln {} {}'.format(os.path.join(self.repo, content_location), filename)
+            self._dbg('CP CMD IS {}'.format(cp_cmd))
+            self._run(cp_cmd)
+        except Exception as e:
+            msg = 'Exception in transfer_retrieve {} {} : {}'.format(key, filename, e)
+            self._dbg(msg)
+            raise RemoteError(msg)
+
+
+    def checkpresent(self, key):
+        # return True if the key is present in the remote
+        # return False if the key is not present
+        # raise RemoteError if the presence of the key couldn't be determined, eg. in case of connection error
+        self._dbg('CHECKING PRESENCE OF KEY ', key)
+        try:
+            retcode = subprocess.call('git annex checkpresentkey {}'.format(key), shell=True, cwd=self.repo)
+            self._dbg('FOUND PRESENCE OF KEY ', key)
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    def remove(self, key):
+        raise UnsupportedRequest('Not supporting remove yet')
+
+    def whereis(self, key):
+        raise UnsupportedRequest('Not supporting whereis yet')
+        
+# In your ``main`` function, link your remote to the master class and initialize the protocol:
+
+def main():
+    master = Master()
+    remote = CanGetRemote(master)
+    master.LinkRemote(remote)
+    master.Listen()
+
+if __name__ == "__main__":
+    main()
+
