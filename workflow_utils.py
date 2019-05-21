@@ -1822,6 +1822,71 @@ def parser_cmp_benchmark_variants(parser=argparse.ArgumentParser()):
 __commands__.append(('cmp_benchmark_variants', parser_cmp_benchmark_variants))
 
 # ** generate_benchmark_variant_comparisons
+
+def _gather_one_benchmark_variant_stats(benchmark_dir_and_benchmark_variant):
+    benchmark_dir, benchmark_variant = benchmark_dir_and_benchmark_variant
+    """Load stats for one variant of one benchmark, as a pandas.Series"""
+    result = []
+    analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant)
+    if os.path.isfile(os.path.join(analysis_dir, 'metadata_with_gitlinks.json')):
+        mdata = _load_analysis_metadata(analysis_dir, git_links_abspaths=True)
+        mdata_flat = _flatten_analysis_metadata(mdata)
+        for k, v in mdata_flat.items():
+            if k.startswith('inputs.') or k.startswith('outputs.') or k.startswith('labels.') or k.startswith('status'):
+                result.append((k, benchmark_variant, benchmark_dir, v))
+    return result
+
+def gather_benchmark_variant_stats(benchmarks_spec_file):
+    """Gather benchmark variant stats into one place.  For each benchmark variant, we produce a file containing
+    the stats for that variant across many benchmarks.
+    """
+
+    benchmarks_spec_file = os.path.abspath(benchmarks_spec_file)
+    benchmarks_spec_dir = os.path.dirname(benchmarks_spec_file)
+    benchmarks_spec = util.misc.load_config(benchmarks_spec_file)
+    _log.info('benchmarks_spec=%s', benchmarks_spec)
+    
+    #_run('git', 'annex', 'get', '--include=metadata_with_gitlinks.json', *benchmarks_spec['benchmark_dirs_roots'])
+    benchmark_dirs = sorted([os.path.relpath(d) for d in _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
+                             if os.path.isdir(os.path.join(d, 'benchmark_variants'))])
+    _log.info('benchmark_dirs=%s', benchmark_dirs)
+
+    processing_stats = collections.Counter()
+    benchmark_variants = tuple(benchmarks_spec['benchmark_variants'].keys())
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=util.misc.available_cpu_count()) as executor:
+        map_res = sorted(functools.reduce(operator.concat,
+                                          executor.map(_gather_one_benchmark_variant_stats,
+                                                       itertools.product(benchmark_dirs,
+                                                                         benchmark_variants)),
+                                         []))
+        r = collections.OrderedDict()
+        for k, benchmark_variant, benchmark_dir, v in map_res:
+            r.setdefault((k, benchmark_variant), collections.OrderedDict())[benchmark_dir] = v
+
+        df = pd.DataFrame(r)
+    # for benchmark_dir, 
+
+    # for benchmark_dir in benchmark_dirs:
+    #     for benchmark_variant in benchmark_variants:
+    #         analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant)
+    #         mdata = _load_analysis_metadata(analysis_dir, git_links_abspaths=True)
+    #         mdata_flat = _flatten_analysis_metadata(mdata)
+    #         for k, v in mdata_flat.items():
+    #             if k.startswith('inputs.') or k.startswith('outputs.') or k.startswith('labels.') or k.startswith('status'):
+    #                 idx2stat.setdefault((benchmark_variant, k), collections.OrderedDict())[benchmark_dir] = v
+    # df = pd.DataFrame(idx2stat)
+    df.to_pickle('cmp/df.pkl.gz')
+
+def parser_gather_benchmark_variant_stats(parser=argparse.ArgumentParser()):
+    parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
+    util.cmd.attach_main(parser, gather_benchmark_variant_stats, split_args=True)
+    return parser
+
+__commands__.append(('gather_benchmark_variant_stats', parser_gather_benchmark_variant_stats))
+
+
+
 def generate_benchmark_variant_comparisons(benchmarks_spec_file):
     """Generate/update reports of benchmark comparisons.
     """
@@ -2486,11 +2551,16 @@ def _load_analysis_metadata(analysis_dir, git_links_abspaths=False):
     """Read the analysis metadata from an analysis dir.  If `git_links_abspath` is True,
     paths in git links will be made absolute."""
     _log.info('loading analysis metadata from %s', analysis_dir)
-    md = _json_loadf(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'))
-    md['analysis_dir'] = analysis_dir
+    mdata = _json_loadf(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'))
+    mdata['analysis_dir'] = analysis_dir
     if git_links_abspaths:
-        md = _make_git_links_absolute(md, base_dir=os.path.abspath(analysis_dir))
-    return md
+        mdata = _make_git_links_absolute(mdata, base_dir=os.path.abspath(analysis_dir))
+    if not _qry_json(mdata, 'labels.sample_name'):
+        contigs_fasta = str(_qry_json(mdata, 'outputs."assemble_denovo.assemble.contigs_fasta"."$git_link"'))
+        if contigs_fasta.endswith('fasta'):
+            sample_name = os.path.basename(contigs_fasta).split('.')[0]
+            mdata.setdefault('labels', collections.OrderedDict())['sample_name'] = sample_name
+    return mdata
 
 def _flatten_analysis_metadata_list(val, pfx=''):
     """Convert analysis metadata to a flat list of key-value pairs"""
@@ -2513,9 +2583,9 @@ def _key_matches_prefixes(key, key_prefixes):
                                    for key_prefix in key_prefixes)
 
 def _flatten_analysis_metadata(mdata, key_prefixes=()):
-    _log.info('mdata=%s', len(mdata))
+    #_log.info('mdata=%s', len(mdata))
     flat_mdata = _ord_dict(*_flatten_analysis_metadata_list(mdata))
-    _log.info('flat_mdata=%s', len(flat_mdata))
+    #_log.info('flat_mdata=%s', len(flat_mdata))
     if 'status' in flat_mdata:
         flat_mdata['succeeded'] = int(flat_mdata['status'] == 'Succeeded')
     if key_prefixes:
