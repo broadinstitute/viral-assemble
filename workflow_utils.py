@@ -1983,6 +1983,91 @@ def parser_generate_benchmark_variant_comparisons(parser=argparse.ArgumentParser
 
 __commands__.append(('generate_benchmark_variant_comparisons', parser_generate_benchmark_variant_comparisons))
 
+def generate_benchmark_variant_comparisons_from_gathered_stats(benchmarks_spec_file):
+    """Generate/update reports of benchmark comparisons.
+    """
+
+    benchmarks_spec_file = os.path.abspath(benchmarks_spec_file)
+    benchmarks_spec_dir = os.path.dirname(benchmarks_spec_file)
+    benchmarks_spec = util.misc.load_config(benchmarks_spec_file)
+    _log.info('benchmarks_spec=%s', benchmarks_spec)
+    
+    benchmark_dirs = [d for d in _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
+                      if os.path.isdir(os.path.join(d, 'benchmark_variants'))]
+    _log.info('benchmark_dirs=%s', benchmark_dirs)
+
+    variant_pairs = [(variant_1, variant_2)
+                     for variant_1, variant_2s in benchmarks_spec.get('compare_variants', {}).items() for variant_2 in variant_2s]
+    _log.info('variant_paris=%s', variant_pairs)
+    processing_stats = collections.Counter()
+
+    muscle_tool = tools.muscle.MuscleTool()
+
+    cmp_output_dir = benchmarks_spec['compare_output_dir']
+    util.file.mkdir_p(cmp_output_dir)
+
+    benchmark_stats = pd.read_pickle('cmp/df.pkl.gz')
+
+    org = util.misc.Org()
+    org.directive('TITLE', 'Benchmark comparisons')
+    org.text('')
+    with org.headline('Comparisons: created {}'.format(datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))):
+        for variants in variant_pairs:
+            with org.headline('={}= vs ={}='.format(variants[0], variants [1])):
+                for metric in benchmarks_spec['compare_metrics']:
+                    with org.headline('Metric: ={}='.format(metric)):
+
+                        deltas = []
+                        no_change = 0
+                        total = 0
+
+                        for benchmark_dir in benchmark_dirs:
+                            variant_analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
+                                                     for benchmark_variant_name in variants]
+                            mdatas_fnames = [os.path.join(d, 'metadata_with_gitlinks.json') for d in variant_analysis_dirs]
+                            if all(map(os.path.lexists, mdatas_fnames)):
+                                _log.info('Both exist: %s', mdatas_fnames)
+                                delta = mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0)
+                                total += 1
+                                if delta == 0:
+                                    no_change += 1
+                                if abs(delta) > 10:
+                                    deltas.append((delta, tuple(variant_analysis_dirs), sample_name))
+                            else:
+                                _log.info('skipping %s: %s', benchmark_dir, mdatas_fnames)
+
+                        org.text('Total: {}.  No change: {}.'.format(total, no_change))
+                        org.text('')
+
+                        deltas_series = pd.Series(map(operator.itemgetter(0), deltas))
+                        deltas_series.hist(bins=20)
+                        fn = os.path.join(cmp_output_dir, 'fig{}.svg'.format(random.randint(0,10000)))
+                        pp.savefig(fn)
+                        org.text('[[file:{}]]'.format(os.path.basename(fn)))
+                                
+                        for delta_val, delta_infos in (): # itertools.groupby(sorted(deltas), key=operator.itemgetter(0)):
+                            delta_infos = list(delta_infos)
+                            with org.headline('{} (x{})'.format(delta_val, len(delta_infos))):
+                                _log.info('delta_infos=%s', delta_infos)
+                                for delta, variant_analysis_dirs, sample_name in delta_infos:
+                                    t = ' '.join('[[{}][{}]] '.format(variant_analysis_dir, 'ab'[i])
+                                                 for i, variant_analysis_dir in enumerate(variant_analysis_dirs))
+                                    with org.headline(sample_name + ' ' + t):
+                                        _diff_analyses_org(analysis_dirs=variant_analysis_dirs, org=org)
+
+        cmp_output_fname = os.path.join(cmp_output_dir, 'index.org')
+        util.file.dump_file(cmp_output_fname, str(org))
+        _run('emacs -Q --batch --eval \'(progn (find-file "{}") (org-html-export-to-html))\''.format(cmp_output_fname))
+
+def parser_generate_benchmark_variant_comparisons_from_gathered_stats(parser=argparse.ArgumentParser()):
+    parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
+    util.cmd.attach_main(parser, generate_benchmark_variant_comparisons_from_gathered_stats, split_args=True)
+    return parser
+
+__commands__.append(('generate_benchmark_variant_comparisons_from_gathered_stats',
+                     parser_generate_benchmark_variant_comparisons_from_gathered_stats))
+
+
 # ** print_analysis_stats
 def print_analysis_stats(analysis_dirs_roots, qry_expr):
     """Print analysis stats for given analyses"""
