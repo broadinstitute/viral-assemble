@@ -287,23 +287,28 @@ def _run(cmd, *args, **kw):
         _log.info('command (cwd={}, kw={}) {} in {}s: {}'.format(os.getcwd(), kw, 'SUCCEEDED' if succeeded else 'FAILED',
                                                                  time.time()-beg_time, cmd))
 
-def _run_succeeds(cmd, *args):
+def _run_succeeds(cmd, *args, **kw):
     try:
-        _run(cmd, *args)
+        _run(cmd, *args, **kw)
         return True
     except subprocess.CalledProcessError:
         return False
 
-def _run_get_output(cmd, *args):
+def _run_get_output(cmd, *args, **kw):
     cmd = _make_cmd(cmd, *args)
-    _log.info('running command: %s cwd=%s', cmd, os.getcwd())
+    _log.info('running command: %s cwd=%s kw={}', cmd, os.getcwd(), kw)
     beg_time = time.time()
-    output = subprocess.check_output(cmd, shell=True)
-    _log.info('command succeeded in {}s: {}'.format(time.time()-beg_time, cmd))
-    return output.strip()
+    succeeded = False
+    try:
+        output = subprocess.check_output(cmd, shell=True, **kw)
+        succeeded = True
+        return output.strip()
+    finally:
+        _log.info('command (cwd={}, kw={}) {} in {}s: {}'.format(os.getcwd(), kw, 'SUCCEEDED' if succeeded else 'FAILED',
+                                                                 time.time()-beg_time, cmd))
 
-def _run_get_json(cmd, *args):
-    return _json_loads(_run_get_output(cmd, *args))
+def _run_get_json(cmd, *args, **kw):
+    return _json_loads(_run_get_output(cmd, *args, **kw))
 
 # *** misc utils
 
@@ -427,7 +432,7 @@ def _git_annex_lookupkey(f):
             #md5_start = link_target_basename.index('--')+2
             #return link_target_basename[md5_start:md5_start+32]
 
-    return _run_get_output('git', 'annex', 'lookupkey', f)
+    return _run_get_output('git', 'annex', 'lookupkey', f, cwd=os.path.dirname(os.path.abspath(f)))
 
 def _git_link_md5(git_link):
     """Return the md5 of the file pointed to by git_link"""
@@ -450,8 +455,7 @@ def _git_annex_get(f):
     assert os.path.islink(f)
     f, link_target = _git_annex_get_link_into_annex(f)
     if not os.path.isfile(f):
-        with util.file.pushd_popd(os.path.dirname(os.path.abspath(f))):
-            _run('git', 'annex', 'get', os.path.basename(f))
+        _run('git', 'annex', 'get', os.path.basename(f), cwd=os.path.dirname(os.path.abspath(f)))
     assert os.path.isfile(f)
 
 def _git_annex_add(f):
@@ -464,8 +468,9 @@ def _git_annex_get_metadata(key, field):
 def _git_annex_set_metadata(key, field, val):
     _run('git', 'annex', 'metadata', '--key='+key, '-s', field + '=' + val)
 
-def _git_annex_checkpresentkey(key, remote=None):
-    return _run_succeeds('git annex checkpresentkey', key, remote) if remote else _run_succeeds('git annex checkpresentkey', key)
+def _git_annex_checkpresentkey(key, remote, git_file_path):
+    return _run_succeeds('git annex checkpresentkey', key, remote, cwd=os.path.dirname(os.path.abspath(git_file_path))) if remote else _run_succeeds('git annex checkpresentkey', key,
+                                                                                                cwd=os.path.dirname(os.path.abspath(git_file_path)))
 
 def _git_annex_get_url_key(url):
     """Return the git-annex key for a url"""
@@ -884,23 +889,22 @@ __commands__.append(('import_mult_dx_analyses', parser_import_mult_dx_analyses))
 #
 # ** _get_workflow_inputs_spec
 
-def _extract_wdl_from_docker_img(docker_img):
+def _extract_wdl_from_docker_img(docker_img, analysis_dir):
     """Extracts from docker image the workflow and task .wdl files into the current directory"""
-    _run('docker run --rm ' + docker_img + ' tar cf - source/pipes/WDL > wdl.tar')
-    _run('tar xvf wdl.tar')
-    _log.debug('cwd=%s', os.getcwd())
-    util.file.mkdir_p('tasks')
-    for f in glob.glob('source/pipes/WDL/workflows/*.wdl'):
-        _log.debug('copying %s to {}', f, os.getcwd())
-        shutil.copy(f, '.')
-    for f in glob.glob('source/pipes/WDL/workflows/tasks/*.wdl'):
-        _log.debug('copying %s to {}', f, os.getcwd())
-        shutil.copy(f, '.')
+    _run('docker run --rm ' + docker_img + ' tar cf - source/pipes/WDL > wdl.tar', cwd=analysis_dir)
+    _run('tar xvf wdl.tar', cwd=analysis_dir)
+    util.file.mkdir_p(os.path.join(analysis_dir, 'tasks'))
+    for f in glob.glob(os.path.join(analysis_dir, 'source/pipes/WDL/workflows/*.wdl')):
+        _log.debug('copying %s to {}', f, analysis_dir)
+        shutil.copy(f, analysis_dir)
+    for f in glob.glob(os.path.join(analysis_dir, 'source/pipes/WDL/workflows/tasks/*.wdl')):
+        _log.debug('copying %s to {}', f, analysis_dir)
+        shutil.copy(f, analysis_dir)
         #shutil.copy(f, './tasks/')
-    shutil.rmtree('source')
-    os.unlink('wdl.tar')
+    shutil.rmtree(os.path.join(analysis_dir, 'source'))
+    os.unlink(os.path.join(analysis_dir, 'wdl.tar'))
 
-def _get_workflow_inputs_spec(workflow_name, docker_img):
+def _get_workflow_inputs_spec(workflow_name, docker_img, analysis_dir):
     """Run womtool to get the inputs of the wdl workflow"""
 
     def _parse_input_spec(spec):
@@ -911,7 +915,7 @@ def _get_workflow_inputs_spec(workflow_name, docker_img):
             default = _json_loads(spec[spec.rindex(opt_str)+len(opt_str):-1])
         return dict(optional=optional, default=default, spec=spec)
 
-    input_spec_parsed = _run_get_json('womtool inputs ' + workflow_name + '.wdl')
+    input_spec_parsed = _run_get_json('womtool inputs ' + workflow_name + '.wdl', cwd=analysis_dir)
     _log.debug('input_spec_parsed=%s', input_spec_parsed.items())
     return _ord_dict(*[(input_name, _parse_input_spec(input_spec_str))
                        for input_name, input_spec_str in input_spec_parsed.items()])
@@ -1547,49 +1551,50 @@ def _prepare_analysis_crogit_do(inputs,
     inputs['_docker_img'] = docker_img_hash
 
     util.file.mkdir_p(analysis_dir)
-    with util.file.pushd_popd(analysis_dir):
-        _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
 
-        _extract_wdl_from_docker_img(docker_img_hash)
-        workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
-        _write_json('inputs-orig.json', **inputs)
-        run_inputs = _make_git_links_under_dir(inputs, analysis_dir, git_annex_tool, files_prefix='files/runInputs')
+    _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
 
-        input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
+    _extract_wdl_from_docker_img(docker_img_hash, analysis_dir)
+    workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash, analysis_dir=analysis_dir)
+    _write_json(os.path.join(analysis_dir, 'inputs-orig.json'), **inputs)
+    run_inputs = _make_git_links_under_dir(inputs, analysis_dir, git_annex_tool, files_prefix='files/runInputs')
 
-        run_inputs = _dict_subset(run_inputs, set(workflow_inputs_spec.keys()) | set(k for k in run_inputs if k.startswith('_')))
-        _write_json('input-spec.json', **workflow_inputs_spec)
-        _write_json('inputs-git-links.json', **run_inputs)
+    input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
 
-        # TODO: option to update just some of the tasks.
-        # actually, when compiling WDL, should have this option -- or, actually,
-        # should make a new workflow where older apps are reused for stages that have not changed.
-        docker_img_no_hash = tools.docker.DockerTool().strip_image_hash(docker_img_hash)
-        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_no_hash))
-        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('viral-ngs_version_unknown',
-                                                  docker_img_no_hash.split(':')[1]))
+    run_inputs = _dict_subset(run_inputs, set(workflow_inputs_spec.keys()) | set(k for k in run_inputs if k.startswith('_')))
+    _write_json(os.path.join(analysis_dir, 'input-spec.json'), **workflow_inputs_spec)
+    _write_json(os.path.join(analysis_dir, 'inputs-git-links.json'), **run_inputs)
 
-        analysis_labels = dict(
-            input_sources,
-            docker_img=docker_img,
-            docker_img_hash=docker_img_hash,
-            analysis_id=analysis_id,
-            analysis_dir=analysis_dir,
-            submitter=getpass.getuser())
-        analysis_labels.update(dict(analysis_labels or {}))
-        _write_json('analysis_labels.json',
-                    **_normalize_cromwell_labels(analysis_labels))
+    # TODO: option to update just some of the tasks.
+    # actually, when compiling WDL, should have this option -- or, actually,
+    # should make a new workflow where older apps are reused for stages that have not changed.
+    docker_img_no_hash = tools.docker.DockerTool().strip_image_hash(docker_img_hash)
+    _run('sed -i -- "s|{}|{}|g" {}/*.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_no_hash, analysis_dir))
+    _run('sed -i -- "s|{}|{}|g" {}/*.wdl'.format('viral-ngs_version_unknown',
+                                                 docker_img_no_hash.split(':')[1], analysis_dir))
 
-        # add cromwell labels: dx project, the docker tag we ran on, etc.
+    analysis_labels = dict(
+        input_sources,
+        docker_img=docker_img,
+        docker_img_hash=docker_img_hash,
+        analysis_id=analysis_id,
+        analysis_dir=analysis_dir,
+        submitter=getpass.getuser())
+    analysis_labels.update(dict(analysis_labels or {}))
+    _write_json(os.path.join(analysis_dir, 'analysis_labels.json'),
+                **_normalize_cromwell_labels(analysis_labels))
 
-        _log.info('Validating workflow')
-        run_inputs_staged_local = _stage_inputs_for_backend(run_inputs, backend='Local', skip_get=True)
-        _write_json('inputs-local.json', **{k:v for k, v in run_inputs_staged_local.items() if not k.startswith('_')})
-        _run('womtool', 'validate',  '-i',  'inputs-local.json', workflow_name + '.wdl')
-        _run('zip imports.zip *.wdl')
-        for wdl_f in os.listdir('.'):
-            if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and wdl_f != workflow_name+'.wdl':
-                os.unlink(wdl_f)
+    # add cromwell labels: dx project, the docker tag we ran on, etc.
+
+    _log.info('Validating workflow')
+    run_inputs_staged_local = _stage_inputs_for_backend(run_inputs, backend='Local', skip_get=True)
+    _write_json(os.path.join('inputs-local.json', analysis_dir),
+                **{k:v for k, v in run_inputs_staged_local.items() if not k.startswith('_')})
+    _run('womtool', 'validate',  '-i',  'inputs-local.json', workflow_name + '.wdl', cwd=analysis_dir)
+    _run('zip imports.zip *.wdl', cwd=analysis_dir)
+    for wdl_f in os.listdir(analysis_dir):
+        if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and wdl_f != workflow_name+'.wdl':
+            os.unlink(os.path.join(analysis_dir, wdl_f))
 
 def _get_full_inputs(workflow_name, inputs):
     """Given a parsed specification of a set of analysis inputs, construct a list of the full inputs to each analysis."""
@@ -1721,7 +1726,7 @@ def _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark
                            jmespath_expr=benchmark_variant_def)
     _prepare_analysis_crogit_do(inputs=run_inputs, analysis_dir=analysis_dir, analysis_labels={}, git_annex_tool=git_annex_tool)
 
-def generate_benchmark_variant_dirs(benchmarks_spec_file):
+def generate_benchmark_variant_dirs(benchmarks_spec_file, one_benchmark_dir=None, one_benchmark_variant=None):
     """The code below takes a benchmark spec file, which specifies benchmarks (as analysis dirs) and variants,
     and generates, under each benchmark dir and for each variant, an analysis spec obtained by
     overriding the benchmark settings with the variant.
@@ -1741,15 +1746,101 @@ def generate_benchmark_variant_dirs(benchmarks_spec_file):
     git_annex_tool = tools.git_annex.GitAnnexTool()
     with git_annex_tool.batching() as git_annex_tool:
         for benchmark_dir in benchmark_dirs:
+            if one_benchmark_dir and one_benchmark_dir != benchmark_dir: continue
             for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
+                if one_benchmark_variant and benchmark_variant_name != one_benchmark_variant: continue
                 _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def, git_annex_tool)
 
 def parser_generate_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
+    parser.add_argument('--oneBenchmarkDir', dest='one_benchmark_dir', help='process only this benchmark dir')
+    parser.add_argument('--oneBenchmarkVariant', dest='one_benchmark_variant', help='process only this benchmark variant')
     util.cmd.attach_main(parser, generate_benchmark_variant_dirs, split_args=True)
     return parser
 
 __commands__.append(('generate_benchmark_variant_dirs', parser_generate_benchmark_variant_dirs))
+
+def _generate_one_benchmark_variant_and_commit(benchmarks_spec_file, one_benchmark_dir, one_benchmark_variant,
+                                               script, temp_worktree_dir):
+    #util.file.mkdir_p(os.path.join(temp_worktree_dir, 'tmp'))
+    log_fname = os.path.join(temp_worktree_dir, benchmark_dir,
+                             'gen_benchmark_variant.log')
+    util.file.mkdir_p(os.path.dirname(log_fname))
+    try:
+        with open(log_fname + '.out.txt', 'wt') as _out_stdout, open(log_fname + '.err.txt', 'wt') as _out_stderr:
+            _run(script, 'generate_benchmark_variant_dirs', benchmarks_spec_file, '--oneBenchmarkDir', one_benchmark_dir,
+                 '--oneBenchmarkVariant', one_benchmark_variant, cwd=temp_worktree_dir, stdout=_out_stdout, stderr=_out_stderr)
+    finally:
+        _run('git', 'annex', 'add', '.', cwd=temp_worktree_dir)
+        _run('git', 'commit', '-m', 'generated benchmark variant {} {}'.format(one_benchmark_dir, one_benchmark_variant),
+             cwd=temp_worktree_dir)
+
+def _set_up_worktree_mult(one_benchmark_dir_and_one_benchmark_variant, exit_stack, git_annex_tool, worktree_group_id):
+    return one_benchmark_dir_and_one_benchmark_variant + \
+        exit_stack.enter_context(git_annex_tool._in_tmp_worktree(worktree_group_id=worktree_group_id,
+                                                                 chdir=False))
+
+def generate_mult_benchmark_variant_dirs(benchmarks_spec_file):
+    """Generate multiple benchmark variant dirs from spec file."""
+
+    benchmarks_spec_file = os.path.abspath(benchmarks_spec_file)
+    benchmarks_spec_dir = os.path.dirname(benchmarks_spec_file)
+    benchmarks_spec = util.misc.load_config(benchmarks_spec_file)
+    _log.info('benchmarks_spec=%s', benchmarks_spec)
+
+    benchmark_dirs = _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
+    _log.info('benchmark_dirs=%s', benchmark_dirs)
+
+    tasks = []
+    git_annex_tool = tools.git_annex.GitAnnexTool()
+    with git_annex_tool.batching() as git_annex_tool:
+        for benchmark_dir in benchmark_dirs:
+            for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
+                tasks.append((benchmark_dir, benchmark_variant_name))
+
+    git_annex_tool = tools.git_annex.GitAnnexTool()
+    with contextlib2.ExitStack() as exit_stack:
+        executor = exit_stack.enter_context(concurrent.futures.ThreadPoolExecutor(max_workers=util.misc.available_cpu_count()))
+        worktree_group_id = 'genvars_{:06d}'.format(random.randint(0,999999))
+        temps = list(executor.map(functools.partial(_set_up_worktree_mult, exit_stack=exit_stack, git_annex_tool=git_annex_tool,
+                                                    worktree_group_id=worktree_group_id+'/gen'), tasks))
+        script = os.path.join(util.version.get_project_path(), os.path.basename(__file__))
+        util.misc.chk(os.path.isabs(script) and os.path.samefile(script, __file__))
+        futures = [executor.submit(_generate_one_benchmark_variant_and_comit,
+                                   benchmarks_spec_file=benchmarks_spec_file, one_benchmark_dir=benchmark_dir,
+                                   one_benchmark_variant=benchmark_variant,
+                                   script=script, temp_worktree_dir=temp_worktree_dir)
+                   for benchmark_dir, benchmark_variant_name, temp_branch, temp_worktree_dir in temps]
+        wait_res = concurrent.futures.wait(futures)
+        done_fail_branches = {'done': [], 'fail': []}
+        for future, (benchmark_dir, benchmark_variant_name, temp_branch, temp_worktree_dir) in zip(futures, temps):
+            if future in wait_res.done:
+                try:
+                    res = future.result()
+                    done_fail_branches['done'].append(temp_branch)
+                    _log.info('DONE generated: %s %s %s', benchmark_dir+'/'+benchmark_variant_name, temp_branch, temp_worktree_dir)
+                except Exception as e:
+                    _log.warning('Got exception when importing %s: %s; branch=%s, worktree=%s',
+                                 benchmark_dir+'/'+benchmark_variant_name, _format_exc(e), temp_branch, temp_worktree_dir)
+                    done_fail_branches['fail'].append(temp_branch)
+
+        for which in 'done', 'fail':
+            with git_annex_tool._in_tmp_worktree(worktree_group_id=worktree_group_id+'/'+which, keep=True) as\
+                 (summary_branch, summary_worktree):
+                _log.info('SUMMARY: %d branches %s', len(done_fail_branches[which]), which)
+                if done_fail_branches[which]:
+                    git_annex_tool.execute_git(['merge',
+                                                '-m', '"saving {} {} branches"'.format(len(done_fail_branches[which]),
+                                                                                       which)] + done_fail_branches[which])
+
+def parser_generate_mult_benchmark_variant_dirs(parser=argparse.ArgumentParser(fromfile_prefix_chars='@')):
+    parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
+    util.cmd.attach_main(parser, generate_mult_benchmark_variant_dirs, split_args=True)
+    return parser
+
+__commands__.append(('generate_mult_benchmark_variant_dirs', parser_generate_mult_benchmark_variant_dirs))
+
 
 # *** submit_benchmark_variant_dirs
 
@@ -2534,12 +2625,28 @@ __commands__.append(('import_from_url', parser_import_from_url))
 
 ########################################################################################################################
 
+def _gs_stat(gs_url):
+    assert gs_url.startswith('gs://')
+    try:
+        stat_output = _run_get_output('gsutil', 'stat', gs_url)
+        result = {}
+        for line in stat_output.split('\n')[1:]:
+            result[line[:25].strip()] = line[25:].strip()
+
+        if 'Hash (md5):' in result:
+            result['md5'] = binascii.hexlify(result['Hash (md5):'].decode('base64'))
+
+        return result
+
+    except subprocess.CalledProcessError:
+        return {}
+
 def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TODO make gs prefix configurable
     """Ensure the given file exists in gs."""
 
     if gs_prefix.endswith('/'):
         gs_prefix = gs_prefix[:-1]
-    whereis = _run_get_json('git annex whereis --json ' + git_file_path)
+    whereis = _run_get_json('git annex whereis --json ' + git_file_path, cwd=os.path.dirname(os.path.abspath(git_file_path)))
     locs = []
     assert whereis['success']
     urls = [url for w in whereis['whereis'] for url in w.get('urls', ()) if url.startswith(gs_prefix) and _gs_stat(url)]
@@ -2568,23 +2675,23 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
 
         if urls:
             _run('gsutil cp', urls[0], gs_url)
-            _run('git annex registerurl', key, gs_url)
+            _run('git annex registerurl', key, gs_url, cwd=os.path.dirname(os.path.abspath(git_file_path)))
         elif size_from_key is not None and (size_from_key is None or size_from_key > 1000) and _running_on_aws() and dx_urls:
             # TODO fix dx egress hack
             # avoid AWS egress charges by copying directly from dnanexus
             dx_tmp_url =  _dx_make_download_url(_url_to_dxid(dx_urls[0]))
             gs_url = tools.google.GCloudTool().transfer_to_gcs(dx_tmp_url, size_from_key, md5_base64_from_key)
-            _run('git annex setpresentkey', key, gs_remote_uuid, 1)
-            _run('git annex registerurl', key, gs_url)
+            _run('git annex setpresentkey', key, gs_remote_uuid, 1, cwd=os.path.dirname(os.path.abspath(git_file_path)))
+            _run('git annex registerurl', key, gs_url, cwd=os.path.dirname(os.path.abspath(git_file_path)))
         else:
             _git_annex_get(git_file_path)
-            _run('gsutil cp', git_file_path, gs_url)
-            _run('git annex setpresentkey', key, gs_remote_uuid, 1)
-            _run('git annex registerurl', key, gs_url)
+            _run('gsutil cp', git_file_path, gs_url, cwd=os.path.dirname(os.path.abspath(git_file_path)))
+            _run('git annex setpresentkey', key, gs_remote_uuid, 1, cwd=os.path.dirname(os.path.abspath(git_file_path)))
+            _run('git annex registerurl', key, gs_url, cwd=os.path.dirname(os.path.abspath(git_file_path)))
 
         urls_with_right_fname.append(gs_url)
     assert _gs_stat(urls_with_right_fname[0])
-    assert _git_annex_checkpresentkey(key, gs_remote_uuid)
+    assert _git_annex_checkpresentkey(key, remote=gs_remote_uuid, git_file_path=git_file_path)
     return urls_with_right_fname[0]
 
 def _stage_file_for_backend(git_file_path, backend, skip_get=False):
