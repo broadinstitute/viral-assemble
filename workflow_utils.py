@@ -1992,10 +1992,6 @@ def generate_benchmark_variant_comparisons_from_gathered_stats(benchmarks_spec_f
     benchmarks_spec = util.misc.load_config(benchmarks_spec_file)
     _log.info('benchmarks_spec=%s', benchmarks_spec)
     
-    benchmark_dirs = [d for d in _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
-                      if os.path.isdir(os.path.join(d, 'benchmark_variants'))]
-    _log.info('benchmark_dirs=%s', benchmark_dirs)
-
     variant_pairs = [(variant_1, variant_2)
                      for variant_1, variant_2s in benchmarks_spec.get('compare_variants', {}).items() for variant_2 in variant_2s]
     _log.info('variant_paris=%s', variant_pairs)
@@ -2017,29 +2013,16 @@ def generate_benchmark_variant_comparisons_from_gathered_stats(benchmarks_spec_f
                 for metric in benchmarks_spec['compare_metrics']:
                     with org.headline('Metric: ={}='.format(metric)):
 
-                        deltas = []
                         no_change = 0
                         total = 0
 
-                        for benchmark_dir in benchmark_dirs:
-                            variant_analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
-                                                     for benchmark_variant_name in variants]
-                            mdatas_fnames = [os.path.join(d, 'metadata_with_gitlinks.json') for d in variant_analysis_dirs]
-                            if all(map(os.path.lexists, mdatas_fnames)):
-                                _log.info('Both exist: %s', mdatas_fnames)
-                                delta = mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0)
-                                total += 1
-                                if delta == 0:
-                                    no_change += 1
-                                if abs(delta) > 10:
-                                    deltas.append((delta, tuple(variant_analysis_dirs), sample_name))
-                            else:
-                                _log.info('skipping %s: %s', benchmark_dir, mdatas_fnames)
+                        deltas = benchmark_stats[metric][variants[0]] - benchmark_stats[metric][variants[1]]
+                        _log.info('deltas=%s', deltas)
 
                         org.text('Total: {}.  No change: {}.'.format(total, no_change))
                         org.text('')
 
-                        deltas_series = pd.Series(map(operator.itemgetter(0), deltas))
+                        deltas_series = deltas.dropna()
                         deltas_series.hist(bins=20)
                         fn = os.path.join(cmp_output_dir, 'fig{}.svg'.format(random.randint(0,10000)))
                         pp.savefig(fn)
