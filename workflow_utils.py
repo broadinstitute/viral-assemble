@@ -586,10 +586,13 @@ def _get_wdl_for_docker_img(docker_img_hash, workflow_name, out_):
     patch the WDL tasks to use that image, prepare the WDL file for the main workflow and a zip file for the
     dependencies, and determine the input spec for the workflow.
     """
-    with util.file.tmp_dir(suffix='_wdl') as t_dir:
+    wdl_version_dir = os.path.join('workflow_versions', util.file.string_to_file_name(docker_img_hash), workflow_name)
+    if not os.path.isdir(wdl_version_dir):
+        util.file.mkdir_p(wdl_version_dir)
+
         docker_tool = tools.docker.DockerTool()
-        _extract_wdl_from_docker_img(docker_img_hash)
-        
+        _extract_wdl_from_docker_img(docker_img_hash, wdl_version_dir)
+
         _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs',
                                                   docker_tool.strip_image_hash(docker_img_hash)))
         _run('zip imports.zip *.wdl')
@@ -887,6 +890,9 @@ __commands__.append(('import_mult_dx_analyses', parser_import_mult_dx_analyses))
 #
 # Code that deals specifying sets of analyses to run, and submitting them to Cromwell.
 #
+
+
+
 # ** _get_workflow_inputs_spec
 
 def _extract_wdl_from_docker_img(docker_img, analysis_dir):
@@ -1524,7 +1530,7 @@ def _prepare_analysis_crogit_do(inputs,
                                 analysis_dir,
                                 analysis_labels,
                                 git_annex_tool):
-    """Submit a WDL analysis to a Cromwell server.
+    """Prepare a WDL analysis for submission.
 
     Inputs to the analysis.
     The analysis can be executed on either a local or a cloud Cromwell backend.  This routine will, if needed,
@@ -1532,11 +1538,9 @@ def _prepare_analysis_crogit_do(inputs,
 
     Args:
         inputs: inputs to the workflow; special inputs specify docker image and workflow name.
-        analysis_dir_pfx: prefix for the analysis dir
+        analysis_dir: where the prepared analysis goes
         analysis_labels: json file specifying any analysis labels
 
-    TODO:
-        - option to ignore input workflow name, use only stage name
     """
     inputs = copy.copy(inputs)
     workflow_name = inputs['_workflow_name']
@@ -1594,7 +1598,7 @@ def _prepare_analysis_crogit_do(inputs,
     _run('zip imports.zip *.wdl', cwd=analysis_dir)
     for wdl_f in os.listdir(analysis_dir):
         wdl_f = os.path.join(analysis_dir, wdl_f)
-        if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and wdl_f != workflow_name+'.wdl':
+        if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and os.path.basename(wdl_f) != workflow_name+'.wdl':
             os.unlink(wdl_f)
 
 def _get_full_inputs(workflow_name, inputs):
