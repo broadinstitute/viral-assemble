@@ -664,6 +664,7 @@ def string_to_file_name(string_value, file_system_path=None, length_margin=0):
         r"<": "_", # no redirect chars
         r"(": "__", # special character
         r")": "__", # special character
+        r"@": "_", # special character
         r"\\x": "_", # hex char
         r"\\o": "_", # octal char
         #r"\\u": "", # unicode char
