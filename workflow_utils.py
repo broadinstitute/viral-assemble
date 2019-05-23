@@ -296,7 +296,7 @@ def _run_succeeds(cmd, *args, **kw):
 
 def _run_get_output(cmd, *args, **kw):
     cmd = _make_cmd(cmd, *args)
-    _log.info('running command: %s cwd=%s kw={}', cmd, os.getcwd(), kw)
+    _log.info('running command: %s cwd=%s kw=%s', cmd, os.getcwd(), kw)
     beg_time = time.time()
     succeeded = False
     try:
@@ -1588,13 +1588,14 @@ def _prepare_analysis_crogit_do(inputs,
 
     _log.info('Validating workflow')
     run_inputs_staged_local = _stage_inputs_for_backend(run_inputs, backend='Local', skip_get=True)
-    _write_json(os.path.join('inputs-local.json', analysis_dir),
+    _write_json(os.path.join(analysis_dir, 'inputs-local.json'),
                 **{k:v for k, v in run_inputs_staged_local.items() if not k.startswith('_')})
     _run('womtool', 'validate',  '-i',  'inputs-local.json', workflow_name + '.wdl', cwd=analysis_dir)
     _run('zip imports.zip *.wdl', cwd=analysis_dir)
     for wdl_f in os.listdir(analysis_dir):
+        wdl_f = os.path.join(analysis_dir, wdl_f)
         if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and wdl_f != workflow_name+'.wdl':
-            os.unlink(os.path.join(analysis_dir, wdl_f))
+            os.unlink(wdl_f)
 
 def _get_full_inputs(workflow_name, inputs):
     """Given a parsed specification of a set of analysis inputs, construct a list of the full inputs to each analysis."""
@@ -1677,7 +1678,12 @@ def _create_analysis_id(workflow_name, prefix):
 
 def _get_docker_hash(docker_img):
     """Return a docker hash, given a docker tag."""
-    _run('docker pull ' + docker_img)
+    try:
+        _run('docker pull ' + docker_img)
+    except Exception:
+        _log.info('Retrying docker pull of %s', docker_img)
+        _run('docker pull ' + docker_img)
+        
     if docker_img.startswith('sha256:'):
         return docker_img
     digest_lines = _run_get_output('docker', 'images', '--digests', '--no-trunc', '--format',
@@ -1711,7 +1717,7 @@ def _is_prepared_analysis_dir(analysis_dir):
 
 # *** generate_benchmark_variant_dirs
 
-def _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def, git_annex_tool):
+def _generate_benchmark_variant(benchmarks_spec_dir, benchmark_dir, benchmark_variant_name, benchmark_variant_def, git_annex_tool):
     """Generate a run-ready analysis dir for the given benchmark and benchmark variant."""
 
     analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
@@ -1719,9 +1725,9 @@ def _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark
         _log.info('Benchmark variant already generated, skipping: %s', analysis_dir)
         return
     util.file.mkdir_p(analysis_dir)
-    run_inputs = _json_loadf(os.path.join(benchmark_dir, 'inputs-git-links.json'))
-    metadata = _json_loadf(os.path.join(benchmark_dir, 'metadata_with_gitlinks.json')) \
-        if os.path.isfile(os.path.join(benchmark_dir, 'metadata_with_gitlinks.json')) else {}
+    run_inputs = _json_loadf(os.path.join(benchmarks_spec_dir, benchmark_dir, 'inputs-git-links.json'))
+    metadata = _json_loadf(os.path.join(benchmarks_spec_dir, benchmark_dir, 'metadata_with_gitlinks.json')) \
+        if os.path.isfile(os.path.join(benchmarks_spec_dir, benchmark_dir, 'metadata_with_gitlinks.json')) else {}
     run_inputs = _qry_json(json_data=dict(run_inputs=run_inputs, metadata=metadata),
                            jmespath_expr=benchmark_variant_def)
     _prepare_analysis_crogit_do(inputs=run_inputs, analysis_dir=analysis_dir, analysis_labels={}, git_annex_tool=git_annex_tool)
@@ -1740,16 +1746,18 @@ def generate_benchmark_variant_dirs(benchmarks_spec_file, one_benchmark_dir=None
     benchmarks_spec = util.misc.load_config(benchmarks_spec_file)
     _log.info('benchmarks_spec=%s', benchmarks_spec)
 
-    benchmark_dirs = _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])
+    benchmark_dirs = [one_benchmark_dir] if one_benchmark_dir else \
+        list(map(functools.partial(os.path.relpath, start=benchmarks_spec_dir),
+                 _get_analysis_dirs_under(benchmarks_spec['benchmark_dirs_roots'])))
     _log.info('benchmark_dirs=%s', benchmark_dirs)
 
     git_annex_tool = tools.git_annex.GitAnnexTool()
     with git_annex_tool.batching() as git_annex_tool:
         for benchmark_dir in benchmark_dirs:
-            if one_benchmark_dir and one_benchmark_dir != benchmark_dir: continue
             for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
                 if one_benchmark_variant and benchmark_variant_name != one_benchmark_variant: continue
-                _generate_benchmark_variant(benchmark_dir, benchmark_variant_name, benchmark_variant_def, git_annex_tool)
+                _generate_benchmark_variant(benchmarks_spec_dir, benchmark_dir, benchmark_variant_name,
+                                            benchmark_variant_def, git_annex_tool)
 
 def parser_generate_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
@@ -1763,7 +1771,9 @@ __commands__.append(('generate_benchmark_variant_dirs', parser_generate_benchmar
 def _generate_one_benchmark_variant_and_commit(benchmarks_spec_file, one_benchmark_dir, one_benchmark_variant,
                                                script, temp_worktree_dir):
     #util.file.mkdir_p(os.path.join(temp_worktree_dir, 'tmp'))
-    log_fname = os.path.join(temp_worktree_dir, benchmark_dir,
+    _log.info('GEN_ONE: temp_worktree_dir=%s one_benchmark_dir=%s one_benchmark_variant=%s',
+              temp_worktree_dir, one_benchmark_dir, one_benchmark_variant)
+    log_fname = os.path.join(temp_worktree_dir, one_benchmark_dir, 'benchmark_variants', one_benchmark_variant,
                              'gen_benchmark_variant.log')
     util.file.mkdir_p(os.path.dirname(log_fname))
     try:
@@ -1795,22 +1805,32 @@ def generate_mult_benchmark_variant_dirs(benchmarks_spec_file):
     git_annex_tool = tools.git_annex.GitAnnexTool()
     with git_annex_tool.batching() as git_annex_tool:
         for benchmark_dir in benchmark_dirs:
+            benchmark_dir = os.path.relpath(benchmark_dir)
             for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
+                analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
+                if _is_prepared_analysis_dir(analysis_dir):
+                    _log.info('Benchmark variant already generated, skipping: %s', analysis_dir)
+                    continue
                 tasks.append((benchmark_dir, benchmark_variant_name))
+    _log.info('TASKS: %d', len(tasks))
+    if not tasks:
+        return
+    _log.info('Submitting %d tasks', len(tasks))
 
     git_annex_tool = tools.git_annex.GitAnnexTool()
     with contextlib2.ExitStack() as exit_stack:
-        executor = exit_stack.enter_context(concurrent.futures.ThreadPoolExecutor(max_workers=util.misc.available_cpu_count()))
+        executor = exit_stack.enter_context(concurrent.futures.ThreadPoolExecutor(max_workers=min(len(tasks),
+                                                                                                  util.misc.available_cpu_count())))
         worktree_group_id = 'genvars_{:06d}'.format(random.randint(0,999999))
         temps = list(executor.map(functools.partial(_set_up_worktree_mult, exit_stack=exit_stack, git_annex_tool=git_annex_tool,
                                                     worktree_group_id=worktree_group_id+'/gen'), tasks))
         script = os.path.join(util.version.get_project_path(), os.path.basename(__file__))
         util.misc.chk(os.path.isabs(script) and os.path.samefile(script, __file__))
-        futures = [executor.submit(_generate_one_benchmark_variant_and_comit,
+        futures = [executor.submit(_generate_one_benchmark_variant_and_commit,
                                    benchmarks_spec_file=benchmarks_spec_file, one_benchmark_dir=benchmark_dir,
                                    one_benchmark_variant=benchmark_variant,
                                    script=script, temp_worktree_dir=temp_worktree_dir)
-                   for benchmark_dir, benchmark_variant_name, temp_branch, temp_worktree_dir in temps]
+                   for benchmark_dir, benchmark_variant, temp_branch, temp_worktree_dir in temps]
         wait_res = concurrent.futures.wait(futures)
         done_fail_branches = {'done': [], 'fail': []}
         for future, (benchmark_dir, benchmark_variant_name, temp_branch, temp_worktree_dir) in zip(futures, temps):
