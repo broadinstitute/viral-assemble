@@ -319,7 +319,9 @@ def _is_under_dir(path, base_dir):
     return path_parts[:len(base_parts)] == base_parts
 
 def _md5_base64(s):
-    return hashlib.md5(s).digest().encode('base64').strip()
+    #_log.info('LOOKING AT {} {}'.format(type(s), s))
+    return binascii.b2a_base64(hashlib.md5(s.encode()).digest()).decode().strip()
+    #return hashlib.md5(s).digest().encode('base64').strip()
 
 def _is_valid_md5(s):
     return _is_str(s) and len(s) == 32 and set(s) <= set('0123456789ABCDEF')
@@ -1367,6 +1369,7 @@ def _submit_prepared_analysis(analysis_dir,
 
 def parser_submit_prepared_analysis(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dir')
+    parser.add_argument('--backend', default='Local', help='Cromwell analysis backend')
     util.cmd.attach_main(parser, _submit_prepared_analysis, split_args=True)
     return parser
 
@@ -1868,7 +1871,7 @@ __commands__.append(('generate_mult_benchmark_variant_dirs', parser_generate_mul
 
 # *** submit_benchmark_variant_dirs
 
-def submit_benchmark_variant_dirs(benchmarks_spec_file):
+def submit_benchmark_variant_dirs(benchmarks_spec_file, backend='Local'):
     """The code below takes a benchmark spec file, which specifies benchmarks (as analysis dirs) and variants,
     and generates, under each benchmark dir and for each variant, an analysis spec obtained by
     overriding the benchmark settings with the variant.
@@ -1890,10 +1893,11 @@ def submit_benchmark_variant_dirs(benchmarks_spec_file):
     for benchmark_dir in benchmark_dirs:
         for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
             _submit_prepared_analysis(analysis_dir=os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name),
-                                      processing_stats=processing_stats)
+                                      processing_stats=processing_stats, backend=backend)
 
 def parser_submit_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
+    parser.add_argument('--backend', default='Local', help='backend on which to run')
     util.cmd.attach_main(parser, submit_benchmark_variant_dirs, split_args=True)
     return parser
 
@@ -2649,16 +2653,22 @@ __commands__.append(('import_from_url', parser_import_from_url))
 
 ########################################################################################################################
 
+def _get_gs_remote_uuid():
+    return '6b9993bb-df07-4409-be5e-05c1cd528165'  # TODO determine this from git and git-annex config
+
+
 def _gs_stat(gs_url):
     assert gs_url.startswith('gs://')
     try:
-        stat_output = _run_get_output('gsutil', 'stat', gs_url)
+        stat_output = util.misc.maybe_decode(_run_get_output('gsutil', 'stat', gs_url)).rstrip('\n')
+        _log.info('stat_output={}'.format(stat_output))
         result = {}
         for line in stat_output.split('\n')[1:]:
             result[line[:25].strip()] = line[25:].strip()
 
         if 'Hash (md5):' in result:
-            result['md5'] = binascii.hexlify(result['Hash (md5):'].decode('base64'))
+            result['md5'] = binascii.hexlify(binascii.a2b_base64(result['Hash (md5):']))
+            _log.info('DECODED: {} to {}'.format(result['Hash (md5):'], result['md5']))
 
         return result
 
@@ -2668,8 +2678,10 @@ def _gs_stat(gs_url):
 def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TODO make gs prefix configurable
     """Ensure the given file exists in gs."""
 
+    _log.info('COPY_TO_GS: {}'.format(git_file_path))
     if gs_prefix.endswith('/'):
         gs_prefix = gs_prefix[:-1]
+    git_file_path = os.path.abspath(git_file_path)
     whereis = _run_get_json('git annex whereis --json ' + git_file_path, cwd=os.path.dirname(os.path.abspath(git_file_path)))
     locs = []
     assert whereis['success']
@@ -2685,7 +2697,9 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
     if key.startswith('MD5E-s'):
         size_from_key = int(key.split('-')[1][1:])
         md5_from_key = key.split('--')[1][:32]
-        md5_base64_from_key = binascii.unhexlify(md5_from_key).encode('base64').strip()
+        md5_base64_from_key = binascii.b2a_base64(binascii.unhexlify(md5_from_key)).decode().strip()
+
+    _log.info('urls={} urls_with_right_fname={} fname={} dx_urls={}'.format(urls, urls_with_right_fname, fname, dx_urls))
 
     if not urls_with_right_fname:
         gs_url = '/'.join((gs_prefix, 'inp', _md5_base64(whereis['key']), fname))
@@ -2704,7 +2718,7 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
             # TODO fix dx egress hack
             # avoid AWS egress charges by copying directly from dnanexus
             dx_tmp_url =  _dx_make_download_url(_url_to_dxid(dx_urls[0]))
-            gs_url = tools.google.GCloudTool().transfer_to_gcs(dx_tmp_url, size_from_key, md5_base64_from_key)
+            gs_url = tools.gcloud.GCloudTool().transfer_to_gcs(dx_tmp_url, size_from_key, md5_base64_from_key)
             _run('git annex setpresentkey', key, gs_remote_uuid, 1, cwd=os.path.dirname(os.path.abspath(git_file_path)))
             _run('git annex registerurl', key, gs_url, cwd=os.path.dirname(os.path.abspath(git_file_path)))
         else:

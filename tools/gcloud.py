@@ -19,6 +19,7 @@ import binascii
 import base64
 import datetime
 import uuid
+import pprint
 
 import uritools
 from google.cloud import storage
@@ -72,13 +73,15 @@ def _run_get_output(cmd, *args):
 def _gs_stat(gs_url):
     assert gs_url.startswith('gs://')
     try:
-        stat_output = _run_get_output('gsutil', 'stat', gs_url)
+        stat_output = util.misc.maybe_decode(_run_get_output('gsutil', 'stat', gs_url)).rstrip('\n')
+        _log.info('stat_output={}'.format(stat_output))
         result = {}
         for line in stat_output.split('\n')[1:]:
             result[line[:25].strip()] = line[25:].strip()
 
         if 'Hash (md5):' in result:
-            result['md5'] = binascii.hexlify(result['Hash (md5):'].decode('base64'))
+            result['md5'] = binascii.hexlify(binascii.a2b_base64(result['Hash (md5):']))
+            _log.info('DECODED: {} to {}'.format(result['Hash (md5):'], result['md5']))
 
         return result
 
@@ -194,7 +197,7 @@ class GCloudTool(tools.Tool):
         ##############
 
         # Create the file manifest
-
+        url = util.misc.maybe_decode(url)
         with util.file.tempfname(prefix='tmp_togcs', suffix='.tsv') as manifest_fname:
             with open(manifest_fname, 'w') as manifest:
                 manifest.write('TsvHttpData-1.0\n')
@@ -219,7 +222,7 @@ class GCloudTool(tools.Tool):
             response = request.execute()
 
             # TODO: Change code below to process the `response` dict:
-            _log.debug('RESPONSE TO SERVICE BUILD: %s', pformat(response))
+            _log.debug('RESPONSE TO SERVICE BUILD: %s', pprint.pformat(response))
 
             now = datetime.datetime.now()
 
@@ -254,7 +257,7 @@ class GCloudTool(tools.Tool):
             response = request.execute()
 
             # TODO: Change code below to process the `response` dict:
-            print('RESPONSE TO TRANSFER REQUEST SUBMIT %s', pformat(response))
+            _log.info('RESPONSE TO TRANSFER REQUEST SUBMIT %s', pprint.pformat(response))
 
             url_parts = uritools.urisplit(url)
             gs_file_uri = 'gs://{}/{}'.format(bucket_name, url_parts.authority + url_parts.path)
