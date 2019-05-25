@@ -25,6 +25,7 @@ import uritools
 from google.cloud import storage
 from googleapiclient import discovery
 from oauth2client.client import GoogleCredentials
+import google.api_core.exceptions
 
 import tools
 import util.file
@@ -155,7 +156,12 @@ class GCloudTool(tools.Tool):
         util.misc.chk(gs_uri_parts.scheme == 'gs' and gs_uri_parts.path.startswith('/') and \
                       gs_uri_parts.query is None and gs_uri_parts.fragment is None)
         bucket = self.get_bucket(gs_uri_parts.authority)
-        blob = bucket.get_blob(gs_uri_parts.path[1:])
+        try:
+            blob = bucket.get_blob(gs_uri_parts.path[1:])
+        except google.api_core.exceptions.ServiceUnavailable:
+            _log.info('Got ServiceUnavailable exception, waiting...')
+            time.sleep(20)
+            blob = bucket.get_blob(gs_uri_parts.path[1:])
         return blob
 
     def get_blob(self, gs_uri):
