@@ -118,18 +118,21 @@ def parser_json_to_org(parser=argparse.ArgumentParser()):
 __commands__.append(('json_to_org', parser_json_to_org))
 
 # =======================
-def render_aws_secrets(template_fname):
+def render_template(template_fname):
     """Render a template that uses AWS secrets
     """
     template = util.file.slurp_file(template_fname)
     client = boto3.client('secretsmanager')
+    secret2value = {}
     str2repl = {}
     for m in re.finditer(r'\{\{ aws_secret:(?P<secret_name>[^:]+):(?P<secret_key>\w+) \}\}', template):
-        log.info('MATCH: %s', m)
         secret_name = m.group('secret_name')
         secret_key = m.group('secret_key')
-        secret_value = json.loads(client.get_secret_value(SecretId=secret_name)['SecretString'])
-        str2repl[m.group(0)] = secret_value[secret_key]
+        if secret_name not in secret2value:
+            secret2value[secret_name] = \
+                json.loads(client.get_secret_value(SecretId=secret_name)['SecretString'])
+        secret_value = secret2value[secret_name]
+        str2repl[m.group(0)] = secret_value[secret_key].replace('\n', '\\n')
 
     for k, repl in str2repl.items():
         while k in template:
@@ -137,12 +140,12 @@ def render_aws_secrets(template_fname):
 
     print(template)
     
-def parser_render_aws_secrets(parser=argparse.ArgumentParser()):
+def parser_render_template(parser=argparse.ArgumentParser()):
     parser.add_argument('template_fname', help='template file with template referencing AWS secrets')
-    util.cmd.attach_main(parser, render_aws_secrets, split_args=True)
+    util.cmd.attach_main(parser, render_template, split_args=True)
     return parser
 
-__commands__.append(('render_aws_secrets', parser_render_aws_secrets))
+__commands__.append(('render_template', parser_render_template))
 # =======================
 
 def full_parser():
