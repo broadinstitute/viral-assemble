@@ -13,10 +13,15 @@ import argparse
 import logging
 import os
 import collections
+import re
+import json
 
 import util.cmd
 import util.file
 import util.misc
+
+import jinja2
+import boto3
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +117,32 @@ def parser_json_to_org(parser=argparse.ArgumentParser()):
 
 __commands__.append(('json_to_org', parser_json_to_org))
 
+# =======================
+def render_aws_secrets(template_fname):
+    """Render a template that uses AWS secrets
+    """
+    template = util.file.slurp_file(template_fname)
+    client = boto3.client('secretsmanager')
+    str2repl = {}
+    for m in re.finditer(r'\{\{ aws_secret:(?P<secret_name>[^:]+):(?P<secret_key>\w+) \}\}', template):
+        log.info('MATCH: %s', m)
+        secret_name = m.group('secret_name')
+        secret_key = m.group('secret_key')
+        secret_value = json.loads(client.get_secret_value(SecretId=secret_name)['SecretString'])
+        str2repl[m.group(0)] = secret_value[secret_key]
+
+    for k, repl in str2repl.items():
+        while k in template:
+            template = template.replace(k, repl)
+
+    print(template)
+    
+def parser_render_aws_secrets(parser=argparse.ArgumentParser()):
+    parser.add_argument('template_fname', help='template file with template referencing AWS secrets')
+    util.cmd.attach_main(parser, render_aws_secrets, split_args=True)
+    return parser
+
+__commands__.append(('render_aws_secrets', parser_render_aws_secrets))
 # =======================
 
 def full_parser():
