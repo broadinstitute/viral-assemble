@@ -9,6 +9,7 @@ cd-hit-auxtools=4.6.8
 conda-execute=0.9.0
 diamond=0.9.10
 dxpy=0.282.0
+jinja2=2.10.1
 jmespath=0.9.3
 kmc=3.1.1rc1
 gatk=3.8
