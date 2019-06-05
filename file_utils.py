@@ -142,6 +142,7 @@ def render_template(template_fname):
     
 def parser_render_template(parser=argparse.ArgumentParser()):
     parser.add_argument('template_fname', help='template file with template referencing AWS secrets')
+    util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, render_template, split_args=True)
     return parser
 
