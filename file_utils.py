@@ -118,11 +118,11 @@ def parser_json_to_org(parser=argparse.ArgumentParser()):
 __commands__.append(('json_to_org', parser_json_to_org))
 
 # =======================
-def render_template(template_fname, rendered_fname, replace):
+def render_template(template_fname, rendered_fname, replace, aws_region):
     """Render a template that uses AWS secrets
     """
     template = util.file.slurp_file(template_fname)
-    client = boto3.client('secretsmanager')
+    client = boto3.client('secretsmanager', region=aws_region)
     secret2value = {}
     str2repl = dict(replace or ())
     for m in re.finditer(r'\{\{ aws_secret:(?P<secret_name>[^:]+):(?P<secret_key>\w+) \}\}', template):
@@ -154,6 +154,7 @@ def parser_render_template(parser=argparse.ArgumentParser()):
     parser.add_argument('template_fname', help='template file with template referencing AWS secrets')
     parser.add_argument('rendered_fname', help='name of rendered file; base name of aux files.')
     parser.add_argument('--replace', nargs=2, action='append', help='additional replacements')
+    parser.add_argument('--awsRegion', dest='aws_region', help='specify an AWS region')
     util.cmd.common_args(parser, (('loglevel', None), ('version', None), ('tmp_dir', None)))
     util.cmd.attach_main(parser, render_template, split_args=True)
     return parser
