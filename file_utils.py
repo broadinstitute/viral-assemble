@@ -122,7 +122,7 @@ def render_template(template_fname, rendered_fname, replace, aws_region):
     """Render a template that uses AWS secrets
     """
     template = util.file.slurp_file(template_fname)
-    client = boto3.client('secretsmanager', region=aws_region)
+    client = boto3.client('secretsmanager', region_name=aws_region)
     secret2value = {}
     str2repl = dict(replace or ())
     for m in re.finditer(r'\{\{ aws_secret:(?P<secret_name>[^:]+):(?P<secret_key>\w+) \}\}', template):
