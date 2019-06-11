@@ -1293,80 +1293,94 @@ def _submit_prepared_analysis(analysis_dir,
     """
     cromwell_tool = tools.cromwell.CromwellTool()
     cromwell_server = CromwellServer(host=cromwell_server_url)
-    with util.file.pushd_popd(analysis_dir):
-        _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
-        if os.path.lexists('metadata_with_gitlinks.json'):
-            _log.info('Analysis dir %s already completed, not submitting', analysis_dir)
-            return
-        if os.path.lexists('cromwell_submit_output.txt'):
-            try:
-                _run('git', 'annex', 'get', 'cromwell_submit_output.txt')
-                cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output('cromwell_submit_output.txt')
-                mdata = cromwell_server.get_metadata(cromwell_analysis_id)
-                if mdata.get('status', None) in ('Running', 'Succeeded', 'Failed'):
-                    _log.info('Analysis dir %s completed though not yet finalized; status=%s', analysis_dir, mdata['status'])
-                    return
-            except Exception:
-                _log.info('Could not determine status for analysis dir %s', analysis_dir)
-            # TODO: check that the analysis is in cromwell and that it is still pending or running
 
-            _log.info('Resubmitting analysis dir: %s', analysis_dir)
-            processing_stats['submitted_but_not_completed'] += 1
-            for f in ('cromwell_submit_output.txt', 'cromwell_opts.json'):
-                _run('git', 'annex', 'edit', f)
-                os.remove(f)
-        
-        _run('git', 'annex', 'get', 'inputs-git-links.json')
-        run_inputs = _json_loadf('inputs-git-links.json')
-
-        input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
-        run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
-        if os.path.lexists('inputs.json'):
-            os.remove('inputs.json')
-        util.misc.chk(not os.path.exists('inputs.json'), 'inputs.json should not yet exist')
-        _write_json('inputs.json', **{k:v for k, v in run_inputs_staged.items() if not k.startswith('_')})
-
-        if backend == 'Local':
-            wf_opts_dict = { "backend": "Local", 'write_to_cache': True, 'read_from_cache': True
-            }
-        elif backend == 'JES':
-            wf_opts_dict = {
-                "backend": "JES"
-            }
-        else:
-            raise RuntimeError('Unknown backend - ' + backend)
-        if os.path.lexists('cromwell_opts.json'):
-            os.remove('cromwell_opts.json')
-        util.misc.chk(not os.path.exists('cromwell_opts.json'), 'cromwell_opts should not yet exist')
-        _write_json('cromwell_opts.json', **wf_opts_dict)
-        #_write_json('execution_env.json', ncpus=util.misc.available_cpu_count())
-
-        # add cromwell labels: dx project, the docker tag we ran on, etc.
-
-        # _log.info('Validating workflow')
-        # _run('womtool', 'validate',  '-i',  'inputs.json', workflow_name + '.wdl')
-        workflow_name = run_inputs['_workflow_name']
+    _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
+    if os.path.lexists(os.path.join(analysis_dir, 'metadata_with_gitlinks.json')):
+        _log.info('Analysis dir %s already completed, not submitting', analysis_dir)
+        return
+    if os.path.lexists(os.path.join(analysis_dir, 'cromwell_submit_output.txt')):
         try:
-            cromwell_output_str = _run_get_output('cromwell', 'submit', workflow_name+'.wdl',
-                                                  '-t', 'wdl', '-i', 'inputs.json', '-l', 'analysis_labels.json',
-                                                  '-o', 'cromwell_opts.json',
-                                                  '-p', 'imports.zip', '-h', cromwell_server_url)
-            cromwell_returncode = 0
-        except subprocess.CalledProcessError as called_process_error:
-            cromwell_output_str = called_process_error.output
-            cromwell_returncode = called_process_error.returncode
+            _run('git', 'annex', 'get', 'cromwell_submit_output.txt', cwd=analysis_dir)
+            submit_fn = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
+            cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output(submit_fn)
+            mdata = cromwell_server.get_metadata(cromwell_analysis_id)
+            if mdata.get('status', None) in ('Running', 'Succeeded', 'Failed'):
+                _log.info('Analysis dir %s completed though not yet finalized; status=%s',
+                          analysis_dir, mdata['status'])
+                return
+        except Exception:
+            _log.info('Could not determine status for analysis dir %s', analysis_dir)
+        # TODO: check that the analysis is in cromwell and that it is still pending or running
 
-        _log.info('Cromwell returned with return code %d', cromwell_returncode)
+        _log.info('Resubmitting analysis dir: %s', analysis_dir)
+        processing_stats['submitted_but_not_completed'] += 1
+        for f in ('cromwell_submit_output.txt', 'cromwell_opts.json'):
+            _run('git', 'annex', 'get', f, cwd=analysis_dir)
+            _run('git', 'annex', 'edit', f, cwd=analysis_dir)
+            os.remove(os.path.join(analysis_dir, f))
 
-        util.file.dump_file('cromwell_submit_output.txt', cromwell_output_str)
-        time.sleep(.5)
-        cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output('cromwell_submit_output.txt')
-        util.misc.chk(cromwell_analysis_id, 'Cromwell analysis id not found in cromwell submit output')
+    _run('git', 'annex', 'get', 'inputs-git-links.json', cwd=analysis_dir)
+    run_inputs = _json_loadf(os.path.join(analysis_dir, 'inputs-git-links.json'))
 
-        _log.debug('cromwell output is %s', cromwell_output_str)
+    input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
+    run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
+    if os.path.lexists(os.path.join(analysis_dir, 'inputs.json')):
+        os.remove(os.path.join(analysis_dir, 'inputs.json'))
+    util.misc.chk(not os.path.exists(os.path.join(analysis_dir, 'inputs.json')),
+                  'inputs.json should not yet exist')
+    _write_json(os.path.join(analysis_dir, 'inputs.json'),
+                **{k:v for k, v in run_inputs_staged.items() if not k.startswith('_')})
 
-        if cromwell_returncode:
-            raise RuntimeError('Cromwell failed - ' + cromwell_output_str)
+    if backend == 'Local':
+        wf_opts_dict = { "backend": "Local", 'write_to_cache': True, 'read_from_cache': True
+        }
+    elif backend == 'JES':
+        wf_opts_dict = {
+            "backend": "JES"
+        }
+    else:
+        raise RuntimeError('Unknown backend - ' + backend)
+    if os.path.lexists(os.path.join(analysis_dir, 'cromwell_opts.json')):
+        os.remove(os.path.join(analysis_dir, 'cromwell_opts.json'))
+    util.misc.chk(not os.path.exists(os.path.join(analysis_dir, 'cromwell_opts.json')),
+                  'cromwell_opts should not yet exist')
+    _write_json(os.path.join(analysis_dir, 'cromwell_opts.json'), **wf_opts_dict)
+    #_write_json('execution_env.json', ncpus=util.misc.available_cpu_count())
+
+    # add cromwell labels: dx project, the docker tag we ran on, etc.
+
+    # _log.info('Validating workflow')
+    # _run('womtool', 'validate',  '-i',  'inputs.json', workflow_name + '.wdl')
+    workflow_name = run_inputs['_workflow_name']
+    try:
+        cromwell_output_str = _run_get_output('cromwell', 'submit',
+                                              os.path.join(analysis_dir, workflow_name+'.wdl'),
+                                              '-t', 'wdl', '-i',
+                                              os.path.join(analysis_dir, 'inputs.json'),
+                                              '-l',
+                                              os.path.join(analysis_dir, 'analysis_labels.json'),
+                                              '-o',
+                                              os.path.join(analysis_dir, 'cromwell_opts.json'),
+                                              '-p',
+                                              os.path.join(analysis_dir, 'imports.zip'),
+                                              '-h', cromwell_server_url,
+                                              cwd=analysis_dir)
+        cromwell_returncode = 0
+    except subprocess.CalledProcessError as called_process_error:
+        cromwell_output_str = called_process_error.output
+        cromwell_returncode = called_process_error.returncode
+
+    _log.info('Cromwell returned with return code %d', cromwell_returncode)
+
+    util.file.dump_file(os.path.join(analysis_dir, 'cromwell_submit_output.txt'), cromwell_output_str)
+    time.sleep(.5)
+    cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output(os.path.join(analysis_dir, 'cromwell_submit_output.txt'))
+    util.misc.chk(cromwell_analysis_id, 'Cromwell analysis id not found in cromwell submit output')
+
+    _log.debug('cromwell output is %s', cromwell_output_str)
+
+    if cromwell_returncode:
+        raise RuntimeError('Cromwell failed - ' + cromwell_output_str)
 
 def parser_submit_prepared_analysis(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dir')
