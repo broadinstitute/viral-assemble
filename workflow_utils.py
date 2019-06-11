@@ -2284,8 +2284,8 @@ def _record_file_metadata(val, analysis_dir, root_dir):
 
 def is_analysis_dir(d):
     """Test whether a given directory is an analysis dir"""
-    return all(os.path.isfile(os.path.join(d, f)) for f in ('metadata_with_gitlinks.json',)) or \
-        all(os.path.isfile(os.path.join(d, f)) for f in ('inputs-git-links.json',))
+    return all(os.path.lexists(os.path.join(d, f)) for f in ('metadata_with_gitlinks.json',)) or \
+        all(os.path.lexists(os.path.join(d, f)) for f in ('inputs-git-links.json',))
 
 def _gather_analysis_dirs(analysis_dirs_roots, processing_stats):
     def _get_analysis_dirs(d):
