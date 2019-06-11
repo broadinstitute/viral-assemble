@@ -15,6 +15,7 @@ import concurrent.futures
 import uuid
 import contextlib2
 import random
+import time
 
 if os.name == 'posix' and sys.version_info[0] < 3:
     import subprocess32 as subprocess
@@ -410,6 +411,21 @@ class GitAnnexTool(tools.Tool):
     def add_cwd(self):
         """Add files in current working directory to git-annex"""
         self.execute(['add'])
+
+    def add_dir(self, directory):
+        """Add files in given directory to git-annex"""
+        retries = 2
+        while True:
+            try:
+                return self.execute(['add'], cwd=directory)
+            except Exception as e:
+                if retries > 0:
+                    _log.debug('add_dir: error %s, %d retries left', e, retries)
+                    retries -= 1
+                    time.sleep(5)
+                else:
+                    raise
+
 
     def initremote(self, name, remote_type, **kw):
         """Initialize a git-annex special remote"""
