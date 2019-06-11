@@ -91,6 +91,7 @@ import shlex
 import sys
 import re
 import random
+import getpass
 import urllib
 try:
     from urllib import urlencode, pathname2url
@@ -2421,91 +2422,108 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata, lcpath2fmdat
 
     # analysis_metadata_with_file_objs = _transform_json_data(analysis_metadata, file_node_to_obj)
 
-def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None, status_only=False):
+def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None, status_only=False,
+                           repeat=False, repeat_delay=120):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
     cromwell_tool = tools.cromwell.CromwellTool()
-    processing_stats = collections.Counter()
-    status_stats = collections.Counter()
+    def _do_finalize():
+        processing_stats = collections.Counter()
+        status_stats = collections.Counter()
 
-    analysis_dirs = () if not analysis_dirs_roots else _get_analysis_dirs_under(analysis_dirs_roots)
-    cromwell_analysis_id_to_dir = {}
-    for analysis_dir in analysis_dirs:
-        fname = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
-        _log.info('looking at cromwell output file %s; exists? %s', fname, os.path.isfile(fname))
-        if os.path.isfile(fname):
-            _log.info('looking at cromwell output file %s', fname)
-            cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output(fname)
-            cromwell_analysis_id_to_dir[cromwell_analysis_id] = analysis_dir
-    _log.info('GOT ANALYSIS IDS %s', cromwell_analysis_id_to_dir)
-    git_annex_tool = tools.git_annex.GitAnnexTool()
-    with git_annex_tool.batching() as git_annex_tool:
+        analysis_dirs = () if not analysis_dirs_roots else _get_analysis_dirs_under(analysis_dirs_roots)
+        cromwell_analysis_id_to_dir = {}
+        for analysis_dir in analysis_dirs:
+            fname = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
+            _log.info('looking at cromwell output file %s; exists? %s', fname, os.path.isfile(fname))
+            if os.path.isfile(fname):
+                _log.info('looking at cromwell output file %s', fname)
+                cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output(fname)
+                cromwell_analysis_id_to_dir[cromwell_analysis_id] = analysis_dir
+        _log.info('GOT ANALYSIS IDS %s', cromwell_analysis_id_to_dir)
+        git_annex_tool = tools.git_annex.GitAnnexTool()
+        with git_annex_tool.batching() as git_annex_tool:
 
-        query = []
-        if hours_ago:
-            query.append(('submission', _isoformat_ago(hours=hours_ago)))
-        if not status_only:
-            query.extend([('status', 'Succeeded'), ('status', 'Failed')])
-        for wf in cromwell_server.get_workflows(query=query):
-            processing_stats['workflowsFromCromwell'] += 1
-            mdata = cromwell_server.get_metadata(wf['id'])
-            assert mdata['id'] == wf['id']
-            assert 'workflowLog' not in mdata or mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
-            analysis_dir = mdata['labels'].get('analysis_dir', cromwell_analysis_id_to_dir.get(mdata['id'], None))
-            _log.info('ID %s ADIR %s', mdata['id'], analysis_dir)
-            if analysis_dir:
-                if analysis_dirs_roots and not any(_is_under_dir(analysis_dir, analysis_dirs_root)
-                                                   for analysis_dirs_root in analysis_dirs_roots):
-                    processing_stats['notUnderAnalysisDirsRoots'] += 1
-                    continue
-                cromwell_output_file = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
-                if git_annex_tool.maybe_get(cromwell_output_file):
-                    id_from_analysis_dir = cromwell_tool.parse_cromwell_submit_output(cromwell_output_file)
-                    if id_from_analysis_dir != mdata['id']:
-                        processing_stats['id from analysis dir does not match metadata id'] += 1
-                        _log.info('MISMATCH: analysis_dir=%s id=%s id_from_dir=%s',
-                                  analysis_dir, mdata['id'], id_from_analysis_dir)
+            query = []
+            if hours_ago:
+                query.append(('submission', _isoformat_ago(hours=hours_ago)))
+            if not status_only:
+                query.extend([('status', 'Succeeded'), ('status', 'Failed')])
+            for wf in cromwell_server.get_workflows(query=query):
+                processing_stats['workflowsFromCromwell'] += 1
+                mdata = cromwell_server.get_metadata(wf['id'])
+                assert mdata['id'] == wf['id']
+                assert 'workflowLog' not in mdata or mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
+                analysis_dir = mdata['labels'].get('analysis_dir', cromwell_analysis_id_to_dir.get(mdata['id'], None))
+                _log.info('ID %s ADIR %s', mdata['id'], analysis_dir)
+                if analysis_dir:
+                    if analysis_dirs_roots and not any(_is_under_dir(analysis_dir, analysis_dirs_root)
+                                                       for analysis_dirs_root in analysis_dirs_roots):
+                        processing_stats['notUnderAnalysisDirsRoots'] += 1
                         continue
-            else:
-                processing_stats['noAnalysisDirForWorkflow'] += 1
-                continue
+                    cromwell_output_file = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
+                    if git_annex_tool.maybe_get(cromwell_output_file):
+                        id_from_analysis_dir = cromwell_tool.parse_cromwell_submit_output(cromwell_output_file)
+                        if id_from_analysis_dir != mdata['id']:
+                            processing_stats['id from analysis dir does not match metadata id'] += 1
+                            _log.info('MISMATCH: analysis_dir=%s id=%s id_from_dir=%s',
+                                      analysis_dir, mdata['id'], id_from_analysis_dir)
+                            continue
+                else:
+                    processing_stats['noAnalysisDirForWorkflow'] += 1
+                    continue
 
-            if status_only:
-                _log.info('WORKFLOW: %s STATUS: %s', wf['id'], mdata['status'])
-                status_stats[mdata['status']] += 1
-                continue
+                if status_only:
+                    _log.info('WORKFLOW: %s STATUS: %s', wf['id'], mdata['status'])
+                    status_stats[mdata['status']] += 1
+                    continue
 
-            util.file.mkdir_p(analysis_dir)
-            mdata_fname = os.path.join(analysis_dir, 'metadata_orig.json') # mdata['workflowLog'][:-4]+'.metadata.json'
-            mdata_rel_fname = os.path.join(analysis_dir, 'metadata_with_gitlinks.json') # mdata['workflowLog'][:-4]+'.metadata.json'
-            if os.path.lexists(mdata_rel_fname):
-                processing_stats['metadata_already_saved'] += 1
-            elif 'workflowRoot' not in mdata:
-                processing_stats['workflow_root_not_in_mdata'] += 1
-            else:
-                if not os.path.lexists(mdata_fname):
-                    _write_json(mdata_fname, **mdata)
-                #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
+                util.file.mkdir_p(analysis_dir)
+                mdata_fname = os.path.join(analysis_dir, 'metadata_orig.json') # mdata['workflowLog'][:-4]+'.metadata.json'
+                mdata_rel_fname = os.path.join(analysis_dir, 'metadata_with_gitlinks.json') # mdata['workflowLog'][:-4]+'.metadata.json'
+                if os.path.lexists(mdata_rel_fname):
+                    processing_stats['metadata_already_saved'] += 1
+                elif 'workflowRoot' not in mdata:
+                    processing_stats['workflow_root_not_in_mdata'] += 1
+                else:
+                    workflow_root = mdata['workflowRoot']
+                    if workflow_root.startswith('/'):
+                        _run('sudo chown -R {}:{} .'.format(getpass.getuser(), getpass.getuser()),
+                             cwd=workflow_root)
+                        _run('chmod -R u+w .', cwd=workflow_root)
+                        _run('rm -rf call-*/tmp.*', cwd=workflow_root)
+                        git_annex_tool.add_dir(workflow_root)
 
-                mdata['runInputs'] = util.misc.json_loads(mdata['submittedFiles']['inputs'])
+                    if not os.path.lexists(mdata_fname):
+                        _write_json(mdata_fname, **mdata)
+                    #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
 
-                leaf_jpaths = util.misc.json_gather_leaf_jpaths(mdata)
-                str_leaves = list(filter(_is_str, util.misc.map_vals(leaf_jpaths)))
-                git_annex_tool.import_urls(str_leaves, ignore_non_urls=True, now=False)
-                mdata_rel = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir,
-                                                        methods=[functools.partial(_resolve_link_using_gathered_filestat,
-                                                                                   git_annex_tool=git_annex_tool),
-#                                                                 _resolve_link_local_path,
-#                                                                 _resolve_link_gs,
-                                                        ], relpath='files')
-                mdata_rel = util.misc.transform_json_data(mdata_rel, functools.partial(util.misc.maybe_wait_for_result, timeout=300))
+                    mdata['runInputs'] = util.misc.json_loads(mdata['submittedFiles']['inputs'])
+                    
+                    leaf_jpaths = util.misc.json_gather_leaf_jpaths(mdata)
+                    str_leaves = list(filter(_is_str, util.misc.map_vals(leaf_jpaths)))
+                    git_annex_tool.import_urls(str_leaves, ignore_non_urls=True, now=False)
+                    mdata_rel = _resolve_links_in_json_data(val=mdata, rel_to_dir=analysis_dir,
+                                                            methods=[functools.partial(_resolve_link_using_gathered_filestat,
+                                                                                       git_annex_tool=git_annex_tool),
+    #                                                                 _resolve_link_local_path,
+    #                                                                 _resolve_link_gs,
+                                                            ], relpath='files')
+                    mdata_rel = util.misc.transform_json_data(mdata_rel, functools.partial(util.misc.maybe_wait_for_result, timeout=300))
 
-                _write_json(mdata_rel_fname, **mdata_rel)
-                _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
-                processing_stats['saved_metata'] += 1
-    _log.info('Processing stats: %s', str(processing_stats))
-    _log.info('Status stats: %s', str(status_stats))
+                    _write_json(mdata_rel_fname, **mdata_rel)
+                    _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
+                    processing_stats['saved_metata'] += 1
+        _log.info('Processing stats: %s', str(processing_stats))
+        _log.info('Status stats: %s', str(status_stats))
+        return status_stats
+
+    while True:
+        status_stats = _do_finalize()
+        if not repeat or status_stats['Running'] == 0:
+            break
+        time.sleep(repeat_delay)
 
 def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('--cromwellHost', dest='cromwell_host', default='localhost:8000', help='cromwell server hostname')
@@ -2514,6 +2532,9 @@ def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('--analysisDirsRoots', dest='analysis_dirs_roots', nargs='+',
                         help='only consider analyses whose analysis dirs are in one of these trees')
     parser.add_argument('--statusOnly', dest='status_only', default=False, action='store_true', help='print status and quit')
+    parser.add_argument('--repeat', action='store_true', default=False, help='repeat while some are running')
+    parser.add_argument('--repeatDelay', dest='repeat_delay',
+                        type=int, default=120, help='delay after re-running')
     util.cmd.attach_main(parser, finalize_analysis_dirs, split_args=True)
     return parser
 
