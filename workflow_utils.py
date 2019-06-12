@@ -1355,24 +1355,39 @@ def _submit_prepared_analysis(analysis_dir,
     # _run('womtool', 'validate',  '-i',  'inputs.json', workflow_name + '.wdl')
     workflow_name = run_inputs['_workflow_name']
     try:
-        cromwell_output_str = _run_get_output('cromwell', 'submit',
-                                              os.path.join(analysis_dir, workflow_name+'.wdl'),
-                                              '-t', 'wdl', '-i',
-                                              os.path.join(analysis_dir, 'inputs.json'),
-                                              '-l',
-                                              os.path.join(analysis_dir, 'analysis_labels.json'),
-                                              '-o',
-                                              os.path.join(analysis_dir, 'cromwell_opts.json'),
-                                              '-p',
-                                              os.path.join(analysis_dir, 'imports.zip'),
-                                              '-h', cromwell_server_url,
-                                              cwd=analysis_dir)
-        cromwell_returncode = 0
+        retries = 2
+        succeeded = False
+        while not succeeded and retries > 0:
+            try:
+                cromwell_output_str = _run_get_output('cromwell', 'submit',
+                                                      os.path.join(analysis_dir, workflow_name+'.wdl'),
+                                                      '-t', 'wdl', '-i',
+                                                      os.path.join(analysis_dir, 'inputs.json'),
+                                                      '-l',
+                                                      os.path.join(analysis_dir, 'analysis_labels.json'),
+                                                      '-o',
+                                                      os.path.join(analysis_dir, 'cromwell_opts.json'),
+                                                      '-p',
+                                                      os.path.join(analysis_dir, 'imports.zip'),
+                                                      '-h', cromwell_server_url,
+                                                      cwd=analysis_dir)
+                _log.info('Got cromwell submit output as %s', cromwell_output_str)
+                cromwell_tool.parse_cromwell_submit_output_str(cromwell_output_str)
+                cromwell_returncode = 0
+                succeeded = True
+            except Exception as e:
+                if retries > 0:
+                    _log.info('Retrying: %d', retries)
+                    retries -= 1
+                    time.sleep(3)
+                else:
+                    raise
     except subprocess.CalledProcessError as called_process_error:
         cromwell_output_str = called_process_error.output
         cromwell_returncode = called_process_error.returncode
 
     _log.info('Cromwell returned with return code %d', cromwell_returncode)
+    _log.info('Cromwell output is %s', cromwell_output_str)
 
     util.file.dump_file(os.path.join(analysis_dir, 'cromwell_submit_output.txt'), cromwell_output_str)
     time.sleep(.5)

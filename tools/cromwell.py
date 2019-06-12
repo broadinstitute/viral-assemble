@@ -146,6 +146,12 @@ class CromwellTool(tools.Tool):
                 server.shutdown()
     # end: def cromwell_server(self, port=8000, check_health=True)
 
+    def parse_cromwell_submit_output_str(self, s):
+        """Parse the output of cromwell submission"""
+        cromwell_analysis_id = re.search('Workflow (?P<uuid>' + util.misc.UUID_RE + ') submitted to ',
+                                         s).group('uuid')
+        return cromwell_analysis_id
+
     def parse_cromwell_submit_output(self, fname):
         """Parse the output of cromwell submission"""
         cromwell_analysis_id = re.search('Workflow (?P<uuid>' + util.misc.UUID_RE + ') submitted to ',
