@@ -1358,6 +1358,8 @@ def _submit_prepared_analysis(analysis_dir,
         retries = 2
         succeeded = False
         while not succeeded and retries > 0:
+            cromwell_returncode = -1
+            cromwell_output_str = ''
             try:
                 cromwell_output_str = _run_get_output('cromwell', 'submit',
                                                       os.path.join(analysis_dir, workflow_name+'.wdl'),
@@ -1372,13 +1374,18 @@ def _submit_prepared_analysis(analysis_dir,
                                                       '-h', cromwell_server_url,
                                                       cwd=analysis_dir)
                 _log.info('Got cromwell submit output as %s', cromwell_output_str)
-                cromwell_tool.parse_cromwell_submit_output_str(cromwell_output_str)
-                cromwell_returncode = 0
-                succeeded = True
+                an_id = cromwell_tool.parse_cromwell_submit_output_str(cromwell_output_str)
+                if an_id and len(an_id) == 36:
+                    _log.info('GOT CROMWELL ANALYSIS ID: %s', an_id)
+                    cromwell_returncode = 0
+                    succeeded = True
+                else:
+                    raise RuntimeError('Could not parse cromwell submit output')
             except Exception as e:
                 if retries > 0:
                     _log.info('Retrying: %d', retries)
                     retries -= 1
+                    succeeded = False
                     time.sleep(3)
                 else:
                     raise
