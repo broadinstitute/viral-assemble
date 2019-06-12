@@ -69,8 +69,19 @@ class GSURIRemote(SpecialRemote):
         self._dbg('transfer-retrieve: key=', key, 'filename=', filename, 'urls=', urls, 'url=', url)
         try:
             #cmd = 'dx download --no-progress ' + self._url_to_dxid(url) + " -f -o '" + filename + "'"
-            gcloud_tool = tools.gcloud.GCloudTool()
-            gcloud_tool.download_object(gs_uri=url, destination_file_name=filename)
+            self._dbg('Constructing gcloudtool')
+            try:
+                gcloud_tool = tools.gcloud.GCloudTool()
+            except Exception as e:
+                self._dbg('Error constructing gcloud tool:', e)
+                raise RemoteError('error constructing gcloud tool - {}'.format(e))
+            self._dbg('Constructed gcloudtool')
+            self._dbg('calling download_object(gs_uri=', url, 'dest=', filename)
+            try:
+                gcloud_tool.download_object(gs_uri=url, destination_file_name=filename)
+            except Exception as e:
+                self_dbg('error downloading from gs:', e)
+                raise RemoteError('error downloading from gs: {}'.format(e))
             #cmd = 'gsutil cp ' + url + " '" + filename + "'"
             #self._dbg('cmd=', cmd)
             #_run(cmd)
