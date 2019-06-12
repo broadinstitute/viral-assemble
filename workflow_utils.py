@@ -2486,8 +2486,8 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
             query = []
             if hours_ago:
                 query.append(('submission', _isoformat_ago(hours=hours_ago)))
-            if not status_only:
-                query.extend([('status', 'Succeeded'), ('status', 'Failed')])
+            #if not status_only:
+            #    query.extend([('status', 'Succeeded'), ('status', 'Failed')])
             for wf in cromwell_server.get_workflows(query=query):
                 processing_stats['workflowsFromCromwell'] += 1
                 mdata = cromwell_server.get_metadata(wf['id'])
@@ -2512,9 +2512,9 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                     processing_stats['noAnalysisDirForWorkflow'] += 1
                     continue
 
+                status_stats[mdata['status']] += 1
                 if status_only:
                     _log.info('WORKFLOW: %s STATUS: %s', wf['id'], mdata['status'])
-                    status_stats[mdata['status']] += 1
                     continue
 
                 util.file.mkdir_p(analysis_dir)
@@ -2561,6 +2561,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
         status_stats = _do_finalize()
         if not repeat or status_stats['Running'] == 0:
             break
+        _run('git annex sync --message="added benchmarks"')
         time.sleep(repeat_delay)
 
 def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
