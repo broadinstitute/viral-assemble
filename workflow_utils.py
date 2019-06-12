@@ -1323,6 +1323,7 @@ def _submit_prepared_analysis(analysis_dir,
     run_inputs = _json_loadf(os.path.join(analysis_dir, 'inputs-git-links.json'))
 
     input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
+    _run('git', 'annex', 'get', '.', cwd=analysis_dir)
     with util.file.pushd_popd(analysis_dir):
         run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
     if os.path.lexists(os.path.join(analysis_dir, 'inputs.json')):
