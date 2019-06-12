@@ -149,13 +149,13 @@ class CromwellTool(tools.Tool):
     def parse_cromwell_submit_output_str(self, s):
         """Parse the output of cromwell submission"""
         cromwell_analysis_id = re.search('Workflow (?P<uuid>' + util.misc.UUID_RE + ') submitted to ',
-                                         s).group('uuid')
+                                         util.misc.maybe_decode(s)).group('uuid')
         return cromwell_analysis_id
 
     def parse_cromwell_submit_output(self, fname):
         """Parse the output of cromwell submission"""
         cromwell_analysis_id = re.search('Workflow (?P<uuid>' + util.misc.UUID_RE + ') submitted to ',
-                                         util.file.slurp_file(fname)).group('uuid')
+                                         util.misc.maybe_decode(util.file.slurp_file(fname))).group('uuid')
         return cromwell_analysis_id
 
 # ** Metadata handling

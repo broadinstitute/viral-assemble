@@ -1357,7 +1357,7 @@ def _submit_prepared_analysis(analysis_dir,
     try:
         retries = 2
         succeeded = False
-        while not succeeded and retries > 0:
+        while not succeeded:
             cromwell_returncode = -1
             cromwell_output_str = ''
             try:
