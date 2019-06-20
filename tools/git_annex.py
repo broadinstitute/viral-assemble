@@ -913,6 +913,10 @@ class GitAnnexTool(tools.Tool):
         for url in urls:
             if url not in self._url2filestat:
                 self._url2filestat[url] = collections.OrderedDict()
+                
+                repo_root = os.getcwd()
+                if url.startswith(repo_root) and self.is_link_into_annex(url):
+                    self._url2filestat[url]['git_annex_key'] = self.lookupkey(url)
 
         remotes = self.get_remotes()
 

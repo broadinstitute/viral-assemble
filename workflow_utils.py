@@ -2461,7 +2461,7 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata, lcpath2fmdat
     # analysis_metadata_with_file_objs = _transform_json_data(analysis_metadata, file_node_to_obj)
 
 def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None, status_only=False,
-                           repeat=False, repeat_delay=120):
+                           repeat=False, repeat_delay=120, copy_to=None):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
     Save metadata, mark final workflow result, make paths relative to analysis dir."""
     cromwell_server = CromwellServer(host=cromwell_host)
@@ -2526,12 +2526,14 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                     processing_stats['workflow_root_not_in_mdata'] += 1
                 else:
                     workflow_root = mdata['workflowRoot']
-                    if workflow_root.startswith('/'):
+                    if repeat and workflow_root.startswith('/'):
                         _run('sudo chown -R {}:{} .'.format(getpass.getuser(), getpass.getuser()),
                              cwd=workflow_root)
                         _run('chmod -R u+w .', cwd=workflow_root)
                         _run('rm -rf call-*/tmp.*', cwd=workflow_root)
                         git_annex_tool.add_dir(workflow_root)
+                        if copy_to:
+                            _run('git annex copy . --to={}'.format(copy_to), cwd=workflow_root)
 
                     if not os.path.lexists(mdata_fname):
                         _write_json(mdata_fname, **mdata)
@@ -2561,6 +2563,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
         status_stats = _do_finalize()
         if not repeat or status_stats['Running'] == 0:
             break
+        _run('git commit -m "added benchmarks"')
         _run('git annex sync --message="added benchmarks"')
         time.sleep(repeat_delay)
 
@@ -2574,6 +2577,7 @@ def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('--repeat', action='store_true', default=False, help='repeat while some are running')
     parser.add_argument('--repeatDelay', dest='repeat_delay',
                         type=int, default=120, help='delay after re-running')
+    parser.add_argument('--copyTo', dest='copy_to', help='copy files to this remote')
     util.cmd.attach_main(parser, finalize_analysis_dirs, split_args=True)
     return parser
 
