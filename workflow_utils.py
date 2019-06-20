@@ -2518,6 +2518,9 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                 if status_only:
                     _log.info('WORKFLOW: %s STATUS: %s', wf['id'], mdata['status'])
                     continue
+                if mdata['status'] not in ('Succeeded', 'Failed'):
+                    _log.info('SKIPPING %s DUE TO STATUS %s', wf['id'], mdata['status'])
+                    continue
 
                 util.file.mkdir_p(analysis_dir)
                 mdata_fname = os.path.join(analysis_dir, 'metadata_orig.json') # mdata['workflowLog'][:-4]+'.metadata.json'
