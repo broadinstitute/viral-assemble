@@ -1771,7 +1771,9 @@ def _generate_benchmark_variant(benchmarks_spec_dir, benchmark_dir, benchmark_va
         _log.info('Benchmark variant already generated, skipping: %s', analysis_dir)
         return
     util.file.mkdir_p(analysis_dir)
+    git_annex_tool.get(os.path.join(benchmarks_spec_dir, benchmark_dir, 'inputs-git-links.json'))
     run_inputs = _json_loadf(os.path.join(benchmarks_spec_dir, benchmark_dir, 'inputs-git-links.json'))
+    git_annex_tool.get(os.path.join(benchmarks_spec_dir, benchmark_dir, 'metadata_with_gitlinks.json'))
     metadata = _json_loadf(os.path.join(benchmarks_spec_dir, benchmark_dir, 'metadata_with_gitlinks.json')) \
         if os.path.isfile(os.path.join(benchmarks_spec_dir, benchmark_dir, 'metadata_with_gitlinks.json')) else {}
     run_inputs = _qry_json(json_data=dict(run_inputs=run_inputs, metadata=metadata),
