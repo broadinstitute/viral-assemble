@@ -2568,6 +2568,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
         status_stats = _do_finalize()
         if not repeat or status_stats['Running'] == 0:
             break
+        _run('sudo rm -rf {}:{} cromwell/cromwell-executions/*/*/*/tmp*'.format(getpass.getuser(), getpass.getuser()))
         _run('git commit -m "added benchmarks"')
         _run('git annex sync --message="added benchmarks"')
         time.sleep(repeat_delay)
