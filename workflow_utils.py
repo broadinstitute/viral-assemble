@@ -285,7 +285,7 @@ def _run(cmd, *args, **kw):
     succeeded = False
     sleep_time_secs = 4
     
-    while retries >= 0:
+    while not succeeded and retries >= 0:
         try:
             subprocess.check_call(cmd, shell=True, **kw)
             succeeded = True
