@@ -289,9 +289,9 @@ def _run(cmd, *args, **kw):
             succeeded = True
         except Exception as e:
             if retries:
-                _log.info('RETRY {} sleep {} command (cwd={}, kw={}) {} in {}s: {} exception {}'.format(retries, sleep_time_secs,
-                                                                                                        os.getcwd(), kw, 
-                                                                                                        time.time()-beg_time, cmd, e))
+                _log.info('RETRY {} sleep {} command (cwd={}, kw={}) in {}s: {} exception {}'.format(retries, sleep_time_secs,
+                                                                                                     os.getcwd(), kw, 
+                                                                                                     time.time()-beg_time, cmd, e))
                 retries -= 1
                 time.sleep(sleep_time_secs)
                 sleep_time_secs *= 2
@@ -2588,7 +2588,6 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
         if not repeat or status_stats['Running'] == 0:
             _log.info('finalize_analysis_dirs: finished! exiting')
             break
-        _run('sudo rm -rf {}:{} cromwell/cromwell-executions/*/*/*/tmp*'.format(getpass.getuser(), getpass.getuser()))
         _run('git commit -m "added benchmarks"', retries=2)
         _run('git annex sync --message="added benchmarks"', retries=2)
         _log.info('finalize_analysis_dirs repeat: sleeping for %s', repeat_delay)
