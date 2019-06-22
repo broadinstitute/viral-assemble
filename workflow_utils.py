@@ -284,7 +284,8 @@ def _run(cmd, *args, **kw):
     beg_time = time.time()
     succeeded = False
     sleep_time_secs = 4
-    while not succeeded:
+    
+    while retries >= 0:
         try:
             subprocess.check_call(cmd, shell=True, **kw)
             succeeded = True
