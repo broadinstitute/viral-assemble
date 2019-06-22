@@ -297,7 +297,9 @@ def _run(cmd, *args, **kw):
                                                                                                      time.time()-beg_time, cmd, e))
                 time.sleep(sleep_time_secs)
                 sleep_time_secs *= 2
-            elif not ignore_failures:
+            elif ignore_failures:
+                return
+            else:
                 raise
         finally:
             _log.info('command (cwd={}, kw={}) {} in {}s: {}'.format(os.getcwd(), kw, 'SUCCEEDED' if succeeded else 'FAILED',
