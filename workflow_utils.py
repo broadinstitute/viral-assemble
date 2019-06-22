@@ -277,16 +277,29 @@ def _make_cmd(cmd, *args):
     return ' '.join([cmd] + [_quote(str(arg)) for arg in args if arg not in (None, '')])
 
 def _run(cmd, *args, **kw):
+    retries = kw.pop('retries', 0)
     cmd = _make_cmd(cmd, *args)
     _log.info('running command: %s cwd=%s kw=%s', cmd, os.getcwd(), kw)
     beg_time = time.time()
     succeeded = False
-    try:
-        subprocess.check_call(cmd, shell=True, **kw)
-        succeeded = True
-    finally:
-        _log.info('command (cwd={}, kw={}) {} in {}s: {}'.format(os.getcwd(), kw, 'SUCCEEDED' if succeeded else 'FAILED',
-                                                                 time.time()-beg_time, cmd))
+    sleep_time_secs = 4
+    while not succeeded:
+        try:
+            subprocess.check_call(cmd, shell=True, **kw)
+            succeeded = True
+        except Exception as e:
+            if retries:
+                _log.info('RETRY {} sleep {} command (cwd={}, kw={}) {} in {}s: {} exception {}'.format(retries, sleep_time_secs,
+                                                                                                        os.getcwd(), kw, 
+                                                                                                        time.time()-beg_time, cmd, e))
+                retries -= 1
+                time.sleep(sleep_time_secs)
+                sleep_time_secs *= 2
+            else:
+                raise
+        finally:
+            _log.info('command (cwd={}, kw={}) {} in {}s: {}'.format(os.getcwd(), kw, 'SUCCEEDED' if succeeded else 'FAILED',
+                                                                     time.time()-beg_time, cmd))
 
 def _run_succeeds(cmd, *args, **kw):
     try:
@@ -2538,7 +2551,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                         _run('rm -rf call-*/tmp.*', cwd=workflow_root)
                         git_annex_tool.add_dir(workflow_root)
                         if copy_to:
-                            _run('git annex copy . --to={}'.format(copy_to), cwd=workflow_root)
+                            _run('git annex copy . --to={}'.format(copy_to), cwd=workflow_root, retries=3)
 
                     if not os.path.lexists(mdata_fname):
                         _write_json(mdata_fname, **mdata)
@@ -2567,11 +2580,15 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
     while True:
         status_stats = _do_finalize()
         if not repeat or status_stats['Running'] == 0:
+            _log.info('finalize_analysis_dirs: finished! exiting')
             break
         _run('sudo rm -rf {}:{} cromwell/cromwell-executions/*/*/*/tmp*'.format(getpass.getuser(), getpass.getuser()))
-        _run('git commit -m "added benchmarks"')
-        _run('git annex sync --message="added benchmarks"')
+        _run('git commit -m "added benchmarks"', retries=2)
+        _run('git annex sync --message="added benchmarks"', retries=2)
+        _log.info('finalize_analysis_dirs repeat: sleeping for %s', repeat_delay)
         time.sleep(repeat_delay)
+# end: def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None, status_only=False,
+#                                 repeat=False, repeat_delay=120, copy_to=None)
 
 def parser_finalize_analysis_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('--cromwellHost', dest='cromwell_host', default='localhost:8000', help='cromwell server hostname')
