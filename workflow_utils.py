@@ -1776,7 +1776,8 @@ def _is_prepared_analysis_dir(analysis_dir):
 
 # *** generate_benchmark_variant_dirs
 
-def _generate_benchmark_variant(benchmarks_spec_dir, benchmark_dir, benchmark_variant_name, benchmark_variant_def, git_annex_tool):
+def _generate_benchmark_variant(benchmarks_spec_dir, benchmark_dir, benchmark_variant_name, benchmark_variant_def, git_annex_tool,
+                                copy_to=None):
     """Generate a run-ready analysis dir for the given benchmark and benchmark variant."""
 
     analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
@@ -1792,8 +1793,12 @@ def _generate_benchmark_variant(benchmarks_spec_dir, benchmark_dir, benchmark_va
     run_inputs = _qry_json(json_data=dict(run_inputs=run_inputs, metadata=metadata),
                            jmespath_expr=benchmark_variant_def)
     _prepare_analysis_crogit_do(inputs=run_inputs, analysis_dir=analysis_dir, analysis_labels={}, git_annex_tool=git_annex_tool)
+    if copy_to:
+        git_annex_tool.add_dir(analysis_dir)
+        _run('git annex copy . --to={}'.format(copy_to), cwd=analysis_dir, retries=3)
+        
 
-def generate_benchmark_variant_dirs(benchmarks_spec_file, one_benchmark_dir=None, one_benchmark_variant=None):
+def generate_benchmark_variant_dirs(benchmarks_spec_file, one_benchmark_dir=None, one_benchmark_variant=None, copy_to=None):
     """The code below takes a benchmark spec file, which specifies benchmarks (as analysis dirs) and variants,
     and generates, under each benchmark dir and for each variant, an analysis spec obtained by
     overriding the benchmark settings with the variant.
@@ -1818,12 +1823,13 @@ def generate_benchmark_variant_dirs(benchmarks_spec_file, one_benchmark_dir=None
             for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
                 if one_benchmark_variant and benchmark_variant_name != one_benchmark_variant: continue
                 _generate_benchmark_variant(benchmarks_spec_dir, benchmark_dir, benchmark_variant_name,
-                                            benchmark_variant_def, git_annex_tool)
+                                            benchmark_variant_def, git_annex_tool, copy_to=copy_to)
 
 def parser_generate_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
     parser.add_argument('--oneBenchmarkDir', dest='one_benchmark_dir', help='process only this benchmark dir')
     parser.add_argument('--oneBenchmarkVariant', dest='one_benchmark_variant', help='process only this benchmark variant')
+    parser.add_argument('--copyTo', dest='copy_to', help='copy files to this remote')
     util.cmd.attach_main(parser, generate_benchmark_variant_dirs, split_args=True)
     return parser
 
