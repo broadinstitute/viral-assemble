@@ -2569,6 +2569,10 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
 
                     if not os.path.lexists(mdata_fname):
                         _write_json(mdata_fname, **mdata)
+                        _run('git annex add {}'.format(mdata_fname), cwd=os.path.dirname(mdata_fname), retries=3)
+                        if copy_to:
+                            _run('git annex copy {} --to={}'.format(mdata_name, copy_to), cwd=workflow_root, retries=3)
+
                     #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
 
                     mdata['runInputs'] = util.misc.json_loads(mdata['submittedFiles']['inputs'])
@@ -2585,6 +2589,9 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                     mdata_rel = util.misc.transform_json_data(mdata_rel, functools.partial(util.misc.maybe_wait_for_result, timeout=300))
 
                     _write_json(mdata_rel_fname, **mdata_rel)
+                    _run('git annex add {}'.format(mdata_rel_fname), cwd=os.path.dirname(mdata_rel_fname), retries=3)
+                    if copy_to:
+                        _run('git annex copy {} --to={}'.format(mdata_rel_fname, copy_to), cwd=workflow_root, retries=3)
                     _log.info('Wrote metadata to %s and %s', mdata_fname, mdata_rel_fname)
                     processing_stats['saved_metata'] += 1
         _log.info('Processing stats: %s', str(processing_stats))
