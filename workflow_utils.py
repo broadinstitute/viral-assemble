@@ -2572,7 +2572,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                         _write_json(mdata_fname, **mdata)
                         _run('git annex add {}'.format(mdata_fname), cwd=os.path.dirname(mdata_fname), retries=3)
                         if copy_to:
-                            _run('git annex copy {} --to={}'.format(mdata_name, copy_to), cwd=workflow_root, retries=3)
+                            _run('git annex copy {} --to={}'.format(mdata_fname, copy_to), cwd=workflow_root, retries=3)
 
                     #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
 
