@@ -289,11 +289,11 @@ def _run(cmd, *args, **kw):
             subprocess.check_call(cmd, shell=True, **kw)
             succeeded = True
         except Exception as e:
-            if retries:
+            if retries > 0:
+                retries -= 1
                 _log.info('RETRY {} sleep {} command (cwd={}, kw={}) in {}s: {} exception {}'.format(retries, sleep_time_secs,
                                                                                                      os.getcwd(), kw, 
                                                                                                      time.time()-beg_time, cmd, e))
-                retries -= 1
                 time.sleep(sleep_time_secs)
                 sleep_time_secs *= 2
             elif not ignore_failures:
@@ -2523,6 +2523,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                 assert mdata['id'] == wf['id']
                 assert 'workflowLog' not in mdata or mdata['workflowLog'].endswith('workflow.{}.log'.format(wf['id']))
                 analysis_dir = mdata['labels'].get('analysis_dir', cromwell_analysis_id_to_dir.get(mdata['id'], None))
+                analysis_dir = os.path.abspath(analysis_dir)
                 _log.info('ID %s ADIR %s', mdata['id'], analysis_dir)
                 if analysis_dir:
                     if analysis_dirs_roots and not any(_is_under_dir(analysis_dir, analysis_dirs_root)
