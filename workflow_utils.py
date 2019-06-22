@@ -278,6 +278,7 @@ def _make_cmd(cmd, *args):
 
 def _run(cmd, *args, **kw):
     retries = kw.pop('retries', 0)
+    ignore_failures = kw.pop('ignore_failures', False)
     cmd = _make_cmd(cmd, *args)
     _log.info('running command: %s cwd=%s kw=%s', cmd, os.getcwd(), kw)
     beg_time = time.time()
@@ -295,7 +296,7 @@ def _run(cmd, *args, **kw):
                 retries -= 1
                 time.sleep(sleep_time_secs)
                 sleep_time_secs *= 2
-            else:
+            elif not ignore_failures:
                 raise
         finally:
             _log.info('command (cwd={}, kw={}) {} in {}s: {}'.format(os.getcwd(), kw, 'SUCCEEDED' if succeeded else 'FAILED',
@@ -1931,7 +1932,7 @@ __commands__.append(('generate_mult_benchmark_variant_dirs', parser_generate_mul
 
 # *** submit_benchmark_variant_dirs
 
-def submit_benchmark_variant_dirs(benchmarks_spec_file, backend='Local'):
+def submit_benchmark_variant_dirs(benchmarks_spec_file, backend='Local', copy_to=None):
     """The code below takes a benchmark spec file, which specifies benchmarks (as analysis dirs) and variants,
     and generates, under each benchmark dir and for each variant, an analysis spec obtained by
     overriding the benchmark settings with the variant.
@@ -1950,14 +1951,21 @@ def submit_benchmark_variant_dirs(benchmarks_spec_file, backend='Local'):
 
     processing_stats = collections.Counter()
 
+    git_annex_tool = tools.git_annex.GitAnnexTool()
     for benchmark_dir in benchmark_dirs:
         for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
-            _submit_prepared_analysis(analysis_dir=os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name),
+            analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
+            _submit_prepared_analysis(analysis_dir=analysis_dir,
                                       processing_stats=processing_stats, backend=backend)
+            if copy_to:
+                git_annex_tool.add_dir(analysis_dir)
+                _run('git annex copy . --to={}'.format(copy_to), cwd=analysis_dir, retries=3)
+
 
 def parser_submit_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
     parser.add_argument('--backend', default='Local', help='backend on which to run')
+    parser.add_argument('--copyTo', dest='copy_to', help='copy files to this remote')
     util.cmd.attach_main(parser, submit_benchmark_variant_dirs, split_args=True)
     return parser
 
@@ -2588,7 +2596,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
         if not repeat or status_stats['Running'] == 0:
             _log.info('finalize_analysis_dirs: finished! exiting')
             break
-        _run('git commit -m "added benchmarks"', retries=2)
+        _run('git commit -m "added benchmarks"', retries=2, ignore_failures=True)
         _run('git annex sync --message="added benchmarks"', retries=2)
         _log.info('finalize_analysis_dirs repeat: sleeping for %s', repeat_delay)
         time.sleep(repeat_delay)
