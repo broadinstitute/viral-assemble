@@ -4,7 +4,7 @@ bbmap=38.56
 bmtagger=3.101
 boto3
 bwa=0.7.17
-cromwell=42
+cromwell=43
 cromwell-tools=1.1.0
 cd-hit=4.6.8
 cd-hit-auxtools=4.6.8
