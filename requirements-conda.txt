@@ -1,5 +1,6 @@
 annexremote=1.3.1
 blast=2.6.0
+bbmap=38.56
 bmtagger=3.101
 boto3
 bwa=0.7.17
