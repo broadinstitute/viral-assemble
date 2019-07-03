@@ -23,7 +23,7 @@ cached_fetch_jar_from_github () {
 }
 
 cached_fetch_jar_from_github broadinstitute cromwell womtool ${CROMWELL_VERSION}
-cached_fetch_jar_from_github broadinstitute cromwell cromwell ${CROWELL_VERSION}
+cached_fetch_jar_from_github broadinstitute cromwell cromwell ${CROMWELL_VERSION}
 cached_fetch_jar_from_github dnanexus dxWDL dxWDL ${DXWDL_VERSION}
 
 TGZ=dx-toolkit-v${DX_TOOLKIT_VERSION}-ubuntu-14.04-amd64.tar.gz
