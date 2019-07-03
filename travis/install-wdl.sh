@@ -2,8 +2,8 @@
 set -eu -o pipefail
 
 DX_TOOLKIT_VERSION=0.285.0
-DXWDL_VERSION=1.11
-CROMWELL_VERSION=43
+DXWDL_VERSION=0.72
+CROMWELL_VERSION=33.1
 
 
 cached_fetch_jar_from_github () {
