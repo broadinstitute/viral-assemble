@@ -279,6 +279,12 @@ def _make_cmd(cmd, *args):
 def _run(cmd, *args, **kw):
     retries = kw.pop('retries', 0)
     ignore_failures = kw.pop('ignore_failures', False)
+    if 'cwd' in kw:
+        if not os.path.isabs(kw['cwd']):
+            kw['cwd'] = os.path.abspath(kw['cwd'])
+        util.misc.chk(os.path.isdir(kw['cwd']),
+                      'trying to run command {} in non-existent dir: cwd={} kw={}'.format(cmd, os.getcwd(), kw))
+
     cmd = _make_cmd(cmd, *args)
     _log.info('running command: %s cwd=%s kw=%s', cmd, os.getcwd(), kw)
     beg_time = time.time()
@@ -2067,6 +2073,8 @@ def gather_benchmark_variant_stats(benchmarks_spec_file):
     #                 idx2stat.setdefault((benchmark_variant, k), collections.OrderedDict())[benchmark_dir] = v
     # df = pd.DataFrame(idx2stat)
     df.to_pickle('cmp/df.pkl.gz')
+    with open('cmp/df.html', 'w') as out:
+        df.to_html(out)
 
 def parser_gather_benchmark_variant_stats(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
@@ -2209,8 +2217,8 @@ def generate_benchmark_variant_comparisons_from_gathered_stats(benchmarks_spec_f
                         deltas = benchmark_stats[metric][variants[0]] - benchmark_stats[metric][variants[1]]
                         _log.info('deltas=%s', deltas)
 
-                        org.text('Total: {}.  No change: {}.'.format(total, no_change))
-                        org.text('')
+                        #org.text('Total: {}.  No change: {}.'.format(total, no_change))
+                        #org.text('')
 
                         deltas_series = deltas.dropna()
                         deltas_series.hist(bins=20)
