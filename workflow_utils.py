@@ -952,6 +952,14 @@ def _get_workflow_inputs_spec(workflow_name, docker_img, analysis_dir):
     return _ord_dict(*[(input_name, _parse_input_spec(input_spec_str))
                        for input_name, input_spec_str in input_spec_parsed.items()])
 
+def _get_wdl_for_docker_img(docker_img, workflow_name, extracted_wdl_base_dir, analysis_dir):
+    """For the docker_img, get a .zip of the wdl imports, the top-level wdl file for the workflow, and the workflow input spec."""
+
+    pass
+    #wdl_dir = os.path.join(extracted_wdl_base_dir, util.file.string_to_file_name())
+    
+
+
 # ** _construct_analysis_inputs_parser
 
 # The code here is concerned with specifying a set of analyses to run.
