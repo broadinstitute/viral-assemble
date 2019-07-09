@@ -952,13 +952,28 @@ def _get_workflow_inputs_spec(workflow_name, docker_img, analysis_dir):
     return _ord_dict(*[(input_name, _parse_input_spec(input_spec_str))
                        for input_name, input_spec_str in input_spec_parsed.items()])
 
-def _get_wdl_for_docker_img(docker_img, workflow_name, extracted_wdl_base_dir, analysis_dir):
+def _get_wdl_for_docker_img(docker_img, workflow_name, extracted_wdl_base_dir='wdl'):
     """For the docker_img, get a .zip of the wdl imports, the top-level wdl file for the workflow, and the workflow input spec."""
 
-    pass
-    #wdl_dir = os.path.join(extracted_wdl_base_dir, util.file.string_to_file_name())
-    
+    docker_tool = tools.docker.DockerTool()
+    docker_img = docker_tool.add_image_hash(docker_img)
+    wdl_dir = os.path.join(extracted_wdl_base_dir, util.file.string_to_file_name(docker_img))
+    if not os.path.isdir(wdl_dir):
+        util.file.mkdir_p(wdl_dir)
+        _extract_wdl_from_docker_img(docker_img, analysis_dir=wdl_dir)
+        workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name=workflow_name, docker_img=docker_img, analysis_dir=wdl_dir)
+        _write_json(os.path.join(wdl_dir, workflow_name+'.input-spec.json'), **workflow_inputs_spec)
 
+        docker_img_no_hash = tools.docker.DockerTool().strip_image_hash(docker_img)
+        _run('sed -i -- "s|{}|{}|g" {}/*.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_no_hash, wdl_dir))
+        _run('sed -i -- "s|{}|{}|g" {}/*.wdl'.format('viral-ngs_version_unknown',
+                                                     docker_img_no_hash.split(':')[1], wdl_dir))
+        _run('zip imports.zip *.wdl', cwd=wdl_dir)
+        git_annex_tool = tools.git_annex.GitAnnexTool()
+        git_anenx_tool.add_dir(wdl_dir)
+    util.misc.chk(all([os.path.isfile(os.path.join(wdl_dir, f)) for f in ('imports.zip', workflow_name+'.input-spec.json',
+                                                                          workflow_name+'.wdl')]))
+    return wdl_dir
 
 # ** _construct_analysis_inputs_parser
 
@@ -1631,6 +1646,7 @@ def _prepare_analysis_crogit_do(inputs,
 
     _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
 
+    wdl_dir = _get_wdl_dir_for_docker_img(docker_img=docker_img_hash, workflow_name=workflow_name)
     _extract_wdl_from_docker_img(docker_img_hash, analysis_dir)
     workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash, analysis_dir=analysis_dir)
     _write_json(os.path.join(analysis_dir, 'inputs-orig.json'), **inputs)
