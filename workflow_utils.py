@@ -970,7 +970,9 @@ def _get_wdl_for_docker_img(docker_img, workflow_name, extracted_wdl_base_dir='w
                                                      docker_img_no_hash.split(':')[1], wdl_dir))
         _run('zip imports.zip *.wdl', cwd=wdl_dir)
         git_annex_tool = tools.git_annex.GitAnnexTool()
-        git_anenx_tool.add_dir(wdl_dir)
+        _log.info('ADDDDDING wdl_dir %s', wdl_dir)
+        git_annex_tool.add_dir(wdl_dir)
+        _log.info('ADDDDDED wdl_dir %s', wdl_dir)
     util.misc.chk(all([os.path.isfile(os.path.join(wdl_dir, f)) for f in ('imports.zip', workflow_name+'.input-spec.json',
                                                                           workflow_name+'.wdl')]))
     return wdl_dir
@@ -1646,25 +1648,31 @@ def _prepare_analysis_crogit_do(inputs,
 
     _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
 
-    wdl_dir = _get_wdl_dir_for_docker_img(docker_img=docker_img_hash, workflow_name=workflow_name)
-    _extract_wdl_from_docker_img(docker_img_hash, analysis_dir)
-    workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash, analysis_dir=analysis_dir)
+    wdl_dir = _get_wdl_for_docker_img(docker_img=docker_img_hash, workflow_name=workflow_name)
+    git_annex_tool.copy_annexed_file(os.path.join(wdl_dir, 'imports.zip'), analysis_dir)
+    git_annex_tool.copy_annexed_file(os.path.join(wdl_dir, workflow_name+'.wdl'), analysis_dir)
+    git_annex_tool.copy_annexed_file(os.path.join(wdl_dir, workflow_name+'.input-spec.json'),
+                                     os.path.join(analysis_dir, 'input-spec.json'))
+
+    #_extract_wdl_from_docker_img(docker_img_hash, analysis_dir)
+    #workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash, analysis_dir=analysis_dir)
+    workflow_inputs_spec = _json_loadf(os.path.join(analysis_dir, 'input-spec.json'))
     _write_json(os.path.join(analysis_dir, 'inputs-orig.json'), **inputs)
     run_inputs = _make_git_links_under_dir(inputs, analysis_dir, git_annex_tool, files_prefix='files/runInputs')
 
     input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
 
     run_inputs = _dict_subset(run_inputs, set(workflow_inputs_spec.keys()) | set(k for k in run_inputs if k.startswith('_')))
-    _write_json(os.path.join(analysis_dir, 'input-spec.json'), **workflow_inputs_spec)
+    #_write_json(os.path.join(analysis_dir, 'input-spec.json'), **workflow_inputs_spec)
     _write_json(os.path.join(analysis_dir, 'inputs-git-links.json'), **run_inputs)
 
     # TODO: option to update just some of the tasks.
     # actually, when compiling WDL, should have this option -- or, actually,
     # should make a new workflow where older apps are reused for stages that have not changed.
-    docker_img_no_hash = tools.docker.DockerTool().strip_image_hash(docker_img_hash)
-    _run('sed -i -- "s|{}|{}|g" {}/*.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_no_hash, analysis_dir))
-    _run('sed -i -- "s|{}|{}|g" {}/*.wdl'.format('viral-ngs_version_unknown',
-                                                 docker_img_no_hash.split(':')[1], analysis_dir))
+    #docker_img_no_hash = tools.docker.DockerTool().strip_image_hash(docker_img_hash)
+    #_run('sed -i -- "s|{}|{}|g" {}/*.wdl'.format('quay.io/broadinstitute/viral-ngs', docker_img_no_hash, analysis_dir))
+    #_run('sed -i -- "s|{}|{}|g" {}/*.wdl'.format('viral-ngs_version_unknown',
+    #                                             docker_img_no_hash.split(':')[1], analysis_dir))
 
     analysis_labels = dict(
         input_sources,
@@ -1683,12 +1691,13 @@ def _prepare_analysis_crogit_do(inputs,
     run_inputs_staged_local = _stage_inputs_for_backend(run_inputs, backend='Local', skip_get=True)
     _write_json(os.path.join(analysis_dir, 'inputs-local.json'),
                 **{k:v for k, v in run_inputs_staged_local.items() if not k.startswith('_')})
-    _run('womtool', 'validate',  '-i',  'inputs-local.json', workflow_name + '.wdl', cwd=analysis_dir)
-    _run('zip imports.zip *.wdl', cwd=analysis_dir)
-    for wdl_f in os.listdir(analysis_dir):
-        wdl_f = os.path.join(analysis_dir, wdl_f)
-        if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and os.path.basename(wdl_f) != workflow_name+'.wdl':
-            os.unlink(wdl_f)
+    _run('womtool', 'validate',  '-i',  os.path.abspath(os.path.join(analysis_dir, 'inputs-local.json')),
+         workflow_name + '.wdl', cwd=wdl_dir)
+    #_run('zip imports.zip *.wdl', cwd=analysis_dir)
+    # for wdl_f in os.listdir(analysis_dir):
+    #     wdl_f = os.path.join(analysis_dir, wdl_f)
+    #     if os.path.isfile(wdl_f) and wdl_f.endswith('.wdl') and os.path.basename(wdl_f) != workflow_name+'.wdl':
+    #         os.unlink(wdl_f)
 
 def _get_full_inputs(workflow_name, inputs):
     """Given a parsed specification of a set of analysis inputs, construct a list of the full inputs to each analysis."""

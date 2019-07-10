@@ -942,4 +942,20 @@ class GitAnnexTool(tools.Tool):
         self.import_urls([url])
         self.fromkey(self._url2filestat[url], os.path.abspath(fname))
 
+    def copy_annexed_file(self, src, dest):
+        """Copy annexed file from `src` to `dest`, typically by just creating a new symlink into the annex."""
+        src = os.path.abspath(src)
+        dest = os.path.abspath(dest)
+        util.misc.chk(os.path.isfile(src) or util.file.is_broken_link(src))
+        if os.path.isdir(dest):
+            dest = os.path.join(dest, os.path.basename(src))
+        util.misc.chk(os.path.isdir(os.path.dirname(dest)))
+        link_into_annex, target_of_link_into_annex = self._get_link_into_annex(src)
+        if target_of_link_into_annex is None:
+            shutil.copyfile(src, dest)
+        else:
+            annex_file_abs = os.path.abspath(os.path.join(os.path.dirname(link_into_annex), target_of_link_into_annex))
+            os.symlink(os.path.relpath(annex_file_abs, os.path.dirname(dest)), dest)
+            #os.symlink(os.path.relpath(os.path.abspath(os.path.join(os.path.dirname(link_into_annex), target_of_link_into_annex, os.path.relpath(
+
 # end: class GitAnnexTool
