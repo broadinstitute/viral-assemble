@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eu -o pipefail
 
-DX_TOOLKIT_VERSION=0.285.0
+DX_TOOLKIT_VERSION=0.285.1
 DXWDL_VERSION=0.72
 CROMWELL_VERSION=33.1
 
@@ -26,7 +26,8 @@ cached_fetch_jar_from_github broadinstitute cromwell womtool ${CROMWELL_VERSION}
 cached_fetch_jar_from_github broadinstitute cromwell cromwell ${CROMWELL_VERSION}
 cached_fetch_jar_from_github dnanexus dxWDL dxWDL ${DXWDL_VERSION}
 
-TGZ=dx-toolkit-v${DX_TOOLKIT_VERSION}-ubuntu-14.04-amd64.tar.gz
+TGZ=dx-toolkit-v${DX_TOOLKIT_VERSION}-ubuntu-16.04-amd64.tar.gz
+
 if [ ! -f $CACHE_DIR/$TGZ ]; then
 	echo "Fetching $TGZ"
 	wget --quiet https://dnanexus-sdk.s3.amazonaws.com/$TGZ
