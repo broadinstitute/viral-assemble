@@ -2052,22 +2052,33 @@ __commands__.append(('cmp_benchmark_variants', parser_cmp_benchmark_variants))
 
 # ** generate_benchmark_variant_comparisons
 
-def _gather_one_benchmark_variant_stats(benchmark_dir_and_benchmark_variant):
+def _gather_metrics_for_one_variant_of_one_benchmark(benchmark_dir_and_benchmark_variant):
+    """Load stats for one variant of one benchmark.
+
+    Args:
+      benchmark_dir_and_benchmark_variant: tuple giving benchmark dir and benchmark variant
+    Returns:
+      a list of tuples of the form (metric_name, benchmark_variant, benchmark_dir, metric_value)
+    """
     benchmark_dir, benchmark_variant = benchmark_dir_and_benchmark_variant
-    """Load stats for one variant of one benchmark, as a pandas.Series"""
     result = []
     analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant)
     if os.path.isfile(os.path.join(analysis_dir, 'metadata_with_gitlinks.json')):
         mdata = _load_analysis_metadata(analysis_dir, git_links_abspaths=True)
         mdata_flat = _flatten_analysis_metadata(mdata)
-        for k, v in mdata_flat.items():
-            if k.startswith('inputs.') or k.startswith('outputs.') or k.startswith('labels.') or k.startswith('status'):
-                result.append((k, benchmark_variant, benchmark_dir, v))
+        for metric_name, metric_value in mdata_flat.items():
+            if any(metric_name.startswith(prefix) for prefix in ('inputs.', 'outputs.', 'labels.', 'status')):
+                result.append((metric_name, benchmark_variant, benchmark_dir, metric_value))
     return result
 
-def gather_benchmark_variant_stats(benchmarks_spec_file):
-    """Gather benchmark variant stats into one place.  For each benchmark variant, we produce a file containing
-    the stats for that variant across many benchmarks.
+def gather_benchmark_variant_metrics(benchmarks_spec_file, unified_metrics_file):
+    """Gather benchmark variant metrics into one place.  We produce a unified pandas DataFrame which contains 
+    for each benchmark variant, for each benchmark, for each metric, the value of the metric.
+    Note that some cells of the DataFrame may be NaN if some benchmarks were not run or have failed for some variants.
+
+
+    Each row of the resulting DataFrame corresponds to one benchmark.  The column index is a multi-index
+    by (metric_Name, benchmark_variant).
     """
 
     benchmarks_spec_file = os.path.abspath(benchmarks_spec_file)
@@ -2083,17 +2094,19 @@ def gather_benchmark_variant_stats(benchmarks_spec_file):
     processing_stats = collections.Counter()
     benchmark_variants = tuple(benchmarks_spec['benchmark_variants'].keys())
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=util.misc.available_cpu_count()) as executor:
-        map_res = sorted(functools.reduce(operator.concat,
-                                          executor.map(_gather_one_benchmark_variant_stats,
-                                                       itertools.product(benchmark_dirs,
-                                                                         benchmark_variants)),
-                                         []))
-        r = collections.OrderedDict()
-        for k, benchmark_variant, benchmark_dir, v in map_res:
-            r.setdefault((k, benchmark_variant), collections.OrderedDict())[benchmark_dir] = v
+    with concurrent.futures.ProcessPoolExecutor(max_workers=util.misc.available_cpu_count()) as executor:
+        unified_metrics_data = sorted(functools.reduce(operator.concat,
+                                                       executor.map(_gather_metrics_for_one_variant_of_one_benchmark,
+                                                                    itertools.product(benchmark_dirs,
+                                                                                      benchmark_variants)),
+                                                       []))
 
-        df = pd.DataFrame(r)
+    unified_metrics_data_dict = collections.OrderedDict()
+    for metric_name, benchmark_variant, benchmark_dir, metric_value in unified_metrics_data:
+        unified_metrics_data_dict.setdefault((metric_name, benchmark_variant),
+                                             collections.OrderedDict())[benchmark_dir] = metric_value
+
+    unified_metrics_data_df = pd.DataFrame(unified_metrics_data_dict)
     # for benchmark_dir, 
 
     # for benchmark_dir in benchmark_dirs:
@@ -2105,16 +2118,17 @@ def gather_benchmark_variant_stats(benchmarks_spec_file):
     #             if k.startswith('inputs.') or k.startswith('outputs.') or k.startswith('labels.') or k.startswith('status'):
     #                 idx2stat.setdefault((benchmark_variant, k), collections.OrderedDict())[benchmark_dir] = v
     # df = pd.DataFrame(idx2stat)
-    df.to_pickle('cmp/df.pkl.gz')
-    with open('cmp/df.html', 'w') as out:
-        df.to_html(out)
+    unified_metrics_data_df.to_pickle(unified_metrics_file)
+    #with open('cmp/df.html', 'w') as out:
+    #    df.to_html(out)
 
-def parser_gather_benchmark_variant_stats(parser=argparse.ArgumentParser()):
+def parser_gather_benchmark_variant_metrics(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
-    util.cmd.attach_main(parser, gather_benchmark_variant_stats, split_args=True)
+    parser.add_argument('unified_metrics_file', help='where to save the gathered metrics')
+    util.cmd.attach_main(parser, gather_benchmark_variant_metrics, split_args=True)
     return parser
 
-__commands__.append(('gather_benchmark_variant_stats', parser_gather_benchmark_variant_stats))
+__commands__.append(('gather_benchmark_variant_metrics', parser_gather_benchmark_variant_metrics))
 
 
 
@@ -2214,7 +2228,7 @@ def parser_generate_benchmark_variant_comparisons(parser=argparse.ArgumentParser
 
 __commands__.append(('generate_benchmark_variant_comparisons', parser_generate_benchmark_variant_comparisons))
 
-def generate_benchmark_variant_comparisons_from_gathered_stats(benchmarks_spec_file):
+def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec_file, unified_metrics_file, cmp_output_dir):
     """Generate/update reports of benchmark comparisons.
     """
 
@@ -2230,13 +2244,21 @@ def generate_benchmark_variant_comparisons_from_gathered_stats(benchmarks_spec_f
 
     muscle_tool = tools.muscle.MuscleTool()
 
-    cmp_output_dir = benchmarks_spec['compare_output_dir']
+    #cmp_output_dir = benchmarks_spec['compare_output_dir']
     util.file.mkdir_p(cmp_output_dir)
+    util.misc.chk(not os.listdir(cmp_output_dir), 'cmp_output_dir must be an empty dir')
 
-    benchmark_stats = pd.read_pickle('cmp/df.pkl.gz')
+
+    unified_metrics = pd.read_pickle(unified_metrics_file)
+
+    all_metrics_fname = os.path.join(cmp_output_dir, 'all_metrics.html')
+    with open(all_metrics_fname, 'w') as out:
+        unified_metrics.to_html(out)
 
     org = util.misc.Org()
     org.directive('TITLE', 'Benchmark comparisons')
+    org.text('')
+    org.text('[[file:{}][Metrics table]]'.format(os.path.basename(all_metrics_fname)))
     org.text('')
     with org.headline('Comparisons: created {}'.format(datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))):
         for variants in variant_pairs:
@@ -2247,7 +2269,7 @@ def generate_benchmark_variant_comparisons_from_gathered_stats(benchmarks_spec_f
                         no_change = 0
                         total = 0
 
-                        deltas = benchmark_stats[metric][variants[0]] - benchmark_stats[metric][variants[1]]
+                        deltas = unified_metrics[metric][variants[0]] - unified_metrics[metric][variants[1]]
                         _log.info('deltas=%s', deltas)
 
                         #org.text('Total: {}.  No change: {}.'.format(total, no_change))
@@ -2273,13 +2295,15 @@ def generate_benchmark_variant_comparisons_from_gathered_stats(benchmarks_spec_f
         util.file.dump_file(cmp_output_fname, str(org))
         _run('emacs -Q --batch --eval \'(progn (find-file "{}") (org-html-export-to-html))\''.format(cmp_output_fname))
 
-def parser_generate_benchmark_variant_comparisons_from_gathered_stats(parser=argparse.ArgumentParser()):
+def parser_generate_benchmark_variant_comparisons_from_gathered_metrics(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
-    util.cmd.attach_main(parser, generate_benchmark_variant_comparisons_from_gathered_stats, split_args=True)
+    parser.add_argument('unified_metrics_file', help='file from which to load the metrics')
+    parser.add_argument('cmp_output_dir', help='dir where to output the generated html')
+    util.cmd.attach_main(parser, generate_benchmark_variant_comparisons_from_gathered_metrics, split_args=True)
     return parser
 
-__commands__.append(('generate_benchmark_variant_comparisons_from_gathered_stats',
-                     parser_generate_benchmark_variant_comparisons_from_gathered_stats))
+__commands__.append(('generate_benchmark_variant_comparisons_from_gathered_metrics',
+                     parser_generate_benchmark_variant_comparisons_from_gathered_metrics))
 
 
 # ** print_analysis_stats
