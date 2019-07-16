@@ -2006,7 +2006,7 @@ def submit_benchmark_variant_dirs(benchmarks_spec_file, backend='Local', copy_to
                                           processing_stats=processing_stats, backend=backend)
             except Exception:
                 _log.warning('SUBMIT FAILURE IN %s', analysis_dir)
-                submit_failures.add(analysis_dir)
+                submit_failures.append(analysis_dir)
 
             if copy_to:
                 git_annex_tool.add_dir(analysis_dir)
