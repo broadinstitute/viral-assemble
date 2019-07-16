@@ -1336,7 +1336,8 @@ def submit_analysis_wdl(workflow_name, inputs,
 def _submit_prepared_analysis(analysis_dir,
                               cromwell_server_url='http://localhost:8000',
                               backend='Local',
-                              processing_stats=collections.Counter()):
+                              processing_stats=collections.Counter(),
+                              copy_to=None):
     """Submit prepared analysis.
     """
     cromwell_tool = tools.cromwell.CromwellTool()
@@ -1450,6 +1451,11 @@ def _submit_prepared_analysis(analysis_dir,
     util.misc.chk(cromwell_analysis_id, 'Cromwell analysis id not found in cromwell submit output')
 
     _log.debug('cromwell output is %s', cromwell_output_str)
+
+    if copy_to:
+        tools.git_annex.GitAnnexTool().add_dir(analysis_dir)
+        _run('git annex copy . --to={}'.format(copy_to), cwd=analysis_dir, retries=3)
+
 
     if cromwell_returncode:
         raise RuntimeError('Cromwell failed - ' + cromwell_output_str)
@@ -2003,14 +2009,10 @@ def submit_benchmark_variant_dirs(benchmarks_spec_file, backend='Local', copy_to
             analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
             try:
                 _submit_prepared_analysis(analysis_dir=analysis_dir,
-                                          processing_stats=processing_stats, backend=backend)
+                                          processing_stats=processing_stats, backend=backend, copy_to=copy_to)
             except Exception:
                 _log.warning('SUBMIT FAILURE IN %s', analysis_dir)
                 submit_failures.append(analysis_dir)
-
-            if copy_to:
-                git_annex_tool.add_dir(analysis_dir)
-                _run('git annex copy . --to={}'.format(copy_to), cwd=analysis_dir, retries=3)
 
     util.file.dump_file(submit_failures_file, '\n'.join(submit_failures))
 
