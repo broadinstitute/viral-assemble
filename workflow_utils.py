@@ -2014,7 +2014,8 @@ def submit_benchmark_variant_dirs(benchmarks_spec_file, backend='Local', copy_to
                 _log.warning('SUBMIT FAILURE IN %s', analysis_dir)
                 submit_failures.append(analysis_dir)
 
-    util.file.dump_file(submit_failures_file, '\n'.join(submit_failures))
+    if submit_failures_file:
+        util.file.dump_file(submit_failures_file, '\n'.join(submit_failures))
 
 
 def parser_submit_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
