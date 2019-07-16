@@ -1974,13 +1974,15 @@ __commands__.append(('generate_mult_benchmark_variant_dirs', parser_generate_mul
 
 # *** submit_benchmark_variant_dirs
 
-def submit_benchmark_variant_dirs(benchmarks_spec_file, backend='Local', copy_to=None):
+def submit_benchmark_variant_dirs(benchmarks_spec_file, backend='Local', copy_to=None, submit_failures_file=None):
     """The code below takes a benchmark spec file, which specifies benchmarks (as analysis dirs) and variants,
     and generates, under each benchmark dir and for each variant, an analysis spec obtained by
     overriding the benchmark settings with the variant.
 
     Args:
       benchmarks_spec: a yaml file specifying benchmarks and variants.
+    
+      submit_failures_file: put list of benchmarks that failed to submit here
     """
 
     benchmarks_spec_file = os.path.abspath(benchmarks_spec_file)
@@ -1993,21 +1995,32 @@ def submit_benchmark_variant_dirs(benchmarks_spec_file, backend='Local', copy_to
 
     processing_stats = collections.Counter()
 
+    submit_failures = []
+
     git_annex_tool = tools.git_annex.GitAnnexTool()
     for benchmark_dir in benchmark_dirs:
         for benchmark_variant_name, benchmark_variant_def in benchmarks_spec['benchmark_variants'].items():
             analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
-            _submit_prepared_analysis(analysis_dir=analysis_dir,
-                                      processing_stats=processing_stats, backend=backend)
+            try:
+                _submit_prepared_analysis(analysis_dir=analysis_dir,
+                                          processing_stats=processing_stats, backend=backend)
+            except Exception:
+                _log.warning('SUBMIT FAILURE IN %s', analysis_dir)
+                submit_failures.add(analysis_dir)
+
             if copy_to:
                 git_annex_tool.add_dir(analysis_dir)
                 _run('git annex copy . --to={}'.format(copy_to), cwd=analysis_dir, retries=3)
+
+    util.file.dump_file(submit_failures_file, '\n'.join(submit_failures))
 
 
 def parser_submit_benchmark_variant_dirs(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
     parser.add_argument('--backend', default='Local', help='backend on which to run')
     parser.add_argument('--copyTo', dest='copy_to', help='copy files to this remote')
+    parser.add_argument('--submitFailuresFile', dest='submit_failures_file',
+                        help='file to which to save analyses that failed to submit')
     util.cmd.attach_main(parser, submit_benchmark_variant_dirs, split_args=True)
     return parser
 
