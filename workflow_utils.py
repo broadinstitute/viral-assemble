@@ -2109,11 +2109,19 @@ def gather_benchmark_variant_metrics(benchmarks_spec_file, unified_metrics_file)
     processing_stats = collections.Counter()
     benchmark_variants = tuple(benchmarks_spec['benchmark_variants'].keys())
 
+    benchmark_dir_variant_pairs = tuple(itertools.product(benchmark_dirs, benchmark_variants))
+    git_annex_tool = tools.git_annex.GitAnnexTool()
+    with git_annex_tool.batching() as git_annex_tool:
+        for benchmark_dir, benchmark_variant in benchmark_dir_variant_pairs:
+            analysis_dir = os.path.abspath(os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant))
+            mdata_fname = os.path.join(analysis_dir, 'metadata_with_gitlinks.json')
+            if os.path.lexists(mdata_fname):
+                git_annex_tool.get(mdata_fname, now=False)
+            
     with concurrent.futures.ProcessPoolExecutor(max_workers=util.misc.available_cpu_count()) as executor:
         unified_metrics_data = sorted(functools.reduce(operator.concat,
                                                        executor.map(_gather_metrics_for_one_variant_of_one_benchmark,
-                                                                    itertools.product(benchmark_dirs,
-                                                                                      benchmark_variants)),
+                                                                    benchmark_dir_variant_pairs),
                                                        []))
 
     unified_metrics_data_dict = collections.OrderedDict()
