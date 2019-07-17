@@ -568,7 +568,6 @@ class GitAnnexTool(tools.Tool):
         """Get annexed file info that can be determined quickly e.g. from the key"""
         raise NotImplemented()
 
-
     @_add_now_arg
     def get(self, f):
         """Ensure the file exists in the local annex, fetching it from a remote if necessary.
@@ -583,7 +582,7 @@ class GitAnnexTool(tools.Tool):
         if not os.path.isfile(f):
             _log.debug('LOOK: f=%s link_target=%s cwd=%s abspath=%s dirname=%s',
                        f, link_target, os.getcwd(), os.path.abspath(f), os.path.dirname(os.path.abspath(f)))
-            repo_dir = os.path.realpath(os.path.join(os.path.abspath(f), link_target[:link_target.index('.git/')], '..'))
+            repo_dir = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(f)), link_target[:link_target.index('.git/')]))
             util.misc.chk(os.path.isdir(os.path.join(repo_dir, '.git/annex')))
             self.execute_batch(['get'], batch_args=(os.path.abspath(f),), cwd=repo_dir)
 
