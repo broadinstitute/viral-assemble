@@ -251,7 +251,7 @@ def _json_loads(s):
     return json.loads(s.strip(), object_hook=_load_dict_sorted, object_pairs_hook=collections.OrderedDict)
 
 def _json_loadf(fname):
-    return _json_loads(util.file.slurp_file(fname, maxSizeMb=1000))
+    return _json_loads(tools.git_annex.GitAnnexTool().slurp_file(fname, maxSizeMb=1000))
 
 # *** timestamps processing
 
@@ -1088,7 +1088,7 @@ def _analysis_inputs_from_analysis_dirs_roots(args, **kw):
             mdata = _json_loadf(mdata_fname)
             if mdata['status'] == 'Success':
                 continue
-        if not os.path.isfile(os.path.join(analysis_dir, 'metadata_with_gitlinks.json')):
+        if not os.path.lexists(os.path.join(analysis_dir, 'metadata_with_gitlinks.json')):
             continue
 
         args.analysis_dir = analysis_dir
@@ -1810,8 +1810,7 @@ def _get_docker_hash(docker_img):
 
 def _is_prepared_analysis_dir(analysis_dir):
     """Check whether analysis dir has been set up for analysis"""
-    return all(os.path.isfile(os.path.join(analysis_dir, f)) or
-               os.path.islink(os.path.join(analysis_dir, f)) for f in ('inputs-git-links.json', 'imports.zip'))
+    return all(os.path.lexists(os.path.join(analysis_dir, f)) for f in ('inputs-git-links.json', 'imports.zip'))
 
 ########################################################################################################################
 
@@ -1838,7 +1837,7 @@ def _generate_benchmark_variant(benchmarks_spec_dir, benchmark_dir, benchmark_va
     run_inputs = _json_loadf(os.path.join(benchmarks_spec_dir, benchmark_dir, 'inputs-git-links.json'))
     git_annex_tool.get(os.path.join(benchmarks_spec_dir, benchmark_dir, 'metadata_with_gitlinks.json'))
     metadata = _json_loadf(os.path.join(benchmarks_spec_dir, benchmark_dir, 'metadata_with_gitlinks.json')) \
-        if os.path.isfile(os.path.join(benchmarks_spec_dir, benchmark_dir, 'metadata_with_gitlinks.json')) else {}
+        if os.path.lexists(os.path.join(benchmarks_spec_dir, benchmark_dir, 'metadata_with_gitlinks.json')) else {}
     run_inputs = _qry_json(json_data=dict(run_inputs=run_inputs, metadata=metadata),
                            jmespath_expr=benchmark_variant_def)
     _prepare_analysis_crogit_do(inputs=run_inputs, analysis_dir=analysis_dir, analysis_labels={}, git_annex_tool=git_annex_tool)
@@ -2048,7 +2047,7 @@ def cmp_benchmark_variants(benchmarks_spec_file, variants, metric):
         variant_analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant_name)
                                  for benchmark_variant_name in variants]
         mdatas = [os.path.join(d, 'metadata_with_gitlinks.json') for d in variant_analysis_dirs]
-        if all(map(os.path.isfile, mdatas)):
+        if all(map(os.path.lexists, mdatas)):
             mdatas = list(map(_json_loadf, mdatas))
             delta = mdatas[1]['outputs'].get(metric, 0) - mdatas[0]['outputs'].get(metric, 0)
             if abs(delta) > 50:
@@ -2079,7 +2078,7 @@ def _gather_metrics_for_one_variant_of_one_benchmark(benchmark_dir_and_benchmark
     benchmark_dir, benchmark_variant = benchmark_dir_and_benchmark_variant
     result = []
     analysis_dir = os.path.join(benchmark_dir, 'benchmark_variants', benchmark_variant)
-    if os.path.isfile(os.path.join(analysis_dir, 'metadata_with_gitlinks.json')):
+    if os.path.lexists(os.path.join(analysis_dir, 'metadata_with_gitlinks.json')):
         mdata = _load_analysis_metadata(analysis_dir, git_links_abspaths=True)
         mdata_flat = _flatten_analysis_metadata(mdata)
         for metric_name, metric_value in mdata_flat.items():
@@ -2329,7 +2328,7 @@ def print_analysis_stats(analysis_dirs_roots, qry_expr):
     analyses = []
     for analysis_dir in analysis_dirs:
         mdata_fname = os.path.join(analysis_dir, 'metadata_with_gitlinks.json')
-        if os.path.isfile(mdata_fname):
+        if os.path.lexists(mdata_fname):
             analyses.append(_json_loadf(mdata_fname))
     print(_qry_json(json_data=analyses, jmespath_expr=qry_expr))
 
@@ -2396,42 +2395,42 @@ class CromwellServer(object):
 def _is_analysis_done(analysis_dir):
     return os.path.exists(os.path.join(analysis_dir, 'output', 'logs'))
 
-def _record_file_metadata(val, analysis_dir, root_dir):
-    """If 'val' is a filename, return a dict representing the file and some metadata about it;
-    otherwise, return val as-is."""
-    if isinstance(val, list): return [_record_file_metadata(v, analysis_dir, root_dir) for v in val]
-    if _is_mapping(val): return collections.OrderedDict([(k, _record_file_metadata(v, analysis_dir, root_dir))
-                                                          for k, v in val.items()])
-    if not (_is_str(val) and (os.path.isfile(val) or os.path.isdir(val))): return val
-    file_info = collections.OrderedDict([('_is_file' if os.path.isfile(val) else '_is_dir', True)])
-    assert val.startswith(analysis_dir) or val.startswith(root_dir), \
-        '{} does not start with {} or {}'.format(val, analysis_dir, root_dir)
-    if val.startswith(analysis_dir):
-        relpath = os.path.relpath(val, analysis_dir)
-        abspath = os.path.join(analysis_dir, relpath)
-    else:
-        cromwell_executions_dir = os.path.dirname(os.path.dirname(root_dir))
-        relpath = os.path.relpath(val, cromwell_executions_dir)
-        abspath = os.path.join(analysis_dir, 'output',
-                               'call_logs' if os.path.basename(val) in ('stdout', 'stderr') else 'outputs', relpath)
-        if os.path.isfile(val) and not os.path.isfile(abspath):
-            _log.debug('LINKING {} to {}'.format(val, abspath))
-            util.file.mkdir_p(os.path.dirname(abspath))
-            shutil.copy(val, abspath)
-        if os.path.isdir(val):
-            util.file.mkdir_p(abspath)
+# def _record_file_metadata(val, analysis_dir, root_dir):
+#     """If 'val' is a filename, return a dict representing the file and some metadata about it;
+#     otherwise, return val as-is."""
+#     if isinstance(val, list): return [_record_file_metadata(v, analysis_dir, root_dir) for v in val]
+#     if _is_mapping(val): return collections.OrderedDict([(k, _record_file_metadata(v, analysis_dir, root_dir))
+#                                                           for k, v in val.items()])
+#     if not (_is_str(val) and (os.path.isfile(val) or os.path.isdir(val))): return val
+#     file_info = collections.OrderedDict([('_is_file' if os.path.isfile(val) else '_is_dir', True)])
+#     assert val.startswith(analysis_dir) or val.startswith(root_dir), \
+#         '{} does not start with {} or {}'.format(val, analysis_dir, root_dir)
+#     if val.startswith(analysis_dir):
+#         relpath = os.path.relpath(val, analysis_dir)
+#         abspath = os.path.join(analysis_dir, relpath)
+#     else:
+#         cromwell_executions_dir = os.path.dirname(os.path.dirname(root_dir))
+#         relpath = os.path.relpath(val, cromwell_executions_dir)
+#         abspath = os.path.join(analysis_dir, 'output',
+#                                'call_logs' if os.path.basename(val) in ('stdout', 'stderr') else 'outputs', relpath)
+#         if os.path.isfile(val) and not os.path.isfile(abspath):
+#             _log.debug('LINKING {} to {}'.format(val, abspath))
+#             util.file.mkdir_p(os.path.dirname(abspath))
+#             shutil.copy(val, abspath)
+#         if os.path.isdir(val):
+#             util.file.mkdir_p(abspath)
 
-    assert os.path.isabs(abspath) and abspath.startswith(analysis_dir), \
-        'bad abspath: {} analysis_dir: {}'.format(abspath, analysis_dir)
-    relpath = os.path.relpath(abspath, analysis_dir)
-    assert not os.path.isabs(relpath), 'should be relative: {}'.format(relpath)
-    assert os.path.isfile(abspath) or os.path.isdir(abspath), 'not file or dir: {}'.format(abspath)
-    assert os.path.isdir(abspath) or os.path.getsize(abspath) == os.path.getsize(val)
-    file_info['relpath'] = relpath
-    if os.path.isfile(abspath):
-        file_info['size'] = os.path.getsize(abspath)
-        file_info['md5'] = _run_get_output('md5sum ' + abspath).strip().split()[0]
-    return file_info
+#     assert os.path.isabs(abspath) and abspath.startswith(analysis_dir), \
+#         'bad abspath: {} analysis_dir: {}'.format(abspath, analysis_dir)
+#     relpath = os.path.relpath(abspath, analysis_dir)
+#     assert not os.path.isabs(relpath), 'should be relative: {}'.format(relpath)
+#     assert os.path.isfile(abspath) or os.path.isdir(abspath), 'not file or dir: {}'.format(abspath)
+#     assert os.path.isdir(abspath) or os.path.getsize(abspath) == os.path.getsize(val)
+#     file_info['relpath'] = relpath
+#     if os.path.isfile(abspath):
+#         file_info['size'] = os.path.getsize(abspath)
+#         file_info['md5'] = _run_get_output('md5sum ' + abspath).strip().split()[0]
+#     return file_info
 
 def is_analysis_dir(d):
     """Test whether a given directory is an analysis dir"""
@@ -2580,6 +2579,8 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
     cromwell_server = CromwellServer(host=cromwell_host)
     cromwell_tool = tools.cromwell.CromwellTool()
     def _do_finalize():
+        git_annex_tool = tools.git_annex.GitAnnexTool()
+
         processing_stats = collections.Counter()
         status_stats = collections.Counter()
 
@@ -2587,13 +2588,12 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
         cromwell_analysis_id_to_dir = {}
         for analysis_dir in analysis_dirs:
             fname = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
-            _log.info('looking at cromwell output file %s; exists? %s', fname, os.path.isfile(fname))
-            if os.path.isfile(fname):
+            _log.info('looking at cromwell output file %s; exists? %s', fname, os.path.lexists(fname))
+            if os.path.lexists(fname):
                 _log.info('looking at cromwell output file %s', fname)
-                cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output(fname)
+                cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output_str(git_annex_tool.slurp_file(fname))
                 cromwell_analysis_id_to_dir[cromwell_analysis_id] = analysis_dir
         _log.info('GOT ANALYSIS IDS %s', cromwell_analysis_id_to_dir)
-        git_annex_tool = tools.git_annex.GitAnnexTool()
         with git_annex_tool.batching() as git_annex_tool:
 
             query = []
@@ -3108,7 +3108,7 @@ def compare_analysis_pairs(analysis_dirs_roots, common, filter_A, filter_B, labe
 
     mdatas = [_json_loadf(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'))
               for analysis_dir in _get_analysis_dirs_under(analysis_dirs_roots)
-              if os.path.isfile(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'))]
+              if os.path.lexists(os.path.join(analysis_dir, 'metadata_with_gitlinks.json'))]
     processing_stats['mdatas'] = len(mdatas)
 
     id2mdata = {mdata['id']:mdata for mdata in mdatas}

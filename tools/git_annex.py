@@ -591,6 +591,11 @@ class GitAnnexTool(tools.Tool):
             self.get(f)
         return os.path.isfile(f)
 
+    def slurp_file(self, f, *args, **kw):
+        """Return the contents of the file, git-annex-getting it first if needed"""
+        self.maybe_get(f)
+        return util.file.slurp_file(f, *args, **kw)
+
     def drop(self, f):
         """Drop the file from its local repo."""
         _log.debug('git-annex drop %s (cwd=%s)', f, os.getcwd())
