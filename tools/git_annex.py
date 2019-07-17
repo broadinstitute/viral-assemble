@@ -583,7 +583,9 @@ class GitAnnexTool(tools.Tool):
         if not os.path.isfile(f):
             _log.debug('LOOK: f=%s link_target=%s cwd=%s abspath=%s dirname=%s',
                        f, link_target, os.getcwd(), os.path.abspath(f), os.path.dirname(os.path.abspath(f)))
-            self.execute_batch(['get'], batch_args=(os.path.basename(f),), cwd=os.path.dirname(os.path.abspath(f)))
+            repo_dir = os.path.realpath(os.path.join(os.path.abspath(f), link_target[:link_target.index('.git/')], '..'))
+            util.misc.chk(os.path.isdir(os.path.join(repo_dir, '.git/annex')))
+            self.execute_batch(['get'], batch_args=(os.path.abspath(f),), cwd=repo_dir)
 
     def maybe_get(self, f):
         """Get file if can"""
