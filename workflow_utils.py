@@ -2307,7 +2307,10 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
 
                         #org.text('Total: {}.  No change: {}.'.format(total, no_change))
                         #org.text('')
+                        
+                        pp.figure()
 
+                        pp.subplot(211)
                         deltas_series = deltas.dropna()
                         deltas_series.hist(bins=20)
                         fn = os.path.join(cmp_output_dir, 'fig{}.svg'.format(random.randint(0,10000)))
@@ -2627,22 +2630,23 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                 analysis_dir = mdata['labels'].get('analysis_dir', cromwell_analysis_id_to_dir.get(mdata['id'], None))
                 analysis_dir = os.path.abspath(analysis_dir)
                 _log.info('ID %s ADIR %s', mdata['id'], analysis_dir)
-                if analysis_dir:
-                    if analysis_dirs_roots and not any(_is_under_dir(analysis_dir, analysis_dirs_root)
-                                                       for analysis_dirs_root in analysis_dirs_roots):
-                        processing_stats['notUnderAnalysisDirsRoots'] += 1
-                        continue
-                    cromwell_output_file = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
-                    if git_annex_tool.maybe_get(cromwell_output_file):
-                        id_from_analysis_dir = cromwell_tool.parse_cromwell_submit_output(cromwell_output_file)
-                        if id_from_analysis_dir != mdata['id']:
-                            processing_stats['id from analysis dir does not match metadata id'] += 1
-                            _log.info('MISMATCH: analysis_dir=%s id=%s id_from_dir=%s',
-                                      analysis_dir, mdata['id'], id_from_analysis_dir)
+                if not status_only:
+                    if analysis_dir:
+                        if analysis_dirs_roots and not any(_is_under_dir(analysis_dir, analysis_dirs_root)
+                                                           for analysis_dirs_root in analysis_dirs_roots):
+                            processing_stats['notUnderAnalysisDirsRoots'] += 1
                             continue
-                else:
-                    processing_stats['noAnalysisDirForWorkflow'] += 1
-                    continue
+                        cromwell_output_file = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
+                        if git_annex_tool.maybe_get(cromwell_output_file):
+                            id_from_analysis_dir = cromwell_tool.parse_cromwell_submit_output(cromwell_output_file)
+                            if id_from_analysis_dir != mdata['id']:
+                                processing_stats['id from analysis dir does not match metadata id'] += 1
+                                _log.info('MISMATCH: analysis_dir=%s id=%s id_from_dir=%s',
+                                          analysis_dir, mdata['id'], id_from_analysis_dir)
+                                continue
+                    else:
+                        processing_stats['noAnalysisDirForWorkflow'] += 1
+                        continue
 
                 status_stats[mdata['status']] += 1
                 if status_only:
