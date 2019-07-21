@@ -1127,12 +1127,13 @@ def _construct_analysis_inputs_parser():
 
 # ** _stage_inputs_for_backend
 
-def _stage_inputs_for_backend(inputs, backend, skip_get=False):
+def _stage_inputs_for_backend(inputs, backend, base_dir_for_rel_paths, skip_get=False):
     """Stage inputs with git links for backend"""
     def _stage_git_link(inp):
         if not _maps(inp, '$git_link'):
             return inp
-        return _stage_file_for_backend(git_file_path=inp['$git_link'], backend=backend, skip_get=skip_get)
+        return _stage_file_for_backend(git_file_path=inp['$git_link'], backend=backend, skip_get=skip_get,
+                                       base_dir_for_rel_paths=base_dir_for_rel_paths)
     return util.misc.transform_json_data(inputs, _stage_git_link)
 
 def _normalize_cromwell_labels(labels):
@@ -1206,7 +1207,7 @@ def _submit_analysis_wdl_do(workflow_name, inputs,
 
         run_inputs = _dict_subset(run_inputs, workflow_inputs_spec.keys())
         _write_json('inputs-git-links.json', **run_inputs)
-        run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
+        run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend, analysis_dir)
         _write_json('inputs.json', **run_inputs_staged)
 
         # TODO: use git annex batch mode to determine the keys for all the file-xxxx files, then
@@ -1347,6 +1348,8 @@ def _submit_prepared_analysis(analysis_dir,
     cromwell_tool = tools.cromwell.CromwellTool()
     cromwell_server = CromwellServer(host=cromwell_server_url)
 
+    analysis_dir = os.path.abspath(analysis_dir)
+
     _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
     if os.path.lexists(os.path.join(analysis_dir, 'metadata_with_gitlinks.json')):
         _log.info('Analysis dir %s already completed, not submitting', analysis_dir)
@@ -1377,8 +1380,8 @@ def _submit_prepared_analysis(analysis_dir,
 
     input_sources = {k:v for k, v in run_inputs.items() if k.startswith('_input_src.')}
     _run('git', 'annex', 'get', '.', cwd=analysis_dir)
-    with util.file.pushd_popd(analysis_dir):
-        run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend)
+    #with util.file.pushd_popd(analysis_dir):
+    run_inputs_staged = _stage_inputs_for_backend(run_inputs, backend, analysis_dir)
     if os.path.lexists(os.path.join(analysis_dir, 'inputs.json')):
         os.remove(os.path.join(analysis_dir, 'inputs.json'))
     util.misc.chk(not os.path.exists(os.path.join(analysis_dir, 'inputs.json')),
@@ -1642,6 +1645,7 @@ def _prepare_analysis_crogit_do(inputs,
         analysis_labels: json file specifying any analysis labels
 
     """
+    analysis_dir = os.path.abspath(analysis_dir)
     inputs = copy.copy(inputs)
     workflow_name = inputs['_workflow_name']
     analysis_id = _create_analysis_id(workflow_name, prefix='analysis')
@@ -1698,7 +1702,8 @@ def _prepare_analysis_crogit_do(inputs,
     # add cromwell labels: dx project, the docker tag we ran on, etc.
 
     _log.info('Validating workflow')
-    run_inputs_staged_local = _stage_inputs_for_backend(run_inputs, backend='Local', skip_get=True)
+    run_inputs_staged_local = _stage_inputs_for_backend(run_inputs, base_dir_for_rel_paths=analysis_dir,
+                                                        backend='Local', skip_get=True)
     _write_json(os.path.join(analysis_dir, 'inputs-local.json'),
                 **{k:v for k, v in run_inputs_staged_local.items() if not k.startswith('_')})
     _run('womtool', 'validate',  '-i',  os.path.abspath(os.path.join(analysis_dir, 'inputs-local.json')),
@@ -2937,9 +2942,12 @@ def _copy_to_gs(git_file_path, gs_prefix = 'gs://sabeti-ilya-cromwell'):   # TOD
     assert _git_annex_checkpresentkey(key, remote=gs_remote_uuid, git_file_path=git_file_path)
     return urls_with_right_fname[0]
 
-def _stage_file_for_backend(git_file_path, backend, skip_get=False):
+def _stage_file_for_backend(git_file_path, backend, base_dir_for_rel_paths, skip_get=False):
     """Ensure file exists in filesystem of the given Cromwell backend, and return the path to the file
     (local or cloud, depending on the backend)."""
+    if not os.path.isabs(git_file_path):
+        util.misc.chk(base_dir_for_rel_paths)
+        git_file_path = os.path.join(base_dir_for_rel_paths, git_file_path)
     if backend == 'Local':
         if not skip_get:
             tools.git_annex.GitAnnexTool().get(git_file_path)
