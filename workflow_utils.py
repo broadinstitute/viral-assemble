@@ -607,22 +607,22 @@ def _determine_dx_analysis_docker_img(dnanexus_tool, mdata):
     mdata['labels']['docker_img'] = docker_img
     mdata['labels']['docker_img_hash'] = docker_tool.add_image_hash(docker_img)
 
-def _get_wdl_for_docker_img(docker_img_hash, workflow_name, out_):
-    """For given viral-ngs docker image, extract the WDL files corresponding to that image,
-    patch the WDL tasks to use that image, prepare the WDL file for the main workflow and a zip file for the
-    dependencies, and determine the input spec for the workflow.
-    """
-    wdl_version_dir = os.path.join('workflow_versions', util.file.string_to_file_name(docker_img_hash), workflow_name)
-    if not os.path.isdir(wdl_version_dir):
-        util.file.mkdir_p(wdl_version_dir)
+# def _get_wdl_for_docker_img(docker_img_hash, workflow_name, out_):
+#     """For given viral-ngs docker image, extract the WDL files corresponding to that image,
+#     patch the WDL tasks to use that image, prepare the WDL file for the main workflow and a zip file for the
+#     dependencies, and determine the input spec for the workflow.
+#     """
+#     wdl_version_dir = os.path.join('workflow_versions', util.file.string_to_file_name(docker_img_hash), workflow_name)
+#     if not os.path.isdir(wdl_version_dir):
+#         util.file.mkdir_p(wdl_version_dir)
 
-        docker_tool = tools.docker.DockerTool()
-        _extract_wdl_from_docker_img(docker_img_hash, wdl_version_dir)
+#         docker_tool = tools.docker.DockerTool()
+#         _extract_wdl_from_docker_img(docker_img_hash, wdl_version_dir)
 
-        _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs',
-                                                  docker_tool.strip_image_hash(docker_img_hash)))
-        _run('zip imports.zip *.wdl')
-        workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
+#         _run('sed -i -- "s|{}|{}|g" *.wdl'.format('quay.io/broadinstitute/viral-ngs',
+#                                                   docker_tool.strip_image_hash(docker_img_hash)))
+#         _run('zip imports.zip *.wdl')
+#         workflow_inputs_spec = _get_workflow_inputs_spec(workflow_name, docker_img=docker_img_hash)
 
 # ** import_dx_analysis impl
 
@@ -952,12 +952,12 @@ def _get_workflow_inputs_spec(workflow_name, docker_img, analysis_dir):
     return _ord_dict(*[(input_name, _parse_input_spec(input_spec_str))
                        for input_name, input_spec_str in input_spec_parsed.items()])
 
-def _get_wdl_for_docker_img(docker_img, workflow_name, extracted_wdl_base_dir='wdl'):
+def _get_wdl_for_docker_img(docker_img, workflow_name, extracted_wdl_base_dir='wdl', copy_to=None):
     """For the docker_img, get a .zip of the wdl imports, the top-level wdl file for the workflow, and the workflow input spec."""
 
     docker_tool = tools.docker.DockerTool()
     docker_img = docker_tool.add_image_hash(docker_img)
-    wdl_dir = os.path.join(extracted_wdl_base_dir, util.file.string_to_file_name(docker_img))
+    wdl_dir = os.path.join(extracted_wdl_base_dir, util.file.string_to_file_name(docker_img), workflow_name)
     if not os.path.isdir(wdl_dir):
         util.file.mkdir_p(wdl_dir)
         _extract_wdl_from_docker_img(docker_img, analysis_dir=wdl_dir)
@@ -970,9 +970,13 @@ def _get_wdl_for_docker_img(docker_img, workflow_name, extracted_wdl_base_dir='w
                                                      docker_img_no_hash.split(':')[1], wdl_dir))
         _run('zip imports.zip *.wdl', cwd=wdl_dir)
         git_annex_tool = tools.git_annex.GitAnnexTool()
-        _log.info('ADDDDDING wdl_dir %s', wdl_dir)
-        git_annex_tool.add_dir(wdl_dir)
-        _log.info('ADDDDDED wdl_dir %s', wdl_dir)
+        if copy_to:
+            _log.info('ADDDDDING wdl_dir %s', wdl_dir)
+            git_annex_tool.add_dir(wdl_dir)
+            _run('git annex copy . --to={}'.format(copy_to), cwd=wdl_dir, retries=3)
+            _log.info('ADDDDDED wdl_dir %s', wdl_dir)
+    
+    _run('git annex get .', cwd=wdl_dir, retries=3)
     util.misc.chk(all([os.path.isfile(os.path.join(wdl_dir, f)) for f in ('imports.zip', workflow_name+'.input-spec.json',
                                                                           workflow_name+'.wdl')]))
     return wdl_dir
@@ -1625,7 +1629,7 @@ __commands__.append(('submit_analyses_crogit', parser_submit_analyses_crogit))
 def _prepare_analysis_crogit_do(inputs,
                                 analysis_dir,
                                 analysis_labels,
-                                git_annex_tool):
+                                git_annex_tool, copy_to=None):
     """Prepare a WDL analysis for submission.
 
     Inputs to the analysis.
@@ -1654,7 +1658,7 @@ def _prepare_analysis_crogit_do(inputs,
 
     _log.info('TTTTTTTTTTT analysis_dir=%s', analysis_dir)
 
-    wdl_dir = _get_wdl_for_docker_img(docker_img=docker_img_hash, workflow_name=workflow_name)
+    wdl_dir = _get_wdl_for_docker_img(docker_img=docker_img_hash, workflow_name=workflow_name, copy_to=None)
     git_annex_tool.copy_annexed_file(os.path.join(wdl_dir, 'imports.zip'), analysis_dir)
     git_annex_tool.copy_annexed_file(os.path.join(wdl_dir, workflow_name+'.wdl'), analysis_dir)
     git_annex_tool.copy_annexed_file(os.path.join(wdl_dir, workflow_name+'.input-spec.json'),
@@ -1840,7 +1844,8 @@ def _generate_benchmark_variant(benchmarks_spec_dir, benchmark_dir, benchmark_va
         if os.path.lexists(os.path.join(benchmarks_spec_dir, benchmark_dir, 'metadata_with_gitlinks.json')) else {}
     run_inputs = _qry_json(json_data=dict(run_inputs=run_inputs, metadata=metadata),
                            jmespath_expr=benchmark_variant_def)
-    _prepare_analysis_crogit_do(inputs=run_inputs, analysis_dir=analysis_dir, analysis_labels={}, git_annex_tool=git_annex_tool)
+    _prepare_analysis_crogit_do(inputs=run_inputs, analysis_dir=analysis_dir, analysis_labels={}, git_annex_tool=git_annex_tool,
+                                copy_to=copy_to)
     if copy_to:
         git_annex_tool.add_dir(analysis_dir)
         _run('git annex copy . --to={}'.format(copy_to), cwd=analysis_dir, retries=3)
