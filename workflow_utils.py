@@ -124,6 +124,7 @@ import pytz
 import contextlib2
 
 import yattag
+import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use('svg')
@@ -2261,7 +2262,8 @@ def parser_generate_benchmark_variant_comparisons(parser=argparse.ArgumentParser
 
 __commands__.append(('generate_benchmark_variant_comparisons', parser_generate_benchmark_variant_comparisons))
 
-def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec_file, unified_metrics_file, cmp_output_dir):
+def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec_file, unified_metrics_file, cmp_output_dir,
+                                                                 overwrite=False):
     """Generate/update reports of benchmark comparisons.
     """
 
@@ -2279,9 +2281,9 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
 
     #cmp_output_dir = benchmarks_spec['compare_output_dir']
     util.file.mkdir_p(cmp_output_dir)
-    util.misc.chk(not os.listdir(cmp_output_dir), 'cmp_output_dir must be an empty dir')
+    util.misc.chk(overwrite or not os.listdir(cmp_output_dir), 'cmp_output_dir must be an empty dir')
 
-
+    tools.git_annex.GitAnnexTool().maybe_get(unified_metrics_file)
     unified_metrics = pd.read_pickle(unified_metrics_file)
 
     all_metrics_fname = os.path.join(cmp_output_dir, 'all_metrics.html')
@@ -2302,19 +2304,43 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
                         no_change = 0
                         total = 0
 
-                        deltas = unified_metrics[metric][variants[0]] - unified_metrics[metric][variants[1]]
-                        _log.info('deltas=%s', deltas)
-
                         #org.text('Total: {}.  No change: {}.'.format(total, no_change))
                         #org.text('')
                         
-                        pp.figure()
+                        fig = pp.figure()
+                        fig.suptitle('Metric: {}'.format(metric))
+                        
+                        axes_deltas_hist = fig.add_subplot(2, 1, 1)
 
-                        pp.subplot(211)
-                        deltas_series = deltas.dropna()
-                        deltas_series.hist(bins=20)
+                        axes_deltas_hist.set_title('deltas: {} - {}'.format(variants[0], variants[1]))
+                        deltas = unified_metrics[metric][variants[0]] - unified_metrics[metric][variants[1]]
+                        _log.info('deltas=%s', deltas)
+
+                        axes_deltas_hist.hist(deltas.dropna(), bins=20)
+
+                        axes_scatter = fig.add_subplot(2, 1, 2)
+                        axes_scatter.set_title('{} vs {}'.format(variants[0], variants[1]))
+                        axes_scatter.scatter(variants[0], variants[1],
+                                             data=unified_metrics[metric])
+
+
+                        ax = axes_scatter
+                        lims = [
+                            np.min([ax.get_xlim(), ax.get_ylim()]),  # min of both axes
+                            np.max([ax.get_xlim(), ax.get_ylim()]),  # max of both axes
+                        ]
+
+                        # now plot both limits against eachother
+                        ax.plot(lims, lims, 'k-', alpha=0.75, zorder=0)
+                        ax.set_aspect('equal')
+                        ax.set_xlim(lims)
+                        ax.set_ylim(lims)
+                        #ax.set_xticklabels(ax.get_xticklabels(), rotation='vertical')
+                        
+                        fig.subplots_adjust(hspace=.5)
+
                         fn = os.path.join(cmp_output_dir, 'fig{}.svg'.format(random.randint(0,10000)))
-                        pp.savefig(fn)
+                        fig.savefig(fn)
                         org.text('[[file:{}]]'.format(os.path.basename(fn)))
                                 
                         for delta_val, delta_infos in (): # itertools.groupby(sorted(deltas), key=operator.itemgetter(0)):
@@ -2335,6 +2361,7 @@ def parser_generate_benchmark_variant_comparisons_from_gathered_metrics(parser=a
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
     parser.add_argument('unified_metrics_file', help='file from which to load the metrics')
     parser.add_argument('cmp_output_dir', help='dir where to output the generated html')
+    parser.add_argument('--overwrite', default=False, action='store_true', help='overwrite target dir')
     util.cmd.attach_main(parser, generate_benchmark_variant_comparisons_from_gathered_metrics, split_args=True)
     return parser
 
