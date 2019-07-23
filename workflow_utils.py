@@ -2295,9 +2295,27 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
     org.text('')
     org.text('[[file:{}][Metrics table]]'.format(os.path.basename(all_metrics_fname)))
     org.text('')
+
+    org.text('{} benchmarks, {} metrics'.format(unified_metrics.shape[0], unified_metrics.shape[1]))
+    org.text('')
+    for variant in benchmarks_spec['benchmark_variants']:
+        org.text('variant ={}=: {}'.format(variant, unified_metrics['labels.sample_name'][variant].nunique()))
+        org.text('')
+
     with org.headline('Comparisons: created {}'.format(datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))):
         for variants in variant_pairs:
             with org.headline('={}= vs ={}='.format(variants[0], variants [1])):
+
+                org.text('={}= succeeded, ={}= failed: {}'.format(variants[0], variants[1],
+                                                                  sum((unified_metrics['status'][variants[0]]=='Succeeded') &
+                                                                      (unified_metrics['status'][variants[1]]=='Failed'))))
+
+                org.text('')
+                org.text('={}= succeeded, ={}= failed: {}'.format(variants[1], variants[0],
+                                                                  sum((unified_metrics['status'][variants[1]]=='Succeeded') &
+                                                                      (unified_metrics['status'][variants[0]]=='Failed'))))
+                org.text('')
+
                 for metric in benchmarks_spec['compare_metrics']:
                     with org.headline('Metric: ={}='.format(metric)):
 
@@ -2306,22 +2324,30 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
 
                         #org.text('Total: {}.  No change: {}.'.format(total, no_change))
                         #org.text('')
+
+                        data = unified_metrics[metric]
+                        margin = 0.02*min(data[variants[0]].std(), data[variants[1]].std())
+                        data_full = data
+                        data = data[(data[variants[0]] - data[variants[1]]).abs() > margin]
                         
                         fig = pp.figure()
-                        fig.suptitle('Metric: {}'.format(metric))
+                        fig.suptitle('Metric: {}\nOmitted {} with diff < {:.2f}'.format(metric, len(data_full)-len(data), margin))
                         
-                        axes_deltas_hist = fig.add_subplot(2, 1, 1)
+                        axes_deltas_hist = fig.add_subplot(1, 2, 1)
+
 
                         axes_deltas_hist.set_title('deltas: {} - {}'.format(variants[0], variants[1]))
-                        deltas = unified_metrics[metric][variants[0]] - unified_metrics[metric][variants[1]]
+                        deltas = data[variants[0]] - data[variants[1]]
                         _log.info('deltas=%s', deltas)
 
                         axes_deltas_hist.hist(deltas.dropna(), bins=20)
 
-                        axes_scatter = fig.add_subplot(2, 1, 2)
-                        axes_scatter.set_title('{} vs {}'.format(variants[0], variants[1]))
+                        axes_scatter = fig.add_subplot(1, 2, 2)
+                        axes_scatter.set_title(metric.split('.')[-1])
+                        axes_scatter.set_xlabel(variants[0])
+                        axes_scatter.set_ylabel(variants[1])
                         axes_scatter.scatter(variants[0], variants[1],
-                                             data=unified_metrics[metric])
+                                             data=data)
 
 
                         ax = axes_scatter
@@ -2337,7 +2363,7 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
                         ax.set_ylim(lims)
                         #ax.set_xticklabels(ax.get_xticklabels(), rotation='vertical')
                         
-                        fig.subplots_adjust(hspace=.5)
+                        fig.subplots_adjust(wspace=.4, top=.8)
 
                         fn = os.path.join(cmp_output_dir, 'fig{}.svg'.format(random.randint(0,10000)))
                         fig.savefig(fn)
