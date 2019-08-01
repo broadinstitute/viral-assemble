@@ -20,6 +20,7 @@ import concurrent.futures
 import json
 import signal
 import socket
+import glob
 
 import util.file
 
@@ -618,6 +619,8 @@ def load_config(cfg, include_directive='include', std_includes=(), param_renamin
          A config mapping is just a dict, possibly including nested dicts, specifying config params.
          The mapping can include an entry pointing to other config files to include.
          The key of the entry is `include_directive`, and the value is a filename or list of filenames of config files.
+         The filenames may include Unix glob wildcards, in which case they denote the list of matching files, which may
+         be empty, sorted in ascending lexicographic order.
          Relative filenames are interpreted relative to the directory containing `cfg`, if `cfg` is a filename,
          else relative to the current directory.  Any files from `std_includes` are prepended to the list of
          included config files.  Parameter values from `cfg` override ones from any included files, and parameter values
@@ -672,9 +675,15 @@ def load_config(cfg, include_directive='include', std_includes=(), param_renamin
     for included_cfg_fname in includes:
         if (not os.path.isabs(included_cfg_fname)) and base_dir_for_includes:
             included_cfg_fname = os.path.join(base_dir_for_includes, included_cfg_fname)
-        _update_config(result, load_config(cfg=included_cfg_fname, 
-                                           include_directive=include_directive,
-                                           param_renamings=param_renamings))
+        
+        included_cfg_fnames = sorted(glob.glob(included_cfg_fname))
+        chk(util.file.is_glob_wildcard(included_cfg_fname) or included_cfg_fnames,
+            'config include file not found: {}'.format(included_cfg_fname))
+
+        for incl_cfg_fname in included_cfg_fnames:
+            _update_config(result, load_config(cfg=incl_cfg_fname, 
+                                               include_directive=include_directive,
+                                               param_renamings=param_renamings))
 
     # mappings in the current (top-level) config override any mappings from included configs
     _update_config(result, cfg)

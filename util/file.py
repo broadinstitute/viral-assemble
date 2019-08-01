@@ -988,3 +988,10 @@ def md5_for_file(fname):
 def replace_ext(fname, new_ext):
     """Replace file extension of `fname` with `new_ext`."""
     return os.path.splitext(fname)[0] + new_ext
+
+def is_glob_wildcard(pattern):
+    """Test whether the glob pattern contains a wildcard.
+    See http://man7.org/linux/man-pages/man7/glob.7.html
+    """
+    re.search(r'[*?[]', pattern)
+
