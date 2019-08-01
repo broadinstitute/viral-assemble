@@ -122,7 +122,11 @@ def render_template(template_fname, rendered_fname, replace, aws_region):
     """Render a template that uses AWS secrets
     """
     template = util.file.slurp_file(template_fname)
-    client = boto3.client('secretsmanager', region_name=aws_region)
+
+    @utill.misc.memoize
+    def _get_client():
+        return boto3.client('secretsmanager', region_name=aws_region)
+
     secret2value = {}
     str2repl = dict(replace or ())
     for m in re.finditer(r'\{\{ aws_secret:(?P<secret_name>[^:]+):(?P<secret_key>\w+) \}\}', template):
@@ -130,7 +134,7 @@ def render_template(template_fname, rendered_fname, replace, aws_region):
         secret_key = m.group('secret_key')
         if secret_name not in secret2value:
             secret2value[secret_name] = \
-                json.loads(client.get_secret_value(SecretId=secret_name)['SecretString'])
+                json.loads(_get_client().get_secret_value(SecretId=secret_name)['SecretString'])
         secret_value = secret2value[secret_name]
         str2repl[m.group(0)] = secret_value[secret_key].replace('\n', '\\n')
 
@@ -138,7 +142,7 @@ def render_template(template_fname, rendered_fname, replace, aws_region):
         secret_name = m.group('secret_name')
         if secret_name not in secret2value:
             secret2value[secret_name] = \
-                json.loads(client.get_secret_value(SecretId=secret_name)['SecretString'])
+                json.loads(_get_client().get_secret_value(SecretId=secret_name)['SecretString'])
         secret_value = secret2value[secret_name]
         secret_fname = rendered_fname + '.' + util.file.string_to_file_name(secret_name) + '.conf'
         util.file.dump_file(secret_fname, secret_value)
