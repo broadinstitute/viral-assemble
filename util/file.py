@@ -993,5 +993,6 @@ def is_glob_wildcard(pattern):
     """Test whether the glob pattern contains a wildcard.
     See http://man7.org/linux/man-pages/man7/glob.7.html
     """
-    re.search(r'[*?[]', pattern)
+    return bool(re.search(r'[*?[]', pattern))
+
 
