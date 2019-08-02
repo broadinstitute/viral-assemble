@@ -123,7 +123,7 @@ def render_template(template_fname, rendered_fname, replace, aws_region):
     """
     template = util.file.slurp_file(template_fname)
 
-    @utill.misc.memoize
+    @util.misc.memoize
     def _get_client():
         return boto3.client('secretsmanager', region_name=aws_region)
 
