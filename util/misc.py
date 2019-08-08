@@ -974,25 +974,42 @@ def find_free_port():
         return s.getsockname()[1]
 
 class Org(object):
-    """Helper for creating org mode files"""
+    """Helper for creating Emacs Org mode files ( https://orgmode.org/ ).
+    These files can be browsed in Emacs as foldable outlines, and can be exported to html.
 
+    Usage: create an Org() object; add Org mode content to it by calling methods like headline(), directive() and text();
+    then use str() to get a string representation of the resulting Org file.  The Org object keeps track of the current
+    outline level.
+    """
+
+    #
+    # Fields:
+    #
+    #   _lines: list of text lines of the Org file being constructed
+    #   _level: the current outline level of the Org file
+    #
+    
     def __init__(self):
-        self.lines = []
-        self.level = 1
+        self._lines = []
+        self._level = 1
 
     @contextlib.contextmanager
     def headline(self, text):
-        self.lines.append(('*' * (1 + self.level - 1)) + ' ' + text)
-        save_level = self.level
-        self.level += 2
+        """Start a new Org headline.  All additions to the Org file within the context will be under this headline."""
+        self._lines.append(('*' * (1 + self._level - 1)) + ' ' + text)
+        save_level = self._level
+        self._level += 2
         yield
-        self.level = save_level
+        self._level = save_level
 
     def directive(self, name, text):
-        self.lines.append('#+' + name + ': ' + text)
+        """Add an Org directive line"""
+        self._lines.append('#+' + name + ': ' + text)
 
     def text(self, txt):
-        self.lines.append(txt)
+        """Add a simple text line"""
+        self._lines.append(txt)
         
     def __str__(self):
-        return '\n'.join(self.lines)
+        """Return a string representing the whole Org file constructed up to this point"""
+        return '\n'.join(self._lines)

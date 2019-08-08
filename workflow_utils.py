@@ -3100,8 +3100,15 @@ def diff_analyses(analysis_dirs, key_prefixes=()):
             print('   ', _fmt(vals[1]))
 
 def _diff_analyses_org(analysis_dirs, org, key_prefixes=()):
-    """Generate an org view of differences between two analysis dirs."""
-    assert len(analysis_dirs)==2, 'currently can only compare two analyses'
+    """Generate an org view of differences between two analysis dirs.
+    
+    Args:
+      analysis_dirs: list of two analysis dirs to compare
+      
+
+    """
+    analysis_dirs = tuple(analysis_dirs)
+    util.misc.chk(len(analysis_dirs)==2, 'currently can only compare two analyses')
 
     flat_mdatas = [_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir,
                                                                       git_links_abspaths=True),
