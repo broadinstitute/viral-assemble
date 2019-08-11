@@ -3132,6 +3132,47 @@ def _diff_analyses_org(analysis_dirs, org, key_prefixes=()):
                 org.text(_fmt(vals[0]))
                 org.text(_fmt(vals[1]))
 
+
+def diff_analyses_org(analysis_dirs, org_file=None, org=None, key_prefixes=()):
+    """Generate an org view of differences between two analysis dirs.
+    
+    Args:
+      analysis_dirs: list of two analysis dirs to compare
+      
+
+    """
+    analysis_dirs = tuple(analysis_dirs)
+    util.misc.chk(len(analysis_dirs)==2, 'currently can only compare two analyses')
+    util.misc.chk(bool(org) != bool(org_file), 'org or org_file is required')
+
+    org = org or util.misc.Org()
+    org.directive('TITLE', 'Benchmark comparisons between {} and {}'.format(*analysis_dirs))
+
+    flat_mdatas = [_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir,
+                                                                      git_links_abspaths=True),
+                                              key_prefixes=key_prefixes)
+                   for analysis_dir in analysis_dirs]
+    all_keys = sorted(set(itertools.chain.from_iterable(flat_mdatas)))
+
+    for key in all_keys:
+        if key.startswith('calls.'): continue
+        if key.startswith('labels.') and not (key.startswith('labels.docker_img') or key.startswith('labels.sample_name')): continue
+        if key in ('analysis_dir', 'end', 'id', 'start', 'submission', 'submittedFiles.inputs', 'submittedFiles.labels',
+                   'workflowRoot', 'runInputs'): continue
+        vals = [flat_mdatas[i].get(key, None) for i in (0, 1)]
+        if vals[0] != vals[1]:
+            def _fmt(s):
+                s = str(s)
+                if False and len(s) > 120:
+                    s = s[:120] + ' ...'
+                return s
+            with org.headline('{}'.format(key)):
+                org.text(_fmt(vals[0]))
+                org.text(_fmt(vals[1]))
+
+    if org_file:
+        util.file.dump_file(org_file, str(org))
+
 def parser_diff_analyses(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dirs', nargs=2, help='the two analysis dirs')
     parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+',
@@ -3141,6 +3182,15 @@ def parser_diff_analyses(parser=argparse.ArgumentParser()):
 
 __commands__.append(('diff_analyses', parser_diff_analyses))
     
+def parser_diff_analyses_org(parser=argparse.ArgumentParser()):
+    parser.add_argument('analysis_dirs', nargs=2, help='the two analysis dirs')
+    parser.add_argument('org_file', help='name of output org file')
+    parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+',
+                        help='only consider metadata items starting with these prefixes')
+    util.cmd.attach_main(parser, diff_analyses_org, split_args=True)
+    return parser
+
+__commands__.append(('diff_analyses_org', parser_diff_analyses_org))
 
 
 def diff_jsons(jsons, key_prefixes=()):
