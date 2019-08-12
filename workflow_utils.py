@@ -3166,9 +3166,9 @@ def diff_analyses_org(analysis_dirs, org_file=None, org=None, key_prefixes=()):
                 if False and len(s) > 120:
                     s = s[:120] + ' ...'
                 return s
-            with org.headline('{}'.format(key)):
-                org.text(_fmt(vals[0]))
-                org.text(_fmt(vals[1]))
+            with org.headline('{}'.format(key)) as org_child:
+                org_child.text(_fmt(vals[0]))
+                org_child.text(_fmt(vals[1]))
 
     if org_file:
         util.file.dump_file(org_file, str(org))

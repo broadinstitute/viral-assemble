@@ -21,6 +21,7 @@ import json
 import signal
 import socket
 import glob
+import weakref
 
 import util.file
 
@@ -981,26 +982,54 @@ class Org(object):
     then use str() to get a string representation of the resulting Org file.  The Org object keeps track of the current
     outline level.
     """
-
     #
     # Fields:
-    #
-    #   _lines: list of text lines of the Org file being constructed
-    #   _level: the current outline level of the Org file
-    #
-    
-    def __init__(self):
+    # 
+    #   _parent: parent entry, or None for top level
+    #   _headline: text of the headline, or None if top-level
+    #   _lines: text of the entry
+    #   _children: sub-entries, of type Org.Entry
+
+    def __init__(self, headline=None, parent=None):
+        self._parent = weakref.ref(parent) if parent else parent
+        self._headline = headline
         self._lines = []
-        self._level = 1
+        self._children = []
+
+    @property
+    def parent(self):
+        if not self._parent:
+            return self._parent
+        _parent = self._parent()
+        if _parent:
+            return _parent
+        else:
+            raise LookupError("Parent was destroyed")
+
+    @property
+    def root(self):
+        return self._parent or self
+
+    def to_str(self, level=-1):
+        """Render the Org representation"""
+        log.info('to_str: level={} self.head={} self.lines={}'.format(level, self._headline, self._lines))
+        lines = []
+        if level >= 1:
+            lines.append(('*' * level) + ' ' + self._headline)
+        lines.extend(self._lines)
+        for child in self._children:
+            lines.append(child.to_str(level + 2))
+        log.info('final to_str: level={} self.head={} self.lines={} lines={}'.format(level, self._headline, self._lines, lines))
+        return '\n'.join(lines)
+
+    def __str__(self):
+        return self.to_str()
 
     @contextlib.contextmanager
     def headline(self, text):
-        """Start a new Org headline.  All additions to the Org file within the context will be under this headline."""
-        self._lines.append(('*' * (1 + self._level - 1)) + ' ' + text)
-        save_level = self._level
-        self._level += 2
-        yield
-        self._level = save_level
+        child = Org(headline=text, parent=self)
+        self._children.append(child)
+        yield child
 
     def directive(self, name, text):
         """Add an Org directive line"""
@@ -1009,7 +1038,3 @@ class Org(object):
     def text(self, txt):
         """Add a simple text line"""
         self._lines.append(txt)
-        
-    def __str__(self):
-        """Return a string representing the whole Org file constructed up to this point"""
-        return '\n'.join(self._lines)
