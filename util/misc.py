@@ -22,6 +22,7 @@ import signal
 import socket
 import glob
 import weakref
+import uuid
 
 import util.file
 
@@ -978,63 +979,157 @@ class Org(object):
     """Helper for creating Emacs Org mode files ( https://orgmode.org/ ).
     These files can be browsed in Emacs as foldable outlines, and can be exported to html.
 
+    The Org file is represented as a tree hierarchy of Org.Entry nodes.
+    The Org object simply keeps track of one node considered "current".
+
     Usage: create an Org() object; add Org mode content to it by calling methods like headline(), directive() and text();
-    then use str() to get a string representation of the resulting Org file.  The Org object keeps track of the current
-    outline level.
+    then use str() to get a string representation of the resulting Org file.
     """
-    #
-    # Fields:
-    # 
-    #   _parent: parent entry, or None for top level
-    #   _headline: text of the headline, or None if top-level
-    #   _lines: text of the entry
-    #   _children: sub-entries, of type Org.Entry
 
-    def __init__(self, headline=None, parent=None):
-        self._parent = weakref.ref(parent) if parent else parent
-        self._headline = headline
-        self._lines = []
-        self._children = []
+    class Entry(object):
+
+        """One entry in an Org file outline."""
+
+        #
+        # Fields:
+        #
+        #   _parent: parent entry, or None for top level
+        #   _headline: text of the headline, or None if top-level
+        #   _props: Org properties of the entry
+        #   _lines: text of the entry
+        #   _children: sub-entries, of type Org.Entry
+        #
+
+        def __init__(self, headline=None, parent=None, custom_id=None):
+            self._parent = weakref.ref(parent) if parent else parent
+            self._headline = headline
+            self._props = collections.OrderedDict()
+            if custom_id:
+                self._props['CUSTOM_ID'] = custom_id
+            self._lines = []
+            self._children = []
+
+        @property
+        def parent(self):
+            """The parent Org node of this node"""
+            if not self._parent:
+                return self._parent
+            _parent = self._parent()
+            if _parent:
+                return _parent
+            else:
+                raise LookupError("Parent was destroyed")
+
+        @property
+        def root(self):
+            """Return the root Org node"""
+            return self._parent or self
+
+        @property
+        def custom_id(self):
+            """Return the custom ID property of this entry, generating it if needed"""
+            if 'CUSTOM_ID' not in self._props:
+                self._props['CUSTOM_ID'] = uuid.uuid4()
+            return self._props['CUSTOM_ID']
+
+        @custom_id.setter
+        def custom_id(self, value):
+            self._props['CUSTOM_ID'] = value
+
+        def to_str(self, level=-1):
+            """Render the Org representation"""
+            lines = []
+            line_prefix = ''
+
+            if level < 1 and self._headline:
+                    lines.append('#+TITLE: {}'.format(self._headline))
+            elif level >= 1:
+                util.misc.chk(self._headline, 'empty headline not allowed')
+                headline_prefix = ('*' * level) + ' '
+                line_prefix = (' ' * level) + ' '
+                lines.append(headline_prefix + self._headline)
+                if self._props:
+                    lines.append(line_prefix + ':PROPERTIES:')
+                    for prop_name, prop_val in self._props.items():
+                        lines.append(line_prefix + ':{}: {}'.format(prop_name, prop_val))
+                    lines.append(line_prefix + ':END:')
+
+            for line in self._lines:
+                lines.append(('' if line.startswith('#+') else line_prefix) + line)
+
+            for child in self._children:
+                lines.append(child.to_str(level + 2))
+
+            return '\n'.join(lines)
+
+        def __str__(self):
+            return self.to_str()
+
+        def add_child(self, child):
+            """Add an existing Org entry as a child of this one"""
+            child._parent = weakref.ref(self)
+            self._children.append(child)
+            return child
+
+        def headline(self, text):
+            """Create and return a new Org entry that is a child of this entry."""
+            return self.add_child(Org.Entry(headline=text))
+
+        def directive(self, name, text):
+            """Add an Org directive line"""
+            self._lines.append('#+' + name + ': ' + text)
+
+        def text(self, txt):
+            """Add a simple text line"""
+            self._lines.append(txt)
+
+        def matplotlib_figure(self, fig):
+            """Add a matplotlib figure"""
+            
+
+    # end: class Entry(object)
+
+    def __init__(self, headline=None):
+        self._cur = self._root = Org.Entry(headline=headline)
 
     @property
-    def parent(self):
-        if not self._parent:
-            return self._parent
-        _parent = self._parent()
-        if _parent:
-            return _parent
-        else:
-            raise LookupError("Parent was destroyed")
-
-    @property
-    def root(self):
-        return self._parent or self
-
-    def to_str(self, level=-1):
-        """Render the Org representation"""
-        log.info('to_str: level={} self.head={} self.lines={}'.format(level, self._headline, self._lines))
-        lines = []
-        if level >= 1:
-            lines.append(('*' * level) + ' ' + self._headline)
-        lines.extend(self._lines)
-        for child in self._children:
-            lines.append(child.to_str(level + 2))
-        log.info('final to_str: level={} self.head={} self.lines={} lines={}'.format(level, self._headline, self._lines, lines))
-        return '\n'.join(lines)
-
-    def __str__(self):
-        return self.to_str()
+    def root(self): return self._root
 
     @contextlib.contextmanager
     def headline(self, text):
-        child = Org(headline=text, parent=self)
-        self._children.append(child)
-        yield child
-
-    def directive(self, name, text):
-        """Add an Org directive line"""
-        self._lines.append('#+' + name + ': ' + text)
+        """Create and return a new Org entry that is a child of the current entry."""
+        old_cur = self._cur
+        new_cur = old_cur.headline(text)
+        self._cur = new_cur
+        yield new_cur
+        chk(self._cur == new_cur)
+        self._cur = old_cur
 
     def text(self, txt):
-        """Add a simple text line"""
-        self._lines.append(txt)
+        """Add a simple text line to the current entry"""
+        self._cur.text(txt)
+        
+    def directive(self, name, text):
+        """Add an Org directive line to the current entry"""
+        self._cur.directive(name, text)
+
+    def table_row(self, *vals):
+        """Add an org table row"""
+        self.text('|' + ' | '.join(map(lambda v: '={}='.format(v), vals)) + ' |')
+
+    def add_child(self, child):
+        """Add an existing Org entry as a child of the current one"""
+        self._cur.add_child(child)
+
+    @property
+    def cur(self): return self._cur
+        
+    def __str__(self):
+        return str(self._cur)
+
+    def save(self, org_fname):
+        """Save the Org from the current node down to the specified Org file"""
+        util.file.dump_file(org_fname, str(self))
+
+# end: class Org(object)
+

@@ -2302,6 +2302,13 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
         org.text('variant ={}=: {}'.format(variant, unified_metrics['labels.sample_name'][variant].nunique()))
         org.text('')
 
+    anchors = []
+
+    def make_anchor_name(benchmark_dir, variant_0, variant_1):
+        anchor_name = util.file.string_to_file_name('_'.join((benchmark_dir, variant_0, variant_1)))
+        anchors.append((benchmark_dir, variant_0, variant_1, anchor_name))
+        return anchor_name
+
     with org.headline('Comparisons: created {}'.format(datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))):
         for variants in variant_pairs:
             with org.headline('={}= vs ={}='.format(variants[0], variants [1])):
@@ -2326,18 +2333,24 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
                         #org.text('')
 
                         data = unified_metrics[metric]
-                        margin = 0.02*min(data[variants[0]].std(), data[variants[1]].std())
-                        data_full = data
-                        data = data[(data[variants[0]] - data[variants[1]]).abs() > margin]
+
+                        def get_data_differing_by_margin(data, std_fraction):
+                            """Return a subset of the data that includes only points that differ by at least the given fraction
+                            of stddev"""
+                            margin = std_fraction*min(data[variants[0]].std(), data[variants[1]].std())
+                            return margin, data[(data[variants[0]] - data[variants[1]]).abs() > margin]
+
+                        margin_to_plot, data_to_plot = get_data_differing_by_margin(data, std_fraction=.02)
                         
                         fig = pp.figure()
-                        fig.suptitle('Metric: {}\nOmitted {} with diff < {:.2f}'.format(metric, len(data_full)-len(data), margin))
+                        fig.suptitle('Metric: {}\nOmitted {} with diff < {:.2f}'.format(metric,
+                                                                                        len(data)-len(data_to_plot),
+                                                                                        margin_to_plot))
                         
                         axes_deltas_hist = fig.add_subplot(1, 2, 1)
 
-
                         axes_deltas_hist.set_title('deltas: {} - {}'.format(variants[0], variants[1]))
-                        deltas = data[variants[0]] - data[variants[1]]
+                        deltas = data_to_plot[variants[0]] - data_to_plot[variants[1]]
                         _log.info('deltas=%s', deltas)
 
                         axes_deltas_hist.hist(deltas.dropna(), bins=20)
@@ -2346,21 +2359,28 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
                         axes_scatter.set_title(metric.split('.')[-1])
                         axes_scatter.set_xlabel(variants[0])
                         axes_scatter.set_ylabel(variants[1])
+
+                        margin_to_link = margin_to_plot*3
+                        urls = [None if delta < margin_to_link else 'index.html#' + make_anchor_name(benchmark_dir, *variants)
+                                for benchmark_dir, delta in deltas.abs().items()]
+
                         axes_scatter.scatter(variants[0], variants[1],
-                                             data=data)
+                                             data=data_to_plot, urls=urls)
+
+                        def plot_axes_limits(ax):
+                            lims = [
+                                np.min([ax.get_xlim(), ax.get_ylim()]),  # min of both axes
+                                np.max([ax.get_xlim(), ax.get_ylim()]),  # max of both axes
+                            ]
+
+                            # now plot both limits against each other
+                            ax.plot(lims, lims, 'k-', alpha=0.75, zorder=0)
+                            ax.set_aspect('equal')
+                            ax.set_xlim(lims)
+                            ax.set_ylim(lims)
 
 
-                        ax = axes_scatter
-                        lims = [
-                            np.min([ax.get_xlim(), ax.get_ylim()]),  # min of both axes
-                            np.max([ax.get_xlim(), ax.get_ylim()]),  # max of both axes
-                        ]
-
-                        # now plot both limits against eachother
-                        ax.plot(lims, lims, 'k-', alpha=0.75, zorder=0)
-                        ax.set_aspect('equal')
-                        ax.set_xlim(lims)
-                        ax.set_ylim(lims)
+                        plot_axes_limits(axes_scatter)
                         #ax.set_xticklabels(ax.get_xticklabels(), rotation='vertical')
                         
                         fig.subplots_adjust(wspace=.4, top=.8)
@@ -2379,9 +2399,18 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
                                     with org.headline(sample_name + ' ' + t):
                                         _diff_analyses_org(analysis_dirs=variant_analysis_dirs, org=org)
 
-        cmp_output_fname = os.path.join(cmp_output_dir, 'index.org')
-        util.file.dump_file(cmp_output_fname, str(org))
-        _run('emacs -Q --batch --eval \'(progn (find-file "{}") (org-html-export-to-html))\''.format(cmp_output_fname))
+    # end: with org.headline('Comparisons: created {}'.format(datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y")))
+
+    with org.headline('Pairwise comparisons'):
+        for benchmark_dir, variant_0, variant_1, anchor_name in anchors:
+            pairwise_comparison_org = diff_analyses_org(analysis_dirs=[os.path.join(benchmark_dir, 'benchmark_variants', v)
+                                                                       for v in (variant_0, variant_1)])
+            pairwise_comparison_org.custom_id = anchor_name
+            org.add_child(pairwise_comparison_org)
+
+    cmp_output_fname = os.path.join(cmp_output_dir, 'index.org')
+    util.file.dump_file(cmp_output_fname, str(org))
+    _run('emacs -Q --batch --eval \'(progn (find-file "{}") (org-html-export-to-html))\''.format(cmp_output_fname))
 
 def parser_generate_benchmark_variant_comparisons_from_gathered_metrics(parser=argparse.ArgumentParser()):
     parser.add_argument('benchmarks_spec_file', help='benchmarks spec in yaml')
@@ -3133,20 +3162,19 @@ def _diff_analyses_org(analysis_dirs, org, key_prefixes=()):
                 org.text(_fmt(vals[1]))
 
 
-def diff_analyses_org(analysis_dirs, org_file=None, org=None, key_prefixes=()):
+def diff_analyses_org(analysis_dirs, key_prefixes=()):
     """Generate an org view of differences between two analysis dirs.
     
     Args:
       analysis_dirs: list of two analysis dirs to compare
-      
 
+    Returns:
+      an Org.Entry representing the diff between the two analyses
     """
     analysis_dirs = tuple(analysis_dirs)
     util.misc.chk(len(analysis_dirs)==2, 'currently can only compare two analyses')
-    util.misc.chk(bool(org) != bool(org_file), 'org or org_file is required')
 
-    org = org or util.misc.Org()
-    org.directive('TITLE', 'Benchmark comparisons between {} and {}'.format(*analysis_dirs))
+    org = util.misc.Org('={}= vs ={}='.format(*analysis_dirs))
 
     flat_mdatas = [_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir,
                                                                       git_links_abspaths=True),
@@ -3166,12 +3194,9 @@ def diff_analyses_org(analysis_dirs, org_file=None, org=None, key_prefixes=()):
                 if False and len(s) > 120:
                     s = s[:120] + ' ...'
                 return s
-            with org.headline('{}'.format(key)) as org_child:
-                org_child.text(_fmt(vals[0]))
-                org_child.text(_fmt(vals[1]))
+            org.table_row(key, *vals)
 
-    if org_file:
-        util.file.dump_file(org_file, str(org))
+    return org.cur
 
 def parser_diff_analyses(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dirs', nargs=2, help='the two analysis dirs')
