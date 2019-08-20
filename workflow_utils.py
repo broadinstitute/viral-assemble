@@ -2387,7 +2387,10 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
 
                         fn = os.path.join(cmp_output_dir, 'fig{}.svg'.format(random.randint(0,10000)))
                         fig.savefig(fn)
+
+                        org.text('')
                         org.text('[[file:{}]]'.format(os.path.basename(fn)))
+                        org.text('')
                                 
                         for delta_val, delta_infos in (): # itertools.groupby(sorted(deltas), key=operator.itemgetter(0)):
                             delta_infos = list(delta_infos)
