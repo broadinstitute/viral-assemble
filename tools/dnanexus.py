@@ -36,7 +36,7 @@ import util.file
 import util.misc
 
 TOOL_NAME = 'dxpy'
-TOOL_VERSION = '0.273.0'
+TOOL_VERSION = '0.285.1'
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)

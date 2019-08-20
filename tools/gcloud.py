@@ -32,7 +32,7 @@ import util.file
 import util.misc
 
 TOOL_NAME = 'google-cloud-storage'
-TOOL_VERSION = '1.13.0'
+TOOL_VERSION = '1.18.0'
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
