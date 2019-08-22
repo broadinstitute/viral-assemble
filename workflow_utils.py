@@ -129,6 +129,9 @@ import pandas as pd
 import matplotlib
 matplotlib.use('svg')
 import matplotlib.pyplot as pp
+import dominate
+import dominate.tags
+import dominate.util
 
 # *** intra-module
 import util.cmd
@@ -3201,6 +3204,59 @@ def diff_analyses_org(analysis_dirs, key_prefixes=()):
 
     return org.cur
 
+
+
+def diff_analyses_html(benchmark_dir, variants, key_prefixes=()):
+    """Generate an HTML view of differences between two analysis dirs.
+    
+    Args:
+      benchmark_dir: the root dir containing the benchmark
+      variants: the benchmark variants to compare
+
+    """
+    analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', variant) for variant in variants]
+    out_dir = os.path.join(benchmark_dir, 'cmp', *variants)
+
+    tags = dominate.tags
+    title = 'Comparison of ({}) on {}'.format(', '.join(variants), benchmark_dir)
+    doc = dominate.document(title=title)
+
+    flat_mdatas = [_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir,
+                                                                      git_links_abspaths=True),
+                                              key_prefixes=key_prefixes)
+                   for analysis_dir in analysis_dirs]
+    all_keys = sorted(set(itertools.chain.from_iterable(flat_mdatas)))
+
+    with doc.head:
+        tags.meta(http_equiv="Expires", content="Thu, 1 June 2000 23:59:00 GMT")
+        tags.meta(http_equiv="pragma", content="no-cache")
+        tags.style('table, th, td {border: 1px solid black;}')
+        tags.style('th {background-color: lightgray;}')
+
+    def txt(v): return dominate.util.text(str(v))
+    def trow(vals): return tags.tr((tags.td(txt(val)) for val in vals), __pretty=False)
+
+    with doc:
+        tags.div(cls='header').add(txt(datetime.datetime.now()))
+        with tags.div(cls='body'):
+            tags.h1(title)
+            with tags.table():
+                tags.thead(trow(['key'] + variants))
+                with tags.tbody():
+                    for key in all_keys:
+                        if key.startswith('calls.'): continue
+                        if key.startswith('labels.') and not (key.startswith('labels.docker_img') \
+                                                              or key.startswith('labels.sample_name')): continue
+                        if key.startswith('runInputs') or key.startswith('workflowProcessingEvents'): continue
+                        if key in ('analysis_dir', 'end', 'id', 'start', 'submission', 'submittedFiles.inputs',
+                                   'submittedFiles.labels',
+                                   'workflowRoot', 'runInputs'): continue
+                        vals = [flat_mdatas[i].get(key, None) for i in (0, 1)]
+                        if vals[0] != vals[1]:
+                            trow([key]+vals)
+                                
+    util.file.dump_file('cmp/index.html', doc.render())
+
 def parser_diff_analyses(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dirs', nargs=2, help='the two analysis dirs')
     parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+',
@@ -3219,6 +3275,17 @@ def parser_diff_analyses_org(parser=argparse.ArgumentParser()):
     return parser
 
 __commands__.append(('diff_analyses_org', parser_diff_analyses_org))
+
+def parser_diff_analyses_html(parser=argparse.ArgumentParser()):
+    parser.add_argument('benchmark_dir', help='the benchmark dir')
+    parser.add_argument('variants', nargs='+', help='the benchmark variants')
+    parser.add_argument('--keyPrefixes', dest='key_prefixes', nargs='+',
+                        help='only consider metadata items starting with these prefixes')
+    util.cmd.attach_main(parser, diff_analyses_html, split_args=True)
+    return parser
+
+__commands__.append(('diff_analyses_html', parser_diff_analyses_html))
+
 
 
 def diff_jsons(jsons, key_prefixes=()):
