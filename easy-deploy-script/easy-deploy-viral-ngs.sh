@@ -50,7 +50,7 @@ fi
 
 SELF_UPDATE_URL="https://raw.githubusercontent.com/broadinstitute/viral-ngs/master/easy-deploy-script/easy-deploy-viral-ngs.sh"
 
-CONDA_CHANNEL_STRING="--override-channels -c broad-viral -c conda-forge -c bioconda -c defaults"
+CONDA_CHANNEL_STRING="--override-channels -c broad-viral -c conda-forge -c bioconda -c defaults -c notestaff"
 
 if [ -z "$VIRAL_NGS_PACKAGE" ]; then
     VIRAL_NGS_PACKAGE="viral-ngs"

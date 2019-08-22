@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-CONDA_CHANNEL_STRING="--override-channels -c broad-viral -c conda-forge -c bioconda -c defaults"
+CONDA_CHANNEL_STRING="--override-channels -c broad-viral -c conda-forge -c bioconda -c defaults -c notestaff"
 PYVER=`echo $TRAVIS_PYTHON_VERSION | cut -c 1`
 if [ "$PYVER" = "3" ]; then
     echo "pip installing snakemake packages (py3 only)"

@@ -13,6 +13,6 @@ if cmd_exists "conda"; then
     # if a conda environment is active
     if [ ! -z "$CONDA_DEFAULT_ENV" ]; then
         # update the conda environment to install the requirements specified
-        conda install -y -c broad-viral -c bioconda --file requirements-conda.txt
+        conda install -y --override-channels -c broad-viral -c conda-forge -c bioconda -c defaults -c notestaff --file requirements-conda.txt
     fi
 fi
