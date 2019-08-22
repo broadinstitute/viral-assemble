@@ -132,6 +132,7 @@ import matplotlib.pyplot as pp
 import dominate
 import dominate.tags
 import dominate.util
+import autologging
 
 # *** intra-module
 import util.cmd
@@ -147,7 +148,7 @@ import tools.muscle
 _log = logging.getLogger(__name__)
 
 #logging.basicConfig(format="%(asctime)s - %(module)s:%(lineno)d:%(funcName)s - %(levelname)s - %(message)s")
-_log.setLevel(logging.INFO)
+_log.setLevel(autologging.TRACE)
 
 # * Utils
 # ** Generic utils
@@ -3080,7 +3081,7 @@ def _load_analysis_metadata(analysis_dir, git_links_abspaths=False):
             mdata.setdefault('labels', collections.OrderedDict())['sample_name'] = sample_name
     return mdata
 
-def _flatten_analysis_metadata_list(val, pfx=''):
+def _flatten_analysis_metadata_list(val, pfx=()):
     """Convert analysis metadata to a flat list of key-value pairs"""
     if _is_git_link(val):
         util.misc.chk('git_annex_key' in val, 'no key: {} {}'.format(val, pfx))
@@ -3089,26 +3090,28 @@ def _flatten_analysis_metadata_list(val, pfx=''):
     def _concat(iters): return list(itertools.chain.from_iterable(iters))
 
     if isinstance(val, list):
-        return _concat(_flatten_analysis_metadata_list(v, pfx+('.' if pfx else '')+str(i))
+        return _concat(_flatten_analysis_metadata_list(v, pfx + (i,))
                        for i, v in enumerate(val))
     if _is_mapping(val):
-        return _concat(_flatten_analysis_metadata_list(v, pfx+('.' if pfx else '')+k)
+        return _concat(_flatten_analysis_metadata_list(v, pfx + (k,))
                        for k, v in val.items())
     return [(pfx, val)]
 
 def _key_matches_prefixes(key, key_prefixes):
-    return not key_prefixes or any(key.startswith(key_prefix)
+    return not key_prefixes or any('.'.join(map(str, key)).startswith(key_prefix)
                                    for key_prefix in key_prefixes)
 
 def _flatten_analysis_metadata(mdata, key_prefixes=()):
+    """Flatten analysis metadata, represented as parsed json data using nested dicts,
+    to a flat key-value mapping."""
     #_log.info('mdata=%s', len(mdata))
     flat_mdata = _ord_dict(*_flatten_analysis_metadata_list(mdata))
     #_log.info('flat_mdata=%s', len(flat_mdata))
-    if 'status' in flat_mdata:
-        flat_mdata['succeeded'] = int(flat_mdata['status'] == 'Succeeded')
+    if ('status',) in flat_mdata:
+        flat_mdata[('succeeded',)] = int(flat_mdata[('status',)] == 'Succeeded')
     if key_prefixes:
         flat_mdata = _ord_dict(*[(key, val) for key, val in flat_mdata.items()
-                                 if key=='analysis_dir' or _key_matches_prefixes(key, key_prefixes)])
+                                 if key==('analysis_dir',) or _key_matches_prefixes(key, key_prefixes)])
     return flat_mdata
 
 def diff_analyses(analysis_dirs, key_prefixes=()):
@@ -3204,8 +3207,6 @@ def diff_analyses_org(analysis_dirs, key_prefixes=()):
 
     return org.cur
 
-
-
 def diff_analyses_html(benchmark_dir, variants, key_prefixes=()):
     """Generate an HTML view of differences between two analysis dirs.
     
@@ -3216,15 +3217,21 @@ def diff_analyses_html(benchmark_dir, variants, key_prefixes=()):
     """
     analysis_dirs = [os.path.join(benchmark_dir, 'benchmark_variants', variant) for variant in variants]
     out_dir = os.path.join(benchmark_dir, 'cmp', *variants)
+    util.file.mkdir_p(out_dir)
+
+    benchmark_variants_link = os.path.join(out_dir, 'benchmark_variants')
+    if os.path.lexists(benchmark_variants_link):
+        os.remove(benchmark_variants_link)
+    os.symlink('../../../benchmark_variants', benchmark_variants_link)
 
     tags = dominate.tags
     title = 'Comparison of ({}) on {}'.format(', '.join(variants), benchmark_dir)
     doc = dominate.document(title=title)
 
-    flat_mdatas = [_flatten_analysis_metadata(_load_analysis_metadata(analysis_dir,
-                                                                      git_links_abspaths=True),
-                                              key_prefixes=key_prefixes)
-                   for analysis_dir in analysis_dirs]
+    mdatas = [_load_analysis_metadata(analysis_dir, git_links_abspaths=True)
+              for analysis_dir in analysis_dirs]
+    flat_mdatas = [_flatten_analysis_metadata(mdata, key_prefixes=key_prefixes) for mdata in mdatas]
+
     all_keys = sorted(set(itertools.chain.from_iterable(flat_mdatas)))
 
     with doc.head:
@@ -3234,28 +3241,51 @@ def diff_analyses_html(benchmark_dir, variants, key_prefixes=()):
         tags.style('th {background-color: lightgray;}')
 
     def txt(v): return dominate.util.text(str(v))
-    def trow(vals): return tags.tr((tags.td(txt(val)) for val in vals), __pretty=False)
+    def trow(vals, td_or_th=tags.td): return tags.tr((td_or_th(txt(val)) for val in vals), __pretty=False)
 
     with doc:
         tags.div(cls='header').add(txt(datetime.datetime.now()))
         with tags.div(cls='body'):
             tags.h1(title)
             with tags.table():
-                tags.thead(trow(['key'] + variants))
+                tags.thead(trow(['key'] + variants, tags.th))
                 with tags.tbody():
                     for key in all_keys:
-                        if key.startswith('calls.'): continue
-                        if key.startswith('labels.') and not (key.startswith('labels.docker_img') \
-                                                              or key.startswith('labels.sample_name')): continue
-                        if key.startswith('runInputs') or key.startswith('workflowProcessingEvents'): continue
-                        if key in ('analysis_dir', 'end', 'id', 'start', 'submission', 'submittedFiles.inputs',
-                                   'submittedFiles.labels',
-                                   'workflowRoot', 'runInputs'): continue
-                        vals = [flat_mdatas[i].get(key, None) for i in (0, 1)]
-                        if vals[0] != vals[1]:
-                            trow([key]+vals)
-                                
-    util.file.dump_file('cmp/index.html', doc.render())
+                        if key[0] == 'calls': continue
+                        if key[0] == 'labels' and key[1] not in ('docker_img', 'sample_name'):
+                            continue
+                        if key[0] in ('runInputs', 'workflowProcessingEvents'): continue
+                        key_str = '.'.join(map(str, key))
+                        if key_str in ('analysis_dir', 'end', 'id', 'start', 'submission',
+                                       'submittedFiles.inputs', 'submittedFiles.labels',
+                                       'workflowRoot', 'runInputs'):
+                            continue
+                        vals = [flat_mdata.get(key, None) for flat_mdata in flat_mdatas]
+                        if len(set(vals)) > 1:
+                            with tags.tr():
+                                tags.td(key_str)
+                                for variant, val, mdata, analysis_dir in \
+                                    zip(variants, vals, mdatas, analysis_dirs):
+                                    with tags.td():
+                                        orig_val = functools.reduce(operator.getitem, key, mdata)
+                                        if _is_git_link(orig_val):
+                                            fname = os.path.relpath(orig_val['$git_link'], analysis_dir)
+                                            href_rel = os.path.join('.', 'benchmark_variants', variant, fname)
+                                            _log.info('HREF_REL=%d %s', len(href_rel), str(href_rel))
+                                            tags.a(os.path.basename(fname),
+                                                   href=href_rel)
+                                        else:
+                                            txt(val)
+                        # end: if len(set(vals)) > 1
+                    # end: for key in all_keys
+                # end: with tags.tbody()
+            # end: with tags.table()
+        # end: with tags.div(cls='body')
+    # end: with doc
+
+    util.file.dump_file(os.path.join(out_dir, 'index.html'), doc.render())
+    _log.info('Wrote cmp to %s', out_dir)
+# end: def diff_analyses_html(benchmark_dir, variants, key_prefixes=())
 
 def parser_diff_analyses(parser=argparse.ArgumentParser()):
     parser.add_argument('analysis_dirs', nargs=2, help='the two analysis dirs')
