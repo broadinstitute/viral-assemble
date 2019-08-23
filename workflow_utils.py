@@ -2097,8 +2097,9 @@ def _gather_metrics_for_one_variant_of_one_benchmark(benchmark_dir_and_benchmark
         mdata = _load_analysis_metadata(analysis_dir, git_links_abspaths=True)
         mdata_flat = _flatten_analysis_metadata(mdata)
         for metric_name, metric_value in mdata_flat.items():
-            if any(metric_name.startswith(prefix) for prefix in ('inputs.', 'outputs.', 'labels.', 'status')):
-                result.append((metric_name, benchmark_variant, benchmark_dir, metric_value))
+            metric_name_str = '.'.join(map(str, metric_name))
+            if any(metric_name_str.startswith(prefix) for prefix in ('inputs.', 'outputs.', 'labels.', 'status')):
+                result.append((metric_name_str, benchmark_variant, benchmark_dir, metric_value))
     return result
 
 def gather_benchmark_variant_metrics(benchmarks_spec_file, unified_metrics_file):
@@ -2267,7 +2268,7 @@ def parser_generate_benchmark_variant_comparisons(parser=argparse.ArgumentParser
 __commands__.append(('generate_benchmark_variant_comparisons', parser_generate_benchmark_variant_comparisons))
 
 def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec_file, unified_metrics_file, cmp_output_dir,
-                                                                 overwrite=False):
+                                                                 overwrite=False, benchmarks_root=os.getcwd()):
     """Generate/update reports of benchmark comparisons.
     """
 
@@ -2303,15 +2304,18 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
     org.text('{} benchmarks, {} metrics'.format(unified_metrics.shape[0], unified_metrics.shape[1]))
     org.text('')
     for variant in benchmarks_spec['benchmark_variants']:
-        org.text('variant ={}=: {}'.format(variant, unified_metrics['labels.sample_name'][variant].nunique()))
+        sample_names = unified_metrics['labels.sample_name']
+        org.text('variant ={}=: {}'.format(variant, sample_names[variant].nunique() if variant in sample_names else 'unknown'))
         org.text('')
 
-    anchors = []
+    os.symlink(os.path.relpath(benchmarks_root, cmp_output_dir), os.path.join(cmp_output_dir, 'benchmarks_root'))
 
-    def make_anchor_name(benchmark_dir, variant_0, variant_1):
-        anchor_name = util.file.string_to_file_name('_'.join((benchmark_dir, variant_0, variant_1)))
-        anchors.append((benchmark_dir, variant_0, variant_1, anchor_name))
-        return anchor_name
+    def make_url_for_pairwise_comparison(benchmark_dir, variant_0, variant_1):
+        url = os.path.join('benchmarks_root', os.path.relpath(benchmark_dir, benchmarks_root), 'cmp', variant_0, variant_1,
+                           'index.html')
+        if not os.path.isfile(os.path.join(cmp_output_dir, url)):
+            diff_analyses_html(benchmark_dir, [variant_0, variant_1])
+        return url
 
     with org.headline('Comparisons: created {}'.format(datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))):
         for variants in variant_pairs:
@@ -2365,7 +2369,7 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
                         axes_scatter.set_ylabel(variants[1])
 
                         margin_to_link = margin_to_plot*3
-                        urls = [None if delta < margin_to_link else 'index.html#' + make_anchor_name(benchmark_dir, *variants)
+                        urls = [None if delta < margin_to_link else make_url_for_pairwise_comparison(benchmark_dir, *variants)
                                 for benchmark_dir, delta in deltas.abs().items()]
 
                         axes_scatter.scatter(variants[0], variants[1],
@@ -2408,12 +2412,12 @@ def generate_benchmark_variant_comparisons_from_gathered_metrics(benchmarks_spec
 
     # end: with org.headline('Comparisons: created {}'.format(datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y")))
 
-    with org.headline('Pairwise comparisons'):
-        for benchmark_dir, variant_0, variant_1, anchor_name in anchors:
-            pairwise_comparison_org = diff_analyses_org(analysis_dirs=[os.path.join(benchmark_dir, 'benchmark_variants', v)
-                                                                       for v in (variant_0, variant_1)])
-            pairwise_comparison_org.custom_id = anchor_name
-            org.add_child(pairwise_comparison_org)
+    # with org.headline('Pairwise comparisons'):
+    #     for benchmark_dir, variant_0, variant_1, anchor_name in anchors:
+    #         pairwise_comparison_org = diff_analyses_org(analysis_dirs=[os.path.join(benchmark_dir, 'benchmark_variants', v)
+    #                                                                    for v in (variant_0, variant_1)])
+    #         pairwise_comparison_org.custom_id = anchor_name
+    #         org.add_child(pairwise_comparison_org)
 
     cmp_output_fname = os.path.join(cmp_output_dir, 'index.org')
     util.file.dump_file(cmp_output_fname, str(org))
@@ -3267,7 +3271,7 @@ def diff_analyses_html(benchmark_dir, variants, key_prefixes=()):
                                 for variant, val, mdata, analysis_dir in \
                                     zip(variants, vals, mdatas, analysis_dirs):
                                     with tags.td():
-                                        orig_val = functools.reduce(operator.getitem, key, mdata)
+                                        orig_val = functools.reduce(lambda d, k: d.get(k, None), key, mdata)
                                         if _is_git_link(orig_val):
                                             fname = os.path.relpath(orig_val['$git_link'], analysis_dir)
                                             href_rel = os.path.join('.', 'benchmark_variants', variant, fname)
