@@ -80,7 +80,7 @@ class GSURIRemote(SpecialRemote):
             try:
                 gcloud_tool.download_object(gs_uri=url, destination_file_name=filename)
             except Exception as e:
-                self_dbg('error downloading from gs:', e)
+                self._dbg('error downloading from gs:', e)
                 raise RemoteError('error downloading from gs: {}'.format(e))
             #cmd = 'gsutil cp ' + url + " '" + filename + "'"
             #self._dbg('cmd=', cmd)
