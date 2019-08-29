@@ -56,6 +56,7 @@ arrow=0.12.1
 bedtools=2.27.1
 biopython=1.72
 contextlib2=0.5.5
+fusepy=3.0.1
 future==0.16.0
 matplotlib=2.2.0
 pluggy=0.8.0
