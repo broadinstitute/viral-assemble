@@ -3276,8 +3276,11 @@ def diff_analyses_html(benchmark_dir, variants, key_prefixes=()):
                                             fname = os.path.relpath(orig_val['$git_link'], analysis_dir)
                                             href_rel = os.path.join('.', 'benchmark_variants', variant, fname)
                                             _log.info('HREF_REL=%d %s', len(href_rel), str(href_rel))
-                                            tags.a(os.path.basename(fname),
-                                                   href=href_rel)
+                                            if fname.endswith('.pdf'):
+                                                tags.object_(data=href_rel, type='application/pdf', width='100%', height='100%')
+                                            else:
+                                                tags.a(os.path.basename(fname),
+                                                       href=href_rel)
                                         else:
                                             txt(val)
                         # end: if len(set(vals)) > 1
