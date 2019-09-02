@@ -932,10 +932,10 @@ def _extract_wdl_from_docker_img(docker_img, analysis_dir):
     _run('tar xvf wdl.tar', cwd=analysis_dir)
     util.file.mkdir_p(os.path.join(analysis_dir, 'tasks'))
     for f in glob.glob(os.path.join(analysis_dir, 'source/pipes/WDL/workflows/*.wdl')):
-        _log.debug('copying %s to {}', f, analysis_dir)
+        _log.debug('copying %s to %s', f, analysis_dir)
         shutil.copy(f, analysis_dir)
     for f in glob.glob(os.path.join(analysis_dir, 'source/pipes/WDL/workflows/tasks/*.wdl')):
-        _log.debug('copying %s to {}', f, analysis_dir)
+        _log.debug('copying %s to %s', f, analysis_dir)
         shutil.copy(f, analysis_dir)
         #shutil.copy(f, './tasks/')
     shutil.rmtree(os.path.join(analysis_dir, 'source'))
