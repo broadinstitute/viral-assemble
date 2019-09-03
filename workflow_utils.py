@@ -134,6 +134,8 @@ import dominate.tags
 import dominate.util
 import autologging
 
+import boto3
+
 # *** intra-module
 import util.cmd
 import util.file
@@ -3587,6 +3589,32 @@ def parser_git_annex_get(parser=argparse.ArgumentParser()):
 __commands__.append(('git_annex_get', parser_git_annex_get))
 
 #########################################################################################################################
+
+#########################################################################################################################
+
+def invoke_benchmarks_update(dummy, docker_tag=None):
+    """Trigger the updating of benchmarks"""
+    lambda_client = boto3.client('lambda')
+    payload = {}
+    if docker_tag:
+        payload['docker_tag'] = docker_tag
+    response = lambda_client.invoke(
+            FunctionName='trigger_viral_ngs_benchmarks_update',
+            LogType='Tail',
+            Payload=json.dumps(payload).encode()
+        )
+    _log.info('invoke_benchmark_update: lambda response - %s', response)
+
+def parser_invoke_benchmarks_update(parser=argparse.ArgumentParser()):
+    parser.add_argument('--dummy', help='dummy arg')
+    parser.add_argument('--dockerTag', dest='docker_tag', help='docker tag to add')
+    util.cmd.attach_main(parser, invoke_benchmarks_update, split_args=True)
+    return parser
+
+__commands__.append(('invoke_benchmarks_update', parser_invoke_benchmarks_update))
+
+#########################################################################################################################
+
 
 
 # * Epilog
