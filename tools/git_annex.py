@@ -414,6 +414,7 @@ class GitAnnexTool(tools.Tool):
 
     def add_dir(self, directory):
         """Add files in given directory to git-annex"""
+        directory = os.path.abspath(directory)
         retries = 2
         while True:
             try:
