@@ -283,7 +283,10 @@ def _make_cmd(cmd, *args):
     _log.debug('ARGS=%s', args)
     return ' '.join([cmd] + [_quote(str(arg)) for arg in args if arg not in (None, '')])
 
+@autologging.traced
+@autologging.logged
 def _run(cmd, *args, **kw):
+    orig_cwd = os.getcwd()
     retries = kw.pop('retries', 0)
     ignore_failures = kw.pop('ignore_failures', False)
     if 'cwd' in kw:
@@ -305,18 +308,24 @@ def _run(cmd, *args, **kw):
         except Exception as e:
             if retries > 0:
                 retries -= 1
-                _log.info('RETRY {} sleep {} command (cwd={}, kw={}) in {}s: {} exception {}'.format(retries, sleep_time_secs,
-                                                                                                     os.getcwd(), kw, 
-                                                                                                     time.time()-beg_time, cmd, e))
+                _log.info('RETRY {} sleep {} command (cwd={}, orig_cwd={}, '
+                          'kw={}) in {}s: {} exception {}'.format(retries, sleep_time_secs,
+                                                                  os.getcwd(), orig_cwd, kw, 
+                                                                  time.time()-beg_time, cmd, e))
                 time.sleep(sleep_time_secs)
                 sleep_time_secs *= 2
             elif ignore_failures:
+                _log.info('IGNORING command failure {} sleep {} command (cwd={}, orig_cwd={}, '
+                          'kw={}) in {}s: {} exception {}'.format(retries, sleep_time_secs,
+                                                                  os.getcwd(), orig_cwd, kw, 
+                                                                  time.time()-beg_time, cmd, e))
                 return
             else:
                 raise
         finally:
-            _log.info('command (cwd={}, kw={}) {} in {}s: {}'.format(os.getcwd(), kw, 'SUCCEEDED' if succeeded else 'FAILED',
-                                                                     time.time()-beg_time, cmd))
+            _log.info('command (cwd={}, orig_cwd={}, kw={}) {} in {}s: {}'.format(os.getcwd(), orig_cwd,
+                                                                                  kw, 'SUCCEEDED' if succeeded else 'FAILED',
+                                                                                  time.time()-beg_time, cmd))
 
 def _run_succeeds(cmd, *args, **kw):
     try:
@@ -2688,6 +2697,8 @@ def _gather_file_metadata_from_analysis_metadata(analysis_metadata, lcpath2fmdat
 
     # analysis_metadata_with_file_objs = _transform_json_data(analysis_metadata, file_node_to_obj)
 
+@autologging.traced
+@autologging.logged
 def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None, status_only=False,
                            repeat=False, repeat_delay=120, copy_to=None):
     """After a submitted cromwell analysis has finished, save results to the analysis dir.
@@ -2760,20 +2771,30 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                     processing_stats['workflow_root_not_in_mdata'] += 1
                 else:
                     workflow_root = mdata['workflowRoot']
-                    if repeat and workflow_root.startswith('/'):
+                    if repeat and workflow_root.startswith('/') and os.path.isdir(workflow_root):
+                        _log.info('Saving workflow result at %s to git-annex', ,workflow_root)
                         _run('sudo chown -R {}:{} .'.format(getpass.getuser(), getpass.getuser()),
                              cwd=workflow_root)
                         _run('chmod -R u+w .', cwd=workflow_root)
+                        _run('ls -lR', cwd=workfllow_root)
                         _run('rm -rf call-*/tmp.*', cwd=workflow_root)
+                        _run('ls -lR', cwd=workfllow_root)
                         git_annex_tool.add_dir(workflow_root)
                         if copy_to:
                             _run('git annex copy . --to={}'.format(copy_to), cwd=workflow_root, retries=3)
 
                     if not os.path.lexists(mdata_fname):
+                        _log.info('saving mdata: %s', mdata_fname)
+                        mdata_dir = os.path.dirname(mdata_fname)
+                        util.misc.chk(os.path.isdir(mdata_dir), 'missing dir {}'.format(mdata_dir))
+                        _run('ls -lR', cwd=os.path.dirname(mdata_dir))
                         _write_json(mdata_fname, **mdata)
-                        _run('git annex add {}'.format(mdata_fname), cwd=os.path.dirname(mdata_fname), retries=3)
+                        _run('ls -lR', cwd=os.path.dirname(mdata_dir))
+                        _log.info('ABOUT TO ADD: cwd=%s', os.getcwd())
+                        _run('ls -lR')
+                        _run('git annex add {}'.format(mdata_fname), cwd=mdata_dir, retries=3)
                         if copy_to:
-                            _run('git annex copy {} --to={}'.format(mdata_fname, copy_to), cwd=workflow_root, retries=3)
+                            _run('git annex copy {} --to={}'.format(mdata_fname, copy_to), cwd=mdata_dir, retries=3)
 
                     #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
 
