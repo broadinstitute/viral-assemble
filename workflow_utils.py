@@ -2772,7 +2772,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                 else:
                     workflow_root = mdata['workflowRoot']
                     if repeat and workflow_root.startswith('/') and os.path.isdir(workflow_root):
-                        _log.info('Saving workflow result at %s to git-annex', ,workflow_root)
+                        _log.info('Saving workflow result at %s to git-annex', workflow_root)
                         _run('sudo chown -R {}:{} .'.format(getpass.getuser(), getpass.getuser()),
                              cwd=workflow_root)
                         _run('chmod -R u+w .', cwd=workflow_root)
