@@ -1367,7 +1367,7 @@ def _submit_prepared_analysis(analysis_dir,
             submit_fn = os.path.join(analysis_dir, 'cromwell_submit_output.txt')
             cromwell_analysis_id = cromwell_tool.parse_cromwell_submit_output(submit_fn)
             mdata = cromwell_server.get_metadata(cromwell_analysis_id)
-            if mdata.get('status', None) in ('Running', 'Succeeded', 'Failed'):
+            if mdata.get('status', None) in ('Submitted', 'Running', 'Succeeded', 'Failed'):
                 _log.info('Analysis dir %s completed though not yet finalized; status=%s',
                           analysis_dir, mdata['status'])
                 return
@@ -2802,7 +2802,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
 
     while True:
         status_stats = _do_finalize()
-        if not repeat or status_stats['Running'] == 0:
+        if not repeat or (status_stats['Running'] + status_stats['Submitted']) == 0:
             _log.info('finalize_analysis_dirs: finished! exiting')
             break
         _run('git commit -m "added benchmarks"', retries=2, ignore_failures=True)
