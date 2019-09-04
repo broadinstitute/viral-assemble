@@ -2776,9 +2776,9 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                         _run('sudo chown -R {}:{} .'.format(getpass.getuser(), getpass.getuser()),
                              cwd=workflow_root)
                         _run('chmod -R u+w .', cwd=workflow_root)
-                        _run('ls -lR', cwd=workfllow_root)
+                        _run('ls -lR', cwd=workflow_root)
                         _run('rm -rf call-*/tmp.*', cwd=workflow_root)
-                        _run('ls -lR', cwd=workfllow_root)
+                        _run('ls -lR', cwd=workflow_root)
                         git_annex_tool.add_dir(workflow_root)
                         if copy_to:
                             _run('git annex copy . --to={}'.format(copy_to), cwd=workflow_root, retries=3)
@@ -2786,15 +2786,19 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                     if not os.path.lexists(mdata_fname):
                         _log.info('saving mdata: %s', mdata_fname)
                         mdata_dir = os.path.dirname(mdata_fname)
+                        _log.info('mdata_dir=%s', mdata_dir)
                         util.misc.chk(os.path.isdir(mdata_dir), 'missing dir {}'.format(mdata_dir))
-                        _run('ls -lR', cwd=os.path.dirname(mdata_dir))
+                        _run('ls -lR', cwd=mdata_dir)
                         _write_json(mdata_fname, **mdata)
-                        _run('ls -lR', cwd=os.path.dirname(mdata_dir))
+                        _run('ls -lR', cwd=mdata_dir)
                         _log.info('ABOUT TO ADD: cwd=%s', os.getcwd())
                         _run('ls -lR')
                         _run('git annex add {}'.format(mdata_fname), cwd=mdata_dir, retries=3)
                         if copy_to:
                             _run('git annex copy {} --to={}'.format(mdata_fname, copy_to), cwd=mdata_dir, retries=3)
+
+                    _log.info('AFTER SAVING %s cwd is %s', mdata_fname, os.getcwd())
+                    _run('ls -l')
 
                     #mdata_rel = _record_file_metadata(mdata, analysis_dir, mdata['workflowRoot'])
 
