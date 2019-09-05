@@ -1354,6 +1354,8 @@ def submit_analysis_wdl(workflow_name, inputs,
 
 # ** submit_prepared_analysis
 
+@autologging.traced
+@autologging.logged
 def _submit_prepared_analysis(analysis_dir,
                               cromwell_server_url='http://localhost:8000',
                               backend='Local',
