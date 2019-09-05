@@ -1406,7 +1406,10 @@ def _submit_prepared_analysis(analysis_dir,
                 **{k:v for k, v in run_inputs_staged.items() if not k.startswith('_')})
 
     if backend == 'Local':
-        wf_opts_dict = { "backend": "Local", 'write_to_cache': True, 'read_from_cache': True
+        logs_dir = os.path.join(analysis_dir, 'files', 'logs')
+        util.file.mkdir_p(logs_dir)
+        wf_opts_dict = { "backend": "Local", 'write_to_cache': True, 'read_from_cache': True,
+                         "final_workflow_log_dir": logs_dir
         }
     elif backend == 'JES':
         wf_opts_dict = {
@@ -2791,6 +2794,10 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                         _run('git annex add {}'.format(mdata_fname), cwd=mdata_dir, retries=3)
                         if copy_to:
                             _run('git annex copy {} --to={}'.format(mdata_fname, copy_to), cwd=mdata_dir, retries=3)
+                        os.path.join(analysis_dir, 'files', 'logs')
+                        git_annex_tool.add_dir(logs_dir)
+                        if copy_to:
+                            _run('git annex copy . --to={}'.format(copy_to), cwd=logs_dir, retries=3)
 
                     _log.info('AFTER SAVING %s cwd is %s', mdata_fname, os.getcwd())
 
