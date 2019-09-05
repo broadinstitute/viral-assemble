@@ -2794,7 +2794,7 @@ def finalize_analysis_dirs(cromwell_host, hours_ago=24, analysis_dirs_roots=None
                         _run('git annex add {}'.format(mdata_fname), cwd=mdata_dir, retries=3)
                         if copy_to:
                             _run('git annex copy {} --to={}'.format(mdata_fname, copy_to), cwd=mdata_dir, retries=3)
-                        os.path.join(analysis_dir, 'files', 'logs')
+                        logs_dir = os.path.join(analysis_dir, 'files', 'logs')
                         git_annex_tool.add_dir(logs_dir)
                         if copy_to:
                             _run('git annex copy . --to={}'.format(copy_to), cwd=logs_dir, retries=3)
