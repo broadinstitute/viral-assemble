@@ -257,8 +257,8 @@ def _load_dict_sorted(d):
 def _json_loads(s):
     return json.loads(s.strip(), object_hook=_load_dict_sorted, object_pairs_hook=collections.OrderedDict)
 
-def _json_loadf(fname):
-    return _json_loads(tools.git_annex.GitAnnexTool().slurp_file(fname, maxSizeMb=1000))
+def _json_loadf(fname, git_annex_tool=tools.git_annex.GitAnnexTool()):
+    return _json_loads(git_annex_tool.slurp_file(fname, maxSizeMb=1000))
 
 # *** timestamps processing
 
@@ -3639,6 +3639,27 @@ def parser_invoke_benchmarks_update(parser=argparse.ArgumentParser()):
 __commands__.append(('invoke_benchmarks_update', parser_invoke_benchmarks_update))
 
 #########################################################################################################################
+
+def fix_analysis_labels(fnames):
+    """Ensure given file is present in local annex"""
+    for fname in fnames:
+        benchmarks_root = os.getcwd()
+        labels = _json_loadf(fname)
+        analysis_dir_rel = os.path.dirname(os.path.relpath(fname, benchmarks_root))
+        util.misc.chk(os.path.isfile(os.path.join(benchmarks_root, analysis_dir_rel, 'analysis_labels.json')))
+        util.misc.chk(labels['analysis_dir'].endswith(analysis_dir_rel),
+                      'bad labels in {}: {} does not end with {}'.format(fname, labels['analysis_dir'], analysis_dir_rel))
+        if labels['analysis_dir'] != analysis_dir_rel:
+            labels['analysis_dir'] = analysis_dir_rel
+            _write_json(fname, **labels)
+
+def parser_fix_analysis_labels(parser=argparse.ArgumentParser()):
+    parser.add_argument('fnames', nargs='+', help='labels file', metavar='FILENAME')
+    util.cmd.attach_main(parser, fix_analysis_labels, split_args=True)
+    return parser
+
+__commands__.append(('fix_analysis_labels', parser_fix_analysis_labels))
+
 
 
 
