@@ -1712,7 +1712,7 @@ def _prepare_analysis_crogit_do(inputs,
         docker_img=docker_img,
         docker_img_hash=docker_img_hash,
         analysis_id=analysis_id,
-        analysis_dir=analysis_dir,
+        analysis_dir=os.path.relpath(analysis_dir),
         submitter=getpass.getuser())
     analysis_labels.update(dict(analysis_labels or {}))
     _write_json(os.path.join(analysis_dir, 'analysis_labels.json'),
