@@ -1,0 +1,69 @@
+dist: bionic
+os: linux
+
+git:
+  depth: 150
+
+env:
+  global:
+  - CACHE_DIR="$HOME/misc_cache"
+  - MINICONDA_DIR="$HOME/miniconda"
+  - GATK_PATH="$CACHE_DIR"
+  - PYTHONIOENCODING=UTF8
+  
+  - DOCKER_REGISTRY="quay.io"
+  - DOCKER_REPO_PROD="quay.io/broadinstitute/viral-assemble"
+  - DOCKER_REPO_DEV="quay.io/broadinstitute/viral-assemble"
+  
+  - BOTO_CONFIG=/dev/null # bogus value to override config on travis
+  - _JAVA_OPTIONS="-Xmx3g" # overrides jvm opts set elsewhere; see: https://stackoverflow.com/questions/28327620/difference-between-java-options-java-tool-options-and-java-opts
+
+cache:
+  directories:
+    - $HOME/misc_cache
+    - $HOME/miniconda
+  timeout: 1000
+
+stages:
+  - build
+  - test
+
+jobs:
+  fast_finish: true
+  include:
+
+    - language: generic
+      stage: build
+      env:
+        - TRAVIS_JOB=build_docker
+        # DOCKER_USER
+        # (replace w/new) - secure: hYX8492Wqpq3yqv+eHBV9c6VY8JlUSS8mUDfT1eWNEZF2vw8WrnTt8SrLIPC8etQUk1ZaSI/8XbJQKEr9LRqgvuO07AIv6BxYCg9l9BPHCj6B2YTTPo2qPkPapfvtGVd7PUZcWDUvzvPxJqMveuKVkTnCuuQSWwR68Y/Khxj8UY=
+        # DOCKER_PASS
+        # (replace w/new) - secure: QYylIMLvn1op6d//5yBD7KpquNxK/+xxQxIJLXWFgIl08sdT/MvrI6edgm3k8CumS7735eSV6C+KGOkF9JqM12aGUK/3PPckFGY+h/j4zQX26taT+6221ozbzF6hqYk6qm86FT5QVkBFLxsoDvt0Sh+1FPeVsWJf0o9yrLTrj2E=
+      script:
+        - set -e
+        - if [ -f "$CACHE_DIR/old-docker-tag.txt" ]; then OLD_DOCKER_TAG=$(cat $CACHE_DIR/old-docker-tag.txt); else OLD_DOCKER_TAG=$DOCKER_REPO_PROD; fi; echo "old docker tag = $OLD_DOCKER_TAG"
+        - if docker pull $OLD_DOCKER_TAG; then _CACHE_FROM="--cache-from $OLD_DOCKER_TAG"; else _CACHE_FROM=""; fi
+        - travis_wait docker build -t local/build-container:build $_CACHE_FROM .;
+        - travis/deploy-docker.sh
+      before_cache:
+        - travis/list-docker-tags.sh | tail -1 > $CACHE_DIR/old-docker-tag.txt
+
+    - language: python
+      stage: test
+      env:
+        - TRAVIS_JOB=test_py36_in_docker
+        - PYTEST_ADDOPTS="-rsxX -n 2 --durations=25 --fixture-durations=10 --junit-xml=pytest.xml --cov-report= --cov assembly"
+      install:
+        - DOCKER_TAG=`travis/list-docker-tags.sh | tail -1`
+        - docker pull $DOCKER_TAG
+        - travis/install-gatk.sh
+        - pip install coveralls==1.1
+        - mkdir coverage
+      script:
+        - docker run -e _JAVA_OPTIONS -e PYTEST_ADDOPTS -v $GATK_PATH:/gatk -v coverage:/coverage --entrypoint /bin/bash $DOCKER_TAG -c 'set -e; cd /opt/viral-ngs/source; gatk3-register /gatk/GenomeAnalysisTK.jar; pytest test/integration test/unit; cp .coverage /coverage'
+      after_success:
+        - mv coverage/.coverage .
+        - coveralls
+    
+  
