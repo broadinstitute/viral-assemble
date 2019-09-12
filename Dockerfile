@@ -20,10 +20,10 @@ LABEL maintainer "viral-ngs@broadinstitute.org"
 COPY requirements-conda.txt $VIRAL_NGS_PATH/
 RUN $VIRAL_NGS_PATH/docker/install-viral-ngs.sh minimal
 
-# Copy all of the source code into the repo
+# Copy key bits of source code into the base repo
 # (this probably changes all the time, so all downstream build
 # layers will likely need to be rebuilt each time)
-COPY . $VIRAL_NGS_PATH/
+COPY assembly.py assemble test $VIRAL_NGS_PATH/
 
 # This not only prints the current version string, but it
 # also saves it to the VERSION file for later use and also
