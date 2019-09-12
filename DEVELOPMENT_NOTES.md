@@ -10,8 +10,9 @@ modularized and layered. In order to work on code changes, you will:
 
 1. check out the git code repository for this module on your local host machine (`git clone https://github.com/broadinstitute/viral-assemble.git`) and edit with your favorite code/text editor
 1. docker `pull` and `run` the image `FROM` which this is built, while mounting your local git checkout into the container (`docker run -it --rm -v `pwd`/viral-assemble:/opt/viral-ngs/viral-assemble quay.io/broadinstitute/viral-core`)
-1. install this module's dependencies inside the container (within container: TO DO: add instructions here)
-1. test code and code changes interactively within the container
+1. install this module's dependencies inside the container (within container: `/opt/viral-ngs/viral-assemble/docker/install-dev-layer.sh`)
+1. (optional) snapshot this docker image locally if you want to continue using it and skip the above steps in the future (`docker commit <image hash> local/viral-assemble-dev`)
+1. test code and execution interactively within the container (`cd /opt/viral-ngs/viral-assemble; pytest -rsxX -n auto test/unit test/integration`)
 1. push changes back to github (from your host machine) for automated CI testing & builds, using standard, collaborative github code review processes
 
 ### Machinery under the hood
