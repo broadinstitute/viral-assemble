@@ -60,7 +60,7 @@ jobs:
         - pip install coveralls==1.1
         - mkdir coverage
       script:
-        - docker run -e _JAVA_OPTIONS -e PYTEST_ADDOPTS -v `pwd`/test:/opt/viral-ngs/source/test -v `pwd`/coverage:/coverage --entrypoint /bin/bash $DOCKER_TAG -c 'set -e; cd /opt/viral-ngs/source; pytest test/integration test/unit; cp .coverage /coverage'
+        - docker run -e _JAVA_OPTIONS -e PYTEST_ADDOPTS -v `pwd`/test:/opt/viral-ngs/source/test -v `pwd`/coverage:/coverage --entrypoint /bin/bash $DOCKER_TAG -c 'set -e; cd /opt/viral-ngs/source; pytest test/unit; cp .coverage /coverage'
       after_success:
         - mv coverage/.coverage .
         - coveralls
