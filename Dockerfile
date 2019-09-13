@@ -1,10 +1,10 @@
-FROM quay.io/broadinstitute/viral-core:2.0.2
+FROM quay.io/broadinstitute/viral-core:2.0.3
 
 LABEL maintainer "viral-ngs@broadinstitute.org"
 
 ENV VIRAL_ASSEMBLE_PATH=$INSTALL_PATH/viral-assemble
 
-COPY requirements-conda.txt $VIRAL_ASSEMBLE_PATH/requirements-conda.txt
+COPY requirements-conda.txt $VIRAL_ASSEMBLE_PATH/
 RUN $VIRAL_NGS_PATH/docker/install-conda-dependencies.sh $VIRAL_ASSEMBLE_PATH/requirements-conda.txt
 
 # Copy all source code into the base repo

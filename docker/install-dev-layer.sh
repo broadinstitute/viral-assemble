@@ -13,9 +13,10 @@
 # Not intended for use in docker build contexts (see Dockerfile for that)
 #
 # Must have $INSTALL_PATH and $VIRAL_NGS_PATH defined (from viral-core docker)
+set -e -o pipefail
 
-VIRAL_ASSEMBLE_PATH=/opt/viral-ngs/viral-assemble
+cd /opt/viral-ngs/viral-assemble
 
-$VIRAL_NGS_PATH/docker/install-conda-dependencies.sh $VIRAL_ASSEMBLE_PATH/requirements-conda.txt
+$VIRAL_NGS_PATH/docker/install-conda-dependencies.sh requirements-conda.txt
 
-ln -s $VIRAL_ASSEMBLE_PATH/assemble $VIRAL_ASSEMBLE_PATH/assembly.py $VIRAL_NGS_PATH
+ln -s assemble test assembly.py $VIRAL_NGS_PATH
