@@ -8,12 +8,18 @@ means that developers will need docker working within their dev environment--and
 not much else (other than git, and a text/code editor). The code base is also
 modularized and layered. In order to work on code changes, you will:
 
-1. check out the git code repository for this module on your local host machine (`git clone https://github.com/broadinstitute/viral-assemble.git`) and edit with your favorite code/text editor
-1. docker `pull` and `run` the image `FROM` which this is built, while mounting your local git checkout into the container (`docker run -it --rm -v `pwd`/viral-assemble:/opt/viral-ngs/viral-assemble quay.io/broadinstitute/viral-core`)
-1. install this module's dependencies inside the container (within container: `/opt/viral-ngs/viral-assemble/docker/install-dev-layer.sh`)
-1. (optional) snapshot this docker image locally if you want to continue using it and skip the above steps in the future (`docker commit <image hash> local/viral-assemble-dev`)
-1. test code and execution interactively within the container (`cd /opt/viral-ngs/viral-assemble; pytest -rsxX -n auto test/unit`)
-1. push changes back to github (from your host machine) for automated CI testing & builds, using standard, collaborative github code review processes
+1. Clone the git code repository for this module on your local host machine (`git clone https://github.com/broadinstitute/viral-assemble.git`), create and checkout a branch for your development work, and edit with your favorite code/text editor (standard git flow).
+1. Run the docker image on your machine while mounting your local git checkout into the container to test live edits. There are two ways to do this:
+	1. If you aren't making (significant) changes to the tool dependencies in `requirements-conda.txt`, just use the latest docker image of viral-assemble (or the specific tag you want to start from) and test your code changes in there. Do the following:
+		1. docker `pull` and `run` the image `FROM` which this is built, while mounting your local git checkout into the container (`docker run -it --rm -v `pwd`/viral-assemble:/opt/viral-ngs/viral-assemble quay.io/broadinstitute/viral-core`)
+		1. If you made any changes to `requirements-conda.txt`, you'll need to update them within your container. Run `/opt/viral-ngs/source/docker/install-conda-dependencies.sh /opt/viral-ngs/viral-assemble/requirements-conda.txt`). Skip this step if you're only testing non-conda changes on your branch. If this took any significant amount of time, you can snapshot the resulting container (see instructions below).
+	1. If you are making significant changes to the conda tool dependencies, it might be best to start from viral-core and layer on from there. Do the following:
+		1. docker `pull` and `run` the image `FROM` which this is built, while mounting your local git checkout into the container (`docker run -it --rm -v `pwd`/viral-assemble:/opt/viral-ngs/viral-assemble quay.io/broadinstitute/viral-core`)
+		1. Install this module's dependencies inside the container (within container: `/opt/viral-ngs/viral-assemble/docker/install-dev-layer.sh`). This make take a couple minutes.
+		1. (optional) Snapshot this docker image locally if you want to continue using it and skip the install-dev-layer step in the future (`docker commit <image hash> local/viral-assemble-dev`, where the image hash comes from `docker container ls`).
+	1. Either way, whenever you exit the container's command line, it will delete itself. Code changes will always persist in your local checkout (because they were on your host machine), but other OS changes, conda changes, and temp files start fresh again the next time you `docker run` the image (from either the original image, or a local snapshot you made with `docker commit`).
+1. Test code and execution interactively within the container (`cd /opt/viral-ngs/viral-assemble; pytest -rsxX -n auto test/unit`, or whatever you'd like to do).
+1. Push changes back to github (from your host machine) for automated CI testing & builds, using standard, collaborative github code review processes. Note that only your host machine (not the container) should have your github credentials, although both are working on the same working copy of files.
 
 ### Machinery under the hood
 
