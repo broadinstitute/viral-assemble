@@ -7,8 +7,8 @@
 [![Code Health](https://landscape.io/github/broadinstitute/viral-ngs/master/landscape.svg?style=flat)](https://landscape.io/github/broadinstitute/viral-ngs)
 -->
 
-viral-assembly
-=========
+viral-assemble
+==============
 
 A set of scripts and tools for the assembly of viral genomes from NGS data.
 

@@ -26,7 +26,7 @@ import mock
 MOCK_MODULES = ['scipy', 'pysam', 'Bio', 'Bio.AlignIO', 'Bio.Alphabet',
                 'Bio.Alphabet.IUPAC', 'Bio.SeqIO', 'Bio.Data.IUPACData',
                 'Bio.Seq', 'Bio.SeqRecord', 'pybedtools', 'pybedtools.BedTool',
-                'arrow']
+                'arrow', 'zstd', 'bz2']
 for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock()
 
@@ -43,6 +43,15 @@ def _git_version():
 
 
 __version__ = _git_version()
+
+
+# -- Obtain upstream viral-core module: this is super hacky and not pinned to any version
+def _get_viral_core():
+    cmd = ['git', 'clone', '--depth=1', 'https://github.com/broadinstitute/viral-core.git']
+    subprocess.check_call(cmd)
+    sys.path.insert(0, os.path.dirname(os.path.abspath('viral-core')))
+_get_viral_core()
+
 
 # -- General configuration ------------------------------------------------
 
