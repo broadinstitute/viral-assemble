@@ -1,7 +1,7 @@
-gap2seq=3.1.1a2
-mafft=7.464
-mummer4=4.0.0beta2
-muscle=3.8.1551 
-spades=3.12.0
+gap2seq>=3.1.1a2
+mafft>=7.464
+mummer4>=4.0.0beta2
+muscle>=3.8.1551 
+spades>=3.12.0
 trinity=date.2011_11_26
 # Python packages below
