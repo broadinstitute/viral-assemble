@@ -1,6 +1,6 @@
 gap2seq>=3.1.1a2
 mafft>=7.508
 mummer4>=4.0.0rc1
-muscle>=3.8.1551
+muscle=3.8.1551
 spades>=3.15.5
 # Python packages below
