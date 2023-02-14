@@ -45,9 +45,9 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       # fetch git tags (tagged releases) because
-      # actions/checkout@v2 does either a full checkout or a shallow checkout without tags
+      # actions/checkout@v3 does either a full checkout or a shallow checkout without tags
       - name: fetch tags
         run: git fetch --prune --unshallow --tags
       - name: Programmatic environment setup
@@ -143,9 +143,9 @@ jobs:
       PYTEST_ADDOPTS: "-rsxX -n 2 --durations=25 --fixture-durations=10 --junit-xml=pytest.xml --cov-report= --cov broad_utils --cov illumina --cov read_utils --cov reports --cov tools --cov util --cov file_utils"
     steps:
       - name: checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       # fetch git tags (tagged releases) because 
-      # actions/checkout@v2 does either a full checkout or a shallow checkout without tags
+      # actions/checkout@v3 does either a full checkout or a shallow checkout without tags
       - name: fetch tags
         run: git fetch --prune --unshallow --tags
       - name: Programmatic environment setup
@@ -202,9 +202,9 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       # fetch git tags (tagged releases) because 
-      # actions/checkout@v2 does either a full checkout or a shallow checkout without tags
+      # actions/checkout@v3 does either a full checkout or a shallow checkout without tags
       - name: fetch tags
         run: git fetch --prune --unshallow --tags
       - name: Programmatic environment setup
