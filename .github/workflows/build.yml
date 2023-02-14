@@ -176,7 +176,7 @@ jobs:
         with:
           python-version: "${{ env.GITHUB_ACTIONS_PYTHON_VERSION }}"
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v2
       - name: pull docker image
         run: |
           set -e -x
