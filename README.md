@@ -1,5 +1,5 @@
 [![Docker Repository on Quay](https://quay.io/repository/broadinstitute/viral-assemble/status "Docker Repository on Quay")](https://quay.io/repository/broadinstitute/viral-assemble)
-[![Build Status](https://travis-ci.com/broadinstitute/viral-assemble.svg?branch=master)](https://travis-ci.com/broadinstitute/viral-assemble)
+[![Build Status](https://github.com/broadinstitute/viral-assemble/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/broadinstitute/viral-assemble/actions)
 [![Documentation Status](https://readthedocs.org/projects/viral-assemble/badge/?version=latest)](https://viral-assemble.readthedocs.io/en/latest/?badge=latest)
 <!--
 [![broad-viral-badge](https://img.shields.io/badge/install%20from-broad--viral-green.svg?style=flat-square)](https://anaconda.org/broad-viral/viral-ngs)
