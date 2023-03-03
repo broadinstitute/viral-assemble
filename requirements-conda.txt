@@ -1,4 +1,4 @@
-gap2seq>=3.1.1a2
+gap2seq=3.1.1a
 mafft>=7.508
 mummer4>=4.0.0rc1
 muscle=3.8.1551
