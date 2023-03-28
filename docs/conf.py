@@ -15,6 +15,7 @@
 
 import sys
 import os
+import subprocess
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -30,8 +31,6 @@ for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock()
 
     # -- Obtain GIT version --
-import subprocess
-
 
 def _git_version():
     cmd = ['git', 'describe', '--tags', '--always']  # omit "--dirty" from doc build
@@ -39,8 +38,6 @@ def _git_version():
     if type(out) != str:
         out = out.decode('utf-8')
     return out.strip()
-
-
 __version__ = _git_version()
 
 
