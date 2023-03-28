@@ -46,9 +46,17 @@ __version__ = _git_version()
 
 # -- Obtain upstream viral-core module: this is super hacky and not pinned to any version
 def _get_viral_core():
-    cmd = ['git', 'clone', '--depth=1', 'https://github.com/broadinstitute/viral-core.git']
-    subprocess.check_call(cmd)
-    sys.path.insert(0, os.path.dirname(os.path.abspath('viral-core')))
+    viral_core_dir = os.path.abspath('viral-core')
+    if not os.path.isdir(viral_core_dir):
+        cmd = ['git', 'clone', '--depth=1', 'https://github.com/broadinstitute/viral-core.git']
+        subprocess.check_call(cmd)
+    else: # else fetch latest
+        cmd = ['git', '-C', viral_core_dir, 'pull', '--depth=1', 'https://github.com/broadinstitute/viral-core.git']
+        subprocess.check_call(cmd)
+
+    viral_core_parent_dir = os.path.dirname(os.path.abspath('viral-core'))
+    if viral_core_parent_dir not in sys.path:
+        sys.path.insert(0, viral_core_parent_dir)
 _get_viral_core()
 
 
