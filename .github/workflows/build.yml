@@ -140,7 +140,7 @@ jobs:
     runs-on: ubuntu-20.04
     env:
       GITHUB_ACTIONS_PYTHON_VERSION: 3.8
-      PYTEST_ADDOPTS: "-rsxX -n 2 --durations=25 --fixture-durations=10 --junit-xml=pytest.xml --cov-report= --cov broad_utils --cov illumina --cov read_utils --cov reports --cov tools --cov util --cov file_utils"
+      PYTEST_ADDOPTS: "-rsxX -n 2 --durations=25 --fixture-durations=10 --junit-xml=pytest.xml --cov-report= --cov assembly --cov assemble"
     steps:
       - name: checkout repository
         uses: actions/checkout@v3
