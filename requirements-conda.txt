@@ -1,6 +1,12 @@
 gap2seq=3.1.1a
-mafft>=7.508
+mafft>=7.520
 mummer4>=4.0.0rc1
 muscle=3.8.1551
 spades>=3.15.5
+fastani>=1.34
+mashtree>=1.4.6
+sourmash-minimal>=4.8.6
+sourmash_plugin_branchwater>=0.9.1
+skani>=0.2.1
+kwip>=0.2.0
 # Python packages below
