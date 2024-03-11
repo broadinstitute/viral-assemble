@@ -2,14 +2,13 @@ name: "viral-assemble CI"
 
 on:
   push:
+  merge_group:
   pull_request:
     branches:
       - master
   release:
     types:
       - created
-  schedule:
-    - cron: '0 18 * * 1' # weekly at 18:00 on Mondays
 
 env:
   HOME: "${{ github.workspace }}"
@@ -45,9 +44,9 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       # fetch git tags (tagged releases) because
-      # actions/checkout@v3 does either a full checkout or a shallow checkout without tags
+      # actions/checkout@v4 does either a full checkout or a shallow checkout without tags
       - name: fetch tags
         run: git fetch --prune --unshallow --tags
       - name: Programmatic environment setup
@@ -75,7 +74,7 @@ jobs:
           echo "GITHUB_ACTIONS_BRANCH=$GITHUB_ACTIONS_BRANCH" >> $GITHUB_ENV
 
       - name: Login to docker registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.DOCKER_REGISTRY }}
           username: ${{ secrets.QUAY_USERNAME }}
@@ -83,7 +82,7 @@ jobs:
       # cache; see: https://docs.github.com/en/actions/guides/caching-dependencies-to-speed-up-workflows
       - name: setup cache
         id: docker_cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: old-docker-tag
         with:
@@ -143,9 +142,9 @@ jobs:
       PYTEST_ADDOPTS: "-rsxX -n 2 --durations=25 --fixture-durations=10 --junit-xml=pytest.xml --cov-report= --cov assembly --cov assemble"
     steps:
       - name: checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       # fetch git tags (tagged releases) because 
-      # actions/checkout@v3 does either a full checkout or a shallow checkout without tags
+      # actions/checkout@v4 does either a full checkout or a shallow checkout without tags
       - name: fetch tags
         run: git fetch --prune --unshallow --tags
       - name: Programmatic environment setup
@@ -172,11 +171,11 @@ jobs:
           echo "GITHUB_ACTIONS_BRANCH=$GITHUB_ACTIONS_BRANCH"
           echo "GITHUB_ACTIONS_BRANCH=$GITHUB_ACTIONS_BRANCH" >> $GITHUB_ENV
       - name: install python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "${{ env.GITHUB_ACTIONS_PYTHON_VERSION }}"
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
       - name: pull docker image
         run: |
           set -e -x
@@ -202,9 +201,9 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       # fetch git tags (tagged releases) because 
-      # actions/checkout@v3 does either a full checkout or a shallow checkout without tags
+      # actions/checkout@v4 does either a full checkout or a shallow checkout without tags
       - name: fetch tags
         run: git fetch --prune --unshallow --tags
       - name: Programmatic environment setup
@@ -231,7 +230,7 @@ jobs:
           echo "GITHUB_ACTIONS_BRANCH=$GITHUB_ACTIONS_BRANCH"
           echo "GITHUB_ACTIONS_BRANCH=$GITHUB_ACTIONS_BRANCH" >> $GITHUB_ENV
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
       - name: pull docker image
         run: |
           set -e -x
