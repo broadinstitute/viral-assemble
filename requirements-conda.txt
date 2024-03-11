@@ -6,7 +6,7 @@ spades>=3.15.5
 fastani>=1.34
 mashtree>=1.4.6
 sourmash-minimal>=4.8.6
-sourmash_plugin_branchwater>=0.9.1
+#sourmash_plugin_branchwater>=0.9.1  ## running into resolver problems at least with our current version of python
 skani>=0.2.1
 kwip>=0.2.0
 # Python packages below
