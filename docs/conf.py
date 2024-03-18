@@ -15,6 +15,7 @@
 
 import sys
 import os
+import subprocess
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -30,8 +31,6 @@ for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock()
 
     # -- Obtain GIT version --
-import subprocess
-
 
 def _git_version():
     cmd = ['git', 'describe', '--tags', '--always']  # omit "--dirty" from doc build
@@ -39,16 +38,27 @@ def _git_version():
     if type(out) != str:
         out = out.decode('utf-8')
     return out.strip()
-
-
 __version__ = _git_version()
 
 
 # -- Obtain upstream viral-core module: this is super hacky and not pinned to any version
 def _get_viral_core():
-    cmd = ['git', 'clone', '--depth=1', 'https://github.com/broadinstitute/viral-core.git']
-    subprocess.check_call(cmd)
-    sys.path.insert(0, os.path.dirname(os.path.abspath('viral-core')))
+    viral_core_dir = os.path.abspath('viral-core')
+
+    # if the viral-core dir and its file exist, pull the latest
+    if os.path.exists(os.path.join(viral_core_dir,"assembly.py")): # ToDo: check if empty instead
+        cmd = ['git', '-C', viral_core_dir, 'pull', '--depth=1', 'https://github.com/broadinstitute/viral-core.git']
+        subprocess.check_call(cmd)
+    # otherwise clone viral-core, removing the viral-core directory if present
+    else:
+        if os.path.isdir(viral_core_dir):
+            os.remove(viral_core_dir, missing_ok=True)
+            cmd = ['git', 'clone', '--depth=1', 'https://github.com/broadinstitute/viral-core.git']
+            subprocess.check_call(cmd)
+
+    viral_core_parent_dir = os.path.dirname(os.path.abspath('viral-core'))
+    if viral_core_parent_dir not in sys.path:
+        sys.path.insert(0, viral_core_parent_dir)
 _get_viral_core()
 
 
