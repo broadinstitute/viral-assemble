@@ -1,4 +1,4 @@
-#bbmap>=39.13
+bbmap=39.10  # more recent versions pin openjdk>=11 which is incompatible with gatk=3.8
 gap2seq=3.1.1a
 mafft>=7.525
 mummer4>=4.0.0rc1
