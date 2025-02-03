@@ -7,6 +7,9 @@ ENV VIRAL_ASSEMBLE_PATH=$INSTALL_PATH/viral-assemble
 COPY requirements-conda.txt $VIRAL_ASSEMBLE_PATH/
 RUN $VIRAL_NGS_PATH/docker/install-conda-dependencies.sh $VIRAL_ASSEMBLE_PATH/requirements-conda.txt $VIRAL_NGS_PATH/requirements-conda.txt
 
+# workaround
+ENV PERL5LIB=$PERL5LIB:/opt/miniconda/envs/viral-ngs-env/share/sequip-0.10/lib
+
 # Copy all source code into the base repo
 # (this probably changes all the time, so all downstream build
 # layers will likely need to be rebuilt each time)
