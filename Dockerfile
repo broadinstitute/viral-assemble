@@ -13,7 +13,7 @@ RUN $VIRAL_NGS_PATH/docker/install-conda-dependencies.sh $VIRAL_ASSEMBLE_PATH/re
 COPY . $VIRAL_ASSEMBLE_PATH
 
 # Link key bits of python code into the path
-RUN ln -s $VIRAL_ASSEMBLE_PATH/assembly.py $VIRAL_ASSEMBLE_PATH/assemble $VIRAL_NGS_PATH
+RUN ln -s $VIRAL_ASSEMBLE_PATH/assembly.py $VIRAL_ASSEMBLE_PATH/assemble $VIRAL_ASSEMBLE_PATH/fasta-trim-terminal-ambigs.pl $VIRAL_NGS_PATH
 
 # This not only prints the current version string, but it
 # also saves it to the VERSION file for later use and also
