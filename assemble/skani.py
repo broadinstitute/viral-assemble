@@ -81,7 +81,7 @@ class SkaniTool(tools.Tool):
         '''
         with open(in_tsv, 'r') as inf:
             reader = csv.DictReader(inf, delimiter='\t')
-            sorted_rows = sorted(reader, key=lambda row: float(row['ANI']) * float(row['Total_bases_covered']), reverse=True)
+            sorted_rows = sorted(reader, key=lambda row: float(row['ANI']) * float(row['Align_fraction_ref']), reverse=True)
 
         with open(out_tsv, 'w') as outf:
             writer = csv.DictWriter(outf, fieldnames=reader.fieldnames, delimiter='\t', dialect=csv.unix_dialect, quoting=csv.QUOTE_MINIMAL)
