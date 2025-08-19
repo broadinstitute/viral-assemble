@@ -1,14 +1,14 @@
 bbmap=39.10  # more recent versions pin openjdk>=11 which is incompatible with gatk=3.8
 gap2seq=3.1.1a
 mafft>=7.525
-mummer4>=4.0.0rc1
+mummer4>=4.0.1
 muscle=3.8.1551
-rasusa>=2.1.0
-spades>=4.0.0
+rasusa>=2.1.1
+spades>=4.2.0
 fastani>=1.34
 mashtree>=1.4.6
 sourmash-minimal>=4.8.11 ## see below
 sourmash_plugin_branchwater>=0.9.11  ## running into resolver problems at least with our current version of python
-skani>=0.2.2
+skani>=0.3.0
 #kwip>=0.2.0 ## relies on khmer, which as of 2024-03-12 does not support python 3.10
 # Python packages below
