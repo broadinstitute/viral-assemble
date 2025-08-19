@@ -1,6 +1,6 @@
-FROM quay.io/broadinstitute/viral-core:2.4.1
+FROM quay.io/broadinstitute/viral-core:2.4.2
 
-LABEL maintainer "viral-ngs@broadinstitute.org"
+LABEL maintainer="viral-ngs@broadinstitute.org"
 
 ENV VIRAL_ASSEMBLE_PATH=$INSTALL_PATH/viral-assemble
 
