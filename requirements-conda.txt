@@ -5,6 +5,7 @@ mummer4>=4.0.1
 muscle=3.8.1551
 rasusa>=2.1.1
 spades>=4.2.0
+wgsim>=1.0
 fastani>=1.34
 #mashtree>=1.4.6
 sourmash-minimal>=4.8.11 ## see below
