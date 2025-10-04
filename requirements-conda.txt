@@ -14,5 +14,5 @@ skani>=0.3.0
 #kwip>=0.2.0 ## relies on khmer, which as of 2024-03-12 does not support python 3.10
 # Perl packages below
 perl-bio-easel
-sequip
+sequip=0.11  ## version must match PERL5LIB path in Dockerfile
 # Python packages below
