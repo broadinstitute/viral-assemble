@@ -1,4 +1,4 @@
-FROM quay.io/broadinstitute/viral-core:2.5.0
+FROM quay.io/broadinstitute/viral-core:dp-conda-fix
 
 LABEL maintainer="viral-ngs@broadinstitute.org"
 
