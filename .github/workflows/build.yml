@@ -39,6 +39,9 @@ env:
   GITHUB_ACTIONS_BASE_REF: ${{ github.base_ref }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+permissions:
+  contents: read
+
 jobs:
   build_docker:
     runs-on: ubuntu-24.04
